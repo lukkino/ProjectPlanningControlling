@@ -107,7 +107,7 @@ class BacklogItem(Base):
         if self.jira_status:
             if self.jira_status == "Done":
                 return "Done"
-            if self.jira_status in ("In Progress", "In Review"):
+            if self.jira_status in ("In Progress", "In Review", "On-Going"):
                 return "In Progress"
             return "To Do"
         if self.actual_finish is not None:

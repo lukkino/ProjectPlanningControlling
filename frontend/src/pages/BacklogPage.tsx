@@ -293,6 +293,10 @@ export function BacklogPage() {
     setDraggedCol(null)
   }
 
+  const inScopeItems = (items ?? []).filter((i) => i.in_scope)
+  const doneCount = inScopeItems.filter((i) => i.status === 'Done').length
+  const remainingCount = inScopeItems.length - doneCount
+
   const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
 
   const handleDrop = (targetId: number) => {
@@ -337,6 +341,21 @@ export function BacklogPage() {
         <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
           {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
         </button>
+      </div>
+
+      <div className="grid-3" style={{ marginBottom: 16 }}>
+        <div className="stat">
+          <span className="value">{inScopeItems.length}</span>
+          <span className="label">PBI in Scope</span>
+        </div>
+        <div className="stat">
+          <span className="value">{doneCount}</span>
+          <span className="label">Done</span>
+        </div>
+        <div className="stat">
+          <span className="value">{remainingCount}</span>
+          <span className="label">Rimanenti (In Progress + To Do)</span>
+        </div>
       </div>
 
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
