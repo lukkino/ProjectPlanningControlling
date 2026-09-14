@@ -41,6 +41,7 @@ class Phase(Base):
     planned_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     actual_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="phases")
 

@@ -10,6 +10,7 @@ class PhaseBase(BaseModel):
     planned_date: dt.date | None = None
     actual_date: dt.date | None = None
     order: int = 0
+    notes: str | None = None
 
 
 class PhaseCreate(PhaseBase):
@@ -21,6 +22,7 @@ class PhaseUpdate(BaseModel):
     planned_date: dt.date | None = None
     actual_date: dt.date | None = None
     order: int | None = None
+    notes: str | None = None
 
 
 class Phase(PhaseBase):

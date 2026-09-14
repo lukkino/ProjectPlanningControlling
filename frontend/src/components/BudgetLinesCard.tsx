@@ -32,10 +32,12 @@ export function BudgetLinesCard({ projectId }: Props) {
   })
 
   const chartData = (lines ?? []).map((l) => ({ name: l.role_name, ore: l.budget_hours }))
+  const error = update.error ?? addLine.error ?? removeLine.error
 
   return (
     <div className="card">
       <h3>Budget ore per ruolo</h3>
+      {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
       <div className="grid-2">
         <div className="table-wrap">
           <table>

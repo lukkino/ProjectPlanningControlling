@@ -64,6 +64,7 @@ body {
 .project-list a.active .name { color: #dbe6ff; }
 
 .main-content { padding: 28px 36px; max-width: 1200px; }
+.main-content--wide { max-width: none; }
 
 .btn {
   border: 1px solid var(--border);

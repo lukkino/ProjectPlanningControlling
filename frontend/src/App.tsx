@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BacklogPage } from './pages/BacklogPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -7,10 +7,13 @@ import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
 export default function App() {
+  const location = useLocation()
+  const isBacklog = location.pathname.endsWith('/backlog')
+
   return (
     <div className="app-shell">
       <Sidebar />
-      <main className="main-content">
+      <main className={isBacklog ? 'main-content main-content--wide' : 'main-content'}>
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>

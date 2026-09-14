@@ -45,15 +45,15 @@ export const api = {
   phases: {
     list: (projectId: number) => request<Phase[]>(`/projects/${projectId}/phases`),
     create: (projectId: number, data: Partial<Phase>) => post<Phase>(`/projects/${projectId}/phases`, data),
-    update: (id: number, data: Partial<Phase>) => put<Phase>(`/phases/${id}`, data),
-    remove: (id: number) => del(`/phases/${id}`),
+    update: (id: number, data: Partial<Phase>) => put<Phase>(`/projects/phases/${id}`, data),
+    remove: (id: number) => del(`/projects/phases/${id}`),
   },
   budgetLines: {
     list: (projectId: number) => request<BudgetLine[]>(`/projects/${projectId}/budget-lines`),
     create: (projectId: number, data: Partial<BudgetLine>) =>
       post<BudgetLine>(`/projects/${projectId}/budget-lines`, data),
-    update: (id: number, data: Partial<BudgetLine>) => put<BudgetLine>(`/budget-lines/${id}`, data),
-    remove: (id: number) => del(`/budget-lines/${id}`),
+    update: (id: number, data: Partial<BudgetLine>) => put<BudgetLine>(`/projects/budget-lines/${id}`, data),
+    remove: (id: number) => del(`/projects/budget-lines/${id}`),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

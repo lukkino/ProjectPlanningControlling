@@ -24,9 +24,12 @@ export function PhasesCard({ projectId }: Props) {
     onSuccess: invalidate,
   })
 
+  const error = update.error ?? addPhase.error ?? removePhase.error
+
   return (
     <div className="card">
       <h3>Fasi progetto</h3>
+      {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
       <div className="table-wrap">
         <table>
           <thead>
@@ -34,6 +37,7 @@ export function PhasesCard({ projectId }: Props) {
               <th>Fase</th>
               <th>Pianificata</th>
               <th>Effettiva</th>
+              <th>Note</th>
               <th />
             </tr>
           </thead>
@@ -60,6 +64,15 @@ export function PhasesCard({ projectId }: Props) {
                     onBlur={(e) => update.mutate({ id: phase.id, data: { actual_date: e.target.value || null } })}
                   />
                 </td>
+                <td className="editable-cell" style={{ minWidth: 180 }}>
+                  <input
+                    defaultValue={phase.notes ?? ''}
+                    onBlur={(e) => {
+                      const value = e.target.value || null
+                      if (value !== phase.notes) update.mutate({ id: phase.id, data: { notes: value } })
+                    }}
+                  />
+                </td>
                 <td>
                   <button className="btn btn-danger" onClick={() => removePhase.mutate(phase.id)}>
                     ✕
@@ -69,7 +82,7 @@ export function PhasesCard({ projectId }: Props) {
             ))}
             {phases?.length === 0 && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={5} className="muted">
                   Nessuna fase definita.
                 </td>
               </tr>

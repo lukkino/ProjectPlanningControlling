@@ -5,6 +5,7 @@ export type Phase = {
   planned_date: string | null
   actual_date: string | null
   order: number
+  notes: string | null
 }
 
 export type BudgetLine = {
