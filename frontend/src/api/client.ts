@@ -2,6 +2,7 @@ import type {
   BacklogItem,
   BudgetLine,
   DashboardMetrics,
+  ForecastSimulation,
   Phase,
   Project,
   ProjectDetail,
@@ -72,5 +73,12 @@ export const api = {
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
+  },
+  forecasting: {
+    list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),
+    create: (projectId: number, data: Partial<ForecastSimulation>) =>
+      post<ForecastSimulation>(`/projects/${projectId}/forecasting`, data),
+    update: (id: number, data: Partial<ForecastSimulation>) => put<ForecastSimulation>(`/forecasting/${id}`, data),
+    remove: (id: number) => del(`/forecasting/${id}`),
   },
 }

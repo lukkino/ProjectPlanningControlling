@@ -143,6 +143,48 @@ class SnapshotUpdate(BaseModel):
     note: str | None = None
 
 
+# ---------- ForecastSimulation ----------
+
+class ForecastSimulationBase(BaseModel):
+    note: str | None = None
+    simulation_date: dt.date | None = None
+    pbi_remaining: int | None = None
+    pbi_done: int | None = None
+    planned_pbi_done: int | None = None
+    unplanned_pbi_done: int | None = None
+    traditional_forecasting: str | None = None
+    code_freeze_deadline: dt.date | None = None
+    completion_likelihood: float | None = None
+    completion_date_85pct: dt.date | None = None
+    pbi_completed_by_deadline_85pct: int | None = None
+    completion_date_85pct_with_holidays: dt.date | None = None
+
+
+class ForecastSimulationCreate(ForecastSimulationBase):
+    pass
+
+
+class ForecastSimulationUpdate(BaseModel):
+    note: str | None = None
+    simulation_date: dt.date | None = None
+    pbi_remaining: int | None = None
+    pbi_done: int | None = None
+    planned_pbi_done: int | None = None
+    unplanned_pbi_done: int | None = None
+    traditional_forecasting: str | None = None
+    code_freeze_deadline: dt.date | None = None
+    completion_likelihood: float | None = None
+    completion_date_85pct: dt.date | None = None
+    pbi_completed_by_deadline_85pct: int | None = None
+    completion_date_85pct_with_holidays: dt.date | None = None
+
+
+class ForecastSimulation(ForecastSimulationBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+
+
 class Snapshot(SnapshotBase):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -62,6 +62,23 @@ export type Snapshot = {
   note: string | null
 }
 
+export type ForecastSimulation = {
+  id: number
+  project_id: number
+  note: string | null
+  simulation_date: string | null
+  pbi_remaining: number | null
+  pbi_done: number | null
+  planned_pbi_done: number | null
+  unplanned_pbi_done: number | null
+  traditional_forecasting: string | null
+  code_freeze_deadline: string | null
+  completion_likelihood: number | null
+  completion_date_85pct: string | null
+  pbi_completed_by_deadline_85pct: number | null
+  completion_date_85pct_with_holidays: string | null
+}
+
 export type Project = {
   id: number
   code: string

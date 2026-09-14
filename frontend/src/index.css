@@ -159,6 +159,22 @@ tbody tr:hover { background: var(--bg); }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 
+.forecast-table { table-layout: fixed; width: 100%; }
+.forecast-table th {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+  vertical-align: bottom;
+}
+.forecast-table td input,
+.forecast-table td textarea { width: 100%; }
+
+.backlog-table th,
+.backlog-table td { text-align: center; }
+.backlog-table td input,
+.backlog-table td textarea,
+.backlog-table td select { text-align: center; }
+
 .badge {
   display: inline-block;
   padding: 2px 8px;

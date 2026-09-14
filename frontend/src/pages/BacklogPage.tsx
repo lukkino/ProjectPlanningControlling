@@ -140,6 +140,7 @@ export function BacklogPage() {
       key: 'ta_date',
       label: 'Data TA',
       className: 'editable-cell',
+      style: { minWidth: 130 },
       render: (item) => (
         <input
           defaultValue={item.ta_date ?? ''}
@@ -402,7 +403,7 @@ export function BacklogPage() {
       </label>
 
       <div className="table-wrap">
-        <table>
+        <table className="backlog-table">
           <thead>
             <tr>
               <th />

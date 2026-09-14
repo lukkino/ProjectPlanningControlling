@@ -30,6 +30,9 @@ class Project(Base):
     budget_lines: Mapped[list["BudgetLine"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BudgetLine.order")
     backlog_items: Mapped[list["BacklogItem"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BacklogItem.priority_order")
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Snapshot.snapshot_date")
+    forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="ForecastSimulation.id"
+    )
 
 
 class Phase(Base):
@@ -118,6 +121,36 @@ class BacklogItem(Base):
         if self.actual_start is not None:
             return "In Progress"
         return "To Do"
+
+
+class ForecastSimulation(Base):
+    """Una riga della tabella Forecasting: una simulazione/snapshot manuale
+    usata per proiettare la data di completamento del progetto (equivalente
+    alla tabella "Throughput" del foglio Excel originale). Tutti i campi
+    numerici/data sono per ora inseriti a mano; la logica di calcolo verra'
+    aggiunta in seguito."""
+
+    __tablename__ = "forecast_simulations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    simulation_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    pbi_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    planned_pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unplanned_pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Testo libero (non Date) perche' nel foglio originale può restare vuoto
+    # o contenere una nota invece di una data vera e propria.
+    traditional_forecasting: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    code_freeze_deadline: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    completion_likelihood: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_date_85pct: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    pbi_completed_by_deadline_85pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_date_85pct_with_holidays: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+
+    project: Mapped["Project"] = relationship(back_populates="forecast_simulations")
 
 
 class Snapshot(Base):
