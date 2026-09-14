@@ -219,5 +219,14 @@ tbody tr:hover { background: var(--bg); }
 .editable-cell input:hover, .editable-cell select:hover { border-color: var(--border); }
 .editable-cell input:focus, .editable-cell select:focus { border-color: var(--primary); outline: none; background: var(--surface); }
 
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  user-select: none;
+  text-align: center;
+  width: 24px;
+}
+.drag-handle:active { cursor: grabbing; }
+
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }

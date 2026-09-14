@@ -65,7 +65,9 @@ class BacklogItem(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
 
     jira_key: Mapped[str] = mapped_column(String(64), index=True)
-    priority_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Float (non int) per permettere di inserire una riga "a meta'" tra due
+    # esistenti via drag&drop, senza dover rinumerare tutto il backlog.
+    priority_order: Mapped[float] = mapped_column(Float, default=0)
 
     # Campi sincronizzati da Jira (sovrascritti a ogni /sync)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -96,6 +98,15 @@ class BacklogItem(Base):
 
     @property
     def status(self) -> str:
+        # Se sincronizzato da Jira, jira_status e' la fonte di verita' (mappato
+        # sui 3 stati locali). Solo per item creati a mano senza jira_status
+        # si usa il fallback storico basato sulle date effettive.
+        if self.jira_status:
+            if self.jira_status == "Done":
+                return "Done"
+            if self.jira_status in ("In Progress", "In Review"):
+                return "In Progress"
+            return "To Do"
         if self.actual_finish is not None:
             return "Done"
         if self.actual_start is not None:

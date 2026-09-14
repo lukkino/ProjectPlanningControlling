@@ -10,6 +10,7 @@ export function BacklogPage() {
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [newKey, setNewKey] = useState('')
+  const [draggedId, setDraggedId] = useState<number | null>(null)
 
   const { data: items } = useQuery({
     queryKey: ['backlog', project.id],
@@ -47,6 +48,32 @@ export function BacklogPage() {
 
   const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
 
+  const handleDrop = (targetId: number) => {
+    if (draggedId === null || draggedId === targetId) {
+      setDraggedId(null)
+      return
+    }
+    const list = [...visibleItems]
+    const fromIndex = list.findIndex((i) => i.id === draggedId)
+    const toIndex = list.findIndex((i) => i.id === targetId)
+    setDraggedId(null)
+    if (fromIndex === -1 || toIndex === -1) return
+
+    const [moved] = list.splice(fromIndex, 1)
+    list.splice(toIndex, 0, moved)
+    const newIndex = list.indexOf(moved)
+    const prev = list[newIndex - 1]
+    const next = list[newIndex + 1]
+
+    let newOrder: number
+    if (prev && next) newOrder = (prev.priority_order + next.priority_order) / 2
+    else if (prev) newOrder = prev.priority_order + 1
+    else if (next) newOrder = next.priority_order - 1
+    else newOrder = 1
+
+    update.mutate({ id: moved.id, data: { priority_order: newOrder } })
+  }
+
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: 12 }}>
@@ -82,6 +109,7 @@ export function BacklogPage() {
         <table>
           <thead>
             <tr>
+              <th />
               <th>#</th>
               <th>Jira Key</th>
               <th>Summary</th>
@@ -104,7 +132,25 @@ export function BacklogPage() {
           </thead>
           <tbody>
             {visibleItems.map((item) => (
-              <tr key={item.id}>
+              <tr
+                key={item.id}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleDrop(item.id)}
+                style={draggedId === item.id ? { opacity: 0.4 } : undefined}
+              >
+                <td
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedId(item.id)
+                    e.dataTransfer.setData('text/plain', String(item.id))
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  onDragEnd={() => setDraggedId(null)}
+                  className="drag-handle"
+                  title="Trascina per riordinare"
+                >
+                  ⠿
+                </td>
                 <td className="editable-cell" style={{ width: 44 }}>
                   <input
                     type="number"
@@ -216,7 +262,7 @@ export function BacklogPage() {
             ))}
             {visibleItems.length === 0 && (
               <tr>
-                <td colSpan={18} className="muted">
+                <td colSpan={19} className="muted">
                   Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
                 </td>
               </tr>

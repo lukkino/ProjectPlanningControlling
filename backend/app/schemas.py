@@ -59,7 +59,7 @@ class BudgetLine(BudgetLineBase):
 
 class BacklogItemBase(BaseModel):
     jira_key: str
-    priority_order: int = 0
+    priority_order: float = 0
     ready_for_refinement: bool = False
     in_scope: bool = True
     planned: bool = False
@@ -80,7 +80,7 @@ class BacklogItemCreate(BacklogItemBase):
 
 
 class BacklogItemUpdate(BaseModel):
-    priority_order: int | None = None
+    priority_order: float | None = None
     ready_for_refinement: bool | None = None
     in_scope: bool | None = None
     planned: bool | None = None
