@@ -72,6 +72,8 @@ class BacklogItemBase(BaseModel):
     actual_start: dt.date | None = None
     actual_finish: dt.date | None = None
     logged_hours: float | None = None
+    refinement_date: str | None = None
+    ta_date: str | None = None
     notes: str | None = None
 
 
@@ -93,6 +95,8 @@ class BacklogItemUpdate(BaseModel):
     actual_start: dt.date | None = None
     actual_finish: dt.date | None = None
     logged_hours: float | None = None
+    refinement_date: str | None = None
+    ta_date: str | None = None
     notes: str | None = None
 
 

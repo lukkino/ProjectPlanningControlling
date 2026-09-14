@@ -95,6 +95,9 @@ class BacklogItem(Base):
     planned_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     planned_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     expected_finish: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Testo libero (non Date) per poter scrivere anche "n.a." oltre a una data.
+    refinement_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ta_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="backlog_items")

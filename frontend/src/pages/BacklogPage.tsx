@@ -122,6 +122,36 @@ export function BacklogPage() {
     },
     { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} /> },
     {
+      key: 'refinement_date',
+      label: 'Data refinement',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          defaultValue={item.refinement_date ?? ''}
+          placeholder="gg/mm/aaaa o n.a."
+          onBlur={(e) => {
+            const value = e.target.value.trim() || null
+            if (value !== item.refinement_date) update.mutate({ id: item.id, data: { refinement_date: value } })
+          }}
+        />
+      ),
+    },
+    {
+      key: 'ta_date',
+      label: 'Data TA',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          defaultValue={item.ta_date ?? ''}
+          placeholder="gg/mm/aaaa o n.a."
+          onBlur={(e) => {
+            const value = e.target.value.trim() || null
+            if (value !== item.ta_date) update.mutate({ id: item.id, data: { ta_date: value } })
+          }}
+        />
+      ),
+    },
+    {
       key: 'planned_duration_days',
       label: 'Sizing (gg)',
       className: 'editable-cell',

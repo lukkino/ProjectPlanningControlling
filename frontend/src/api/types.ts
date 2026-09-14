@@ -38,6 +38,8 @@ export type BacklogItem = {
   actual_start: string | null
   actual_finish: string | null
   logged_hours: number | null
+  refinement_date: string | null
+  ta_date: string | null
   notes: string | null
   status: 'To Do' | 'In Progress' | 'Done'
 }
