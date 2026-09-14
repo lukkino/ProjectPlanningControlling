@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
+import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
 
 // Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
@@ -324,9 +325,7 @@ export function BacklogPage() {
     setDraggedCol(null)
   }
 
-  const inScopeItems = (items ?? []).filter((i) => i.in_scope)
-  const doneCount = inScopeItems.filter((i) => i.status === 'Done').length
-  const remainingCount = inScopeItems.length - doneCount
+  const { inScopeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
 
   const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
 
@@ -376,7 +375,7 @@ export function BacklogPage() {
 
       <div className="grid-3" style={{ marginBottom: 16 }}>
         <div className="stat">
-          <span className="value">{inScopeItems.length}</span>
+          <span className="value">{inScopeCount}</span>
           <span className="label">PBI in Scope</span>
         </div>
         <div className="stat">

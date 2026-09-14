@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { ForecastSimulation } from '../api/types'
+import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
 
 export function ForecastingPage() {
@@ -12,6 +13,14 @@ export function ForecastingPage() {
     queryFn: () => api.forecasting.list(project.id),
   })
 
+  // Stessa query cache di BacklogPage (query key condivisa): serve solo a
+  // precompilare #PBI Remaining di default su una nuova simulazione.
+  const { data: backlogItems } = useQuery({
+    queryKey: ['backlog', project.id],
+    queryFn: () => api.backlog.list(project.id),
+  })
+  const { remainingCount } = countBacklogStats(backlogItems ?? [])
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['forecasting', project.id] })
 
   const update = useMutation({
@@ -19,7 +28,11 @@ export function ForecastingPage() {
     onSuccess: invalidate,
   })
   const add = useMutation({
-    mutationFn: () => api.forecasting.create(project.id, {}),
+    mutationFn: () =>
+      api.forecasting.create(project.id, {
+        simulation_date: new Date().toISOString().slice(0, 10),
+        pbi_remaining: remainingCount,
+      }),
     onSuccess: invalidate,
   })
   const remove = useMutation({
@@ -46,9 +59,9 @@ export function ForecastingPage() {
         <table className="forecast-table">
           <colgroup>
             <col style={{ width: '14%' }} />
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '6%' }} />
-            <col style={{ width: '6%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '5%' }} />
             <col style={{ width: '7%' }} />
             <col style={{ width: '7%' }} />
             <col style={{ width: '8%' }} />
