@@ -1,8 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Label,
+  LabelList,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { api } from '../api/client'
 import type { ForecastSimulation } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDateShort } from '../lib/forecastChart'
 import { useProjectContext } from './useProjectContext'
+
+// Palette categorica validata del progetto (vedi skill data-viz), ordine
+// fisso dei primi 6 slot: blu, arancio, aqua, giallo, magenta, verde.
+const COLOR_PBI_REMAINING = '#2a78d6'
+const COLOR_PLANNED_DONE = '#eb6834'
+const COLOR_UNPLANNED_DONE = '#1baf7a'
+const COLOR_CODE_FREEZE = '#eda100'
+const COLOR_MONTE_CARLO = '#e87ba4'
+const COLOR_TRADITIONAL = '#008300'
 
 export function ForecastingPage() {
   const { project } = useProjectContext()
@@ -32,6 +55,7 @@ export function ForecastingPage() {
       api.forecasting.create(project.id, {
         simulation_date: new Date().toISOString().slice(0, 10),
         pbi_remaining: remainingCount,
+        code_freeze_deadline: project.code_freeze_date,
       }),
     onSuccess: invalidate,
   })
@@ -43,6 +67,22 @@ export function ForecastingPage() {
   const num = (v: string) => (v === '' ? null : Number(v))
   const dateOrNull = (v: string) => v || null
   const textOrNull = (v: string) => v.trim() || null
+
+  const chartData = (simulations ?? []).map((sim) => ({
+    label: sim.simulation_date ? formatIsoDateShort(sim.simulation_date) : `#${sim.id}`,
+    pbi_remaining: sim.pbi_remaining ?? 0,
+    planned_pbi_done: sim.planned_pbi_done ?? 0,
+    unplanned_pbi_done: sim.unplanned_pbi_done ?? 0,
+    code_freeze: dateStrToEpochDays(sim.code_freeze_deadline),
+    monte_carlo: dateStrToEpochDays(sim.completion_date_85pct),
+    traditional: dateStrToEpochDays(sim.traditional_forecasting),
+  }))
+
+  const dateEpochs = chartData
+    .flatMap((r) => [r.code_freeze, r.monte_carlo, r.traditional])
+    .filter((v): v is number => v !== null)
+  const dateAxisDomain: [number, number] =
+    dateEpochs.length > 0 ? [Math.min(...dateEpochs) - 5, Math.max(...dateEpochs) + 5] : [0, 1]
 
   return (
     <div className="card">
@@ -211,6 +251,141 @@ export function ForecastingPage() {
         <button className="btn btn-primary" onClick={() => add.mutate()} disabled={add.isPending}>
           + Aggiungi simulazione
         </button>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Andamento simulazioni</h3>
+        {chartData.length === 0 ? (
+          <p className="muted">Aggiungi almeno una simulazione per vedere il grafico.</p>
+        ) : (
+          <div style={{ height: 400 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                <CartesianGrid stroke="#e1e0d9" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }}>
+                  <Label value="Simulation Date" position="insideBottom" offset={-4} style={{ fontSize: 12, fill: '#898781' }} />
+                </XAxis>
+                <YAxis
+                  yAxisId="pbi"
+                  allowDecimals={false}
+                  tick={{ fontSize: 12 }}
+                  label={{ value: '#PBI', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#898781' } }}
+                />
+                <YAxis
+                  yAxisId="date"
+                  orientation="right"
+                  domain={dateAxisDomain}
+                  tickFormatter={formatEpochDaysAsDate}
+                  tick={{ fontSize: 12 }}
+                  label={{
+                    value: 'Forecasting Date',
+                    angle: 90,
+                    position: 'insideRight',
+                    style: { fontSize: 12, fill: '#898781' },
+                  }}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgba(11,11,11,0.04)' }}
+                  formatter={(value, name) =>
+                    ['Code Freeze Deadline', 'Monte Carlo 85% Forecast', 'Traditional Forecasting'].includes(String(name))
+                      ? [formatEpochDaysAsDate(Number(value)), name]
+                      : [value, name]
+                  }
+                />
+                <Legend verticalAlign="top" height={48} wrapperStyle={{ fontSize: 12 }} />
+
+                <Bar
+                  yAxisId="pbi"
+                  dataKey="pbi_remaining"
+                  name="#PBI Remaining"
+                  stackId="pbi"
+                  fill={COLOR_PBI_REMAINING}
+                  stroke="#fcfcfb"
+                  strokeWidth={2}
+                >
+                  <LabelList dataKey="pbi_remaining" position="inside" fill="#fff" fontSize={11} />
+                </Bar>
+                <Bar
+                  yAxisId="pbi"
+                  dataKey="planned_pbi_done"
+                  name="Planned #PBI Done"
+                  stackId="pbi"
+                  fill={COLOR_PLANNED_DONE}
+                  stroke="#fcfcfb"
+                  strokeWidth={2}
+                >
+                  <LabelList dataKey="planned_pbi_done" position="inside" fill="#fff" fontSize={11} />
+                </Bar>
+                <Bar
+                  yAxisId="pbi"
+                  dataKey="unplanned_pbi_done"
+                  name="Unplanned #PBI Done"
+                  stackId="pbi"
+                  fill={COLOR_UNPLANNED_DONE}
+                  stroke="#fcfcfb"
+                  strokeWidth={2}
+                >
+                  <LabelList dataKey="unplanned_pbi_done" position="inside" fill="#fff" fontSize={11} />
+                </Bar>
+
+                <Line
+                  yAxisId="date"
+                  dataKey="code_freeze"
+                  name="Code Freeze Deadline"
+                  stroke={COLOR_CODE_FREEZE}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                >
+                  <LabelList
+                    dataKey="code_freeze"
+                    position="top"
+                    fontSize={11}
+                    fill={COLOR_CODE_FREEZE}
+                    formatter={(v) => (typeof v === 'number' ? formatEpochDaysAsDate(v) : '')}
+                  />
+                </Line>
+                <Line
+                  yAxisId="date"
+                  dataKey="monte_carlo"
+                  name="Monte Carlo 85% Forecast"
+                  stroke={COLOR_MONTE_CARLO}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                >
+                  <LabelList
+                    dataKey="monte_carlo"
+                    position="top"
+                    fontSize={11}
+                    fill={COLOR_MONTE_CARLO}
+                    formatter={(v) => (typeof v === 'number' ? formatEpochDaysAsDate(v) : '')}
+                  />
+                </Line>
+                <Line
+                  yAxisId="date"
+                  dataKey="traditional"
+                  name="Traditional Forecasting"
+                  stroke={COLOR_TRADITIONAL}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                >
+                  <LabelList
+                    dataKey="traditional"
+                    position="bottom"
+                    fontSize={11}
+                    fill={COLOR_TRADITIONAL}
+                    formatter={(v) => (typeof v === 'number' ? formatEpochDaysAsDate(v) : '')}
+                  />
+                </Line>
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </div>
   )
