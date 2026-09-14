@@ -42,6 +42,12 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
     percent_budget_used = (logged_hours_total / budget_hours_total) if budget_hours_total else 0.0
 
+    # Ore da Time Tracking Jira sui singoli item di backlog: e' un dato di
+    # sola Development (il tempo che gli sviluppatori loggano sulle issue),
+    # a differenza di logged_hours_total sopra che rappresenta lo sforzo
+    # sull'intero progetto.
+    dev_logged_hours_total = sum(i.logged_hours or 0 for i in items)
+
     percent_time_elapsed = None
     spi = None
     if project.start_date and project.code_freeze_date:
@@ -59,6 +65,7 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         percent_complete=percent_complete,
         budget_hours_total=budget_hours_total,
         logged_hours_total=logged_hours_total,
+        dev_logged_hours_total=dev_logged_hours_total,
         percent_budget_used=percent_budget_used,
         percent_time_elapsed=percent_time_elapsed,
         spi=spi,

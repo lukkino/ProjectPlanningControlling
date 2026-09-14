@@ -93,6 +93,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
             item.issue_type = issue.issue_type
             item.jira_status = issue.status
             item.labels = labels
+            item.logged_hours = issue.logged_hours
             item.last_synced_at = now
             updated += 1
         else:
@@ -105,6 +106,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
                 issue_type=issue.issue_type,
                 jira_status=issue.status,
                 labels=labels,
+                logged_hours=issue.logged_hours,
                 last_synced_at=now,
             )
             db.add(item)

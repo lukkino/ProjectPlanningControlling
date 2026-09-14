@@ -53,7 +53,7 @@ export function DashboardPage() {
       )}
 
       <div className="card">
-        <div className="grid-4">
+        <div className="grid-5">
           <div className="stat">
             <span className="value">{metrics ? pct(metrics.percent_complete) : '—'}</span>
             <span className="label">
@@ -75,6 +75,13 @@ export function DashboardPage() {
                 da snapshot del {metrics.last_snapshot_date}
               </span>
             )}
+          </div>
+          <div className="stat">
+            <span className="value">{metrics?.dev_logged_hours_total ?? 0} h</span>
+            <span className="label">Ore loggate</span>
+            <span className="muted" style={{ fontSize: 11 }}>
+              solo Development (Time Tracking Jira)
+            </span>
           </div>
           <div className="stat">
             <span className={`value ${metrics ? spiTone(metrics.spi) : ''}`}>

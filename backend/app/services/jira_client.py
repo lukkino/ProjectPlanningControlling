@@ -15,12 +15,21 @@ class JiraClientError(Exception):
 
 
 class JiraIssue:
-    def __init__(self, key: str, issue_type: str, summary: str, status: str, labels: list[str]):
+    def __init__(
+        self,
+        key: str,
+        issue_type: str,
+        summary: str,
+        status: str,
+        labels: list[str],
+        logged_hours: float | None = None,
+    ):
         self.key = key
         self.issue_type = issue_type
         self.summary = summary
         self.status = status
         self.labels = labels
+        self.logged_hours = logged_hours
 
 
 def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
@@ -32,7 +41,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
     base_url = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    fields = ["summary", "issuetype", "status", "labels"]
+    fields = ["summary", "issuetype", "status", "labels", "timetracking"]
 
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
@@ -54,6 +63,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
                 for raw in data.get("issues", []):
                     f = raw.get("fields", {})
+                    time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
                     issues.append(
                         JiraIssue(
                             key=raw.get("key", ""),
@@ -61,6 +71,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             summary=f.get("summary", ""),
                             status=(f.get("status") or {}).get("name", ""),
                             labels=f.get("labels") or [],
+                            logged_hours=(time_spent_seconds / 3600) if time_spent_seconds is not None else None,
                         )
                     )
 

@@ -87,6 +87,7 @@ export type DashboardMetrics = {
   percent_complete: number
   budget_hours_total: number
   logged_hours_total: number
+  dev_logged_hours_total: number
   percent_budget_used: number
   percent_time_elapsed: number | null
   spi: number | null

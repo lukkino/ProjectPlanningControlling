@@ -196,6 +196,7 @@ class DashboardMetrics(BaseModel):
     percent_complete: float
     budget_hours_total: float
     logged_hours_total: float
+    dev_logged_hours_total: float
     percent_budget_used: float
     percent_time_elapsed: float | None
     spi: float | None
