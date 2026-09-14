@@ -199,5 +199,8 @@ class DashboardMetrics(BaseModel):
     percent_budget_used: float
     percent_time_elapsed: float | None
     spi: float | None
+    completion_source: str
+    logged_hours_source: str
+    last_snapshot_date: dt.date | None
     phases: list[Phase]
     budget_lines: list[BudgetLine]

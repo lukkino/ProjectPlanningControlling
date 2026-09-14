@@ -90,6 +90,9 @@ export type DashboardMetrics = {
   percent_budget_used: number
   percent_time_elapsed: number | null
   spi: number | null
+  completion_source: 'backlog' | 'snapshot'
+  logged_hours_source: 'backlog' | 'snapshot'
+  last_snapshot_date: string | null
   phases: Phase[]
   budget_lines: BudgetLine[]
 }

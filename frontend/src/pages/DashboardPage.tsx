@@ -14,6 +14,17 @@ function spiTone(spi: number | null) {
   return ''
 }
 
+// Replica della formula Excel:
+// =IF(H17>1,05;"Ahead of Schedule";IF(H17<0,95;"Behind Schedule";"On Schedule"))
+function spiStatusLabel(spi: number | null) {
+  if (spi === null) return null
+  if (spi > 1.05) return 'Ahead of Schedule'
+  if (spi < 0.95) return 'Behind Schedule'
+  return 'On Schedule'
+}
+
+const BADGE_CLASS_BY_TONE: Record<string, string> = { done: 'done', progress: 'progress', '': 'todo' }
+
 export function DashboardPage() {
   const { project } = useProjectContext()
 
@@ -42,24 +53,44 @@ export function DashboardPage() {
       )}
 
       <div className="card">
-        <div className="grid-3">
+        <div className="grid-4">
           <div className="stat">
             <span className="value">{metrics ? pct(metrics.percent_complete) : '—'}</span>
             <span className="label">
               Completamento backlog ({metrics?.backlog_done ?? 0}/{metrics?.backlog_in_scope ?? 0})
             </span>
+            {metrics?.completion_source === 'snapshot' && (
+              <span className="muted" style={{ fontSize: 11 }}>
+                da snapshot del {metrics.last_snapshot_date}
+              </span>
+            )}
           </div>
           <div className="stat">
             <span className="value">{metrics ? pct(metrics.percent_budget_used) : '—'}</span>
             <span className="label">
               Ore usate ({metrics?.logged_hours_total ?? 0} / {metrics?.budget_hours_total ?? 0} h)
             </span>
+            {metrics?.logged_hours_source === 'snapshot' && (
+              <span className="muted" style={{ fontSize: 11 }}>
+                da snapshot del {metrics.last_snapshot_date}
+              </span>
+            )}
           </div>
           <div className="stat">
             <span className={`value ${metrics ? spiTone(metrics.spi) : ''}`}>
               {metrics?.spi != null ? metrics.spi.toFixed(2) : '—'}
             </span>
             <span className="label">SPI (avanzamento / tempo trascorso)</span>
+          </div>
+          <div className="stat">
+            {metrics && spiStatusLabel(metrics.spi) ? (
+              <span className={`badge ${BADGE_CLASS_BY_TONE[spiTone(metrics.spi)]}`} style={{ width: 'fit-content' }}>
+                {spiStatusLabel(metrics.spi)}
+              </span>
+            ) : (
+              <span className="value">—</span>
+            )}
+            <span className="label">Status</span>
           </div>
         </div>
       </div>
