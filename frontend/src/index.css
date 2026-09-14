@@ -228,5 +228,8 @@ tbody tr:hover { background: var(--bg); }
 }
 .drag-handle:active { cursor: grabbing; }
 
+.draggable-col { cursor: grab; }
+.draggable-col:active { cursor: grabbing; }
+
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }

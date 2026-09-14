@@ -1,9 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
+
+// Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
+// inclusi. Restituisce null se una delle due date manca o se fine < inizio.
+function workingDaysBetween(startStr: string | null, endStr: string | null): number | null {
+  if (!startStr || !endStr) return null
+  const start = new Date(`${startStr}T00:00:00`)
+  const end = new Date(`${endStr}T00:00:00`)
+  if (end < start) return null
+
+  let count = 0
+  const cursor = new Date(start)
+  while (cursor <= end) {
+    const day = cursor.getDay() // 0 = domenica, 6 = sabato
+    if (day !== 0 && day !== 6) count++
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return count
+}
+
+const COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v1'
+
+type Column = {
+  key: string
+  label: string
+  className?: string
+  style?: CSSProperties
+  render: (item: BacklogItem) => ReactNode
+}
 
 export function BacklogPage() {
   const { project } = useProjectContext()
@@ -11,6 +39,7 @@ export function BacklogPage() {
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
+  const [draggedCol, setDraggedCol] = useState<string | null>(null)
 
   const { data: items } = useQuery({
     queryKey: ['backlog', project.id],
@@ -45,6 +74,224 @@ export function BacklogPage() {
 
   const num = (v: string) => (v === '' ? null : Number(v))
   const dateOrNull = (v: string) => v || null
+
+  const columns: Column[] = [
+    {
+      key: 'priority_order',
+      label: '#',
+      className: 'editable-cell',
+      style: { width: 44 },
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.priority_order}
+          onBlur={(e) => update.mutate({ id: item.id, data: { priority_order: Number(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'jira_key',
+      label: 'Jira Key',
+      render: (item) =>
+        project.jira_jql ? (
+          <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
+            {item.jira_key}
+          </a>
+        ) : (
+          item.jira_key
+        ),
+    },
+    {
+      key: 'summary',
+      label: 'Summary',
+      style: { whiteSpace: 'normal', minWidth: 220 },
+      render: (item) => item.summary ?? <span className="muted">—</span>,
+    },
+    { key: 'issue_type', label: 'Tipo', render: (item) => item.issue_type ?? '—' },
+    { key: 'jira_status', label: 'Stato Jira', render: (item) => item.jira_status ?? '—' },
+    {
+      key: 'in_scope',
+      label: 'In Scope',
+      render: (item) => (
+        <input
+          type="checkbox"
+          checked={item.in_scope}
+          onChange={(e) => update.mutate({ id: item.id, data: { in_scope: e.target.checked } })}
+        />
+      ),
+    },
+    { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} /> },
+    {
+      key: 'planned_duration_days',
+      label: 'Sizing (gg)',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.planned_duration_days ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { planned_duration_days: num(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'dev_estimate_hours',
+      label: 'Dev (h)',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.dev_estimate_hours ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { dev_estimate_hours: num(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'test_estimate_hours',
+      label: 'Test (h)',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.test_estimate_hours ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { test_estimate_hours: num(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'planned_hours',
+      label: 'Planned (h)',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.planned_hours ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { planned_hours: num(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'planned_start',
+      label: 'Start pian.',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="date"
+          defaultValue={item.planned_start ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { planned_start: dateOrNull(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'expected_finish',
+      label: 'Fine pian.',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="date"
+          defaultValue={item.expected_finish ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'actual_start',
+      label: 'Start eff.',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="date"
+          defaultValue={item.actual_start ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { actual_start: dateOrNull(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'actual_finish',
+      label: 'Fine eff.',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="date"
+          defaultValue={item.actual_finish ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { actual_finish: dateOrNull(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'duration',
+      label: 'Durata (gg)',
+      className: 'text-right',
+      render: (item) => workingDaysBetween(item.actual_start, item.actual_finish) ?? <span className="muted">—</span>,
+    },
+    {
+      key: 'logged_hours',
+      label: 'Ore loggate',
+      className: 'editable-cell',
+      render: (item) => (
+        <input
+          type="number"
+          defaultValue={item.logged_hours ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
+        />
+      ),
+    },
+    {
+      key: 'notes',
+      label: 'Note',
+      className: 'editable-cell',
+      style: { minWidth: 160 },
+      render: (item) => (
+        <input
+          defaultValue={item.notes ?? ''}
+          onBlur={(e) => update.mutate({ id: item.id, data: { notes: e.target.value || null } })}
+        />
+      ),
+    },
+  ]
+  const defaultColumnOrder = columns.map((c) => c.key)
+
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored) as string[]
+        const known = parsed.filter((k) => defaultColumnOrder.includes(k))
+        const missing = defaultColumnOrder.filter((k) => !known.includes(k))
+        return [...known, ...missing]
+      }
+    } catch {
+      // localStorage non disponibile o dato corrotto: usa l'ordine di default
+    }
+    return defaultColumnOrder
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder))
+    } catch {
+      // ignora: e' solo una comodita' per-browser, non deve bloccare l'uso
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnOrder])
+
+  const orderedColumns = columnOrder.map((key) => columns.find((c) => c.key === key)).filter((c): c is Column => !!c)
+
+  const handleColumnDrop = (targetKey: string) => {
+    if (draggedCol === null || draggedCol === targetKey) {
+      setDraggedCol(null)
+      return
+    }
+    setColumnOrder((prev) => {
+      const list = [...prev]
+      const fromIndex = list.indexOf(draggedCol)
+      const toIndex = list.indexOf(targetKey)
+      if (fromIndex === -1 || toIndex === -1) return prev
+      const [moved] = list.splice(fromIndex, 1)
+      list.splice(toIndex, 0, moved)
+      return list
+    })
+    setDraggedCol(null)
+  }
 
   const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
 
@@ -110,23 +357,25 @@ export function BacklogPage() {
           <thead>
             <tr>
               <th />
-              <th>#</th>
-              <th>Jira Key</th>
-              <th>Summary</th>
-              <th>Tipo</th>
-              <th>Stato Jira</th>
-              <th>In Scope</th>
-              <th>Stato</th>
-              <th>Sizing (gg)</th>
-              <th>Dev (h)</th>
-              <th>Test (h)</th>
-              <th>Planned (h)</th>
-              <th>Start pian.</th>
-              <th>Fine pian.</th>
-              <th>Start eff.</th>
-              <th>Fine eff.</th>
-              <th>Ore loggate</th>
-              <th>Note</th>
+              {orderedColumns.map((col) => (
+                <th
+                  key={col.key}
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedCol(col.key)
+                    e.dataTransfer.setData('text/plain', col.key)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleColumnDrop(col.key)}
+                  onDragEnd={() => setDraggedCol(null)}
+                  className="draggable-col"
+                  style={draggedCol === col.key ? { opacity: 0.4 } : undefined}
+                  title="Trascina per riordinare la colonna"
+                >
+                  {col.label}
+                </th>
+              ))}
               <th />
             </tr>
           </thead>
@@ -151,108 +400,11 @@ export function BacklogPage() {
                 >
                   ⠿
                 </td>
-                <td className="editable-cell" style={{ width: 44 }}>
-                  <input
-                    type="number"
-                    defaultValue={item.priority_order}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { priority_order: Number(e.target.value) } })}
-                  />
-                </td>
-                <td>
-                  {project.jira_jql ? (
-                    <a
-                      href={`https://inpeco.atlassian.net/browse/${item.jira_key}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {item.jira_key}
-                    </a>
-                  ) : (
-                    item.jira_key
-                  )}
-                </td>
-                <td style={{ whiteSpace: 'normal', minWidth: 220 }}>{item.summary ?? <span className="muted">—</span>}</td>
-                <td>{item.issue_type ?? '—'}</td>
-                <td>{item.jira_status ?? '—'}</td>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={item.in_scope}
-                    onChange={(e) => update.mutate({ id: item.id, data: { in_scope: e.target.checked } })}
-                  />
-                </td>
-                <td>
-                  <StatusBadge status={item.status} />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={item.planned_duration_days ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_duration_days: num(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={item.dev_estimate_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { dev_estimate_hours: num(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={item.test_estimate_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { test_estimate_hours: num(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={item.planned_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_hours: num(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={item.planned_start ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_start: dateOrNull(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={item.expected_finish ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={item.actual_start ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { actual_start: dateOrNull(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={item.actual_finish ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { actual_finish: dateOrNull(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={item.logged_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
-                  />
-                </td>
-                <td className="editable-cell" style={{ minWidth: 160 }}>
-                  <input
-                    defaultValue={item.notes ?? ''}
-                    onBlur={(e) => update.mutate({ id: item.id, data: { notes: e.target.value || null } })}
-                  />
-                </td>
+                {orderedColumns.map((col) => (
+                  <td key={col.key} className={col.className} style={col.style}>
+                    {col.render(item)}
+                  </td>
+                ))}
                 <td>
                   <button className="btn btn-danger" onClick={() => remove.mutate(item.id)}>
                     ✕
@@ -262,7 +414,7 @@ export function BacklogPage() {
             ))}
             {visibleItems.length === 0 && (
               <tr>
-                <td colSpan={19} className="muted">
+                <td colSpan={orderedColumns.length + 2} className="muted">
                   Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
                 </td>
               </tr>

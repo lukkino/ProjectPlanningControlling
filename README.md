@@ -79,10 +79,13 @@ Apri `http://localhost:5174`. In sviluppo, Vite fa da proxy delle chiamate
 3. **Backlog**: griglia degli item (equivalente al foglio "scope_plan").
    Il bottone **"Sincronizza da Jira"** esegue la JQL del progetto e crea/
    aggiorna gli item per `jira_key` (summary, tipo, stato Jira, label, ore
-   da Time Tracking Jira → `logged_hours`, sempre sovrascritte: Jira e' la
-   fonte di verita' anche se il valore era stato modificato a mano); gli
-   altri campi di pianificazione (date, sizing, note, in-scope) restano
-   invece gestiti nell'app e non vengono mai sovrascritti dal sync.
+   da Time Tracking Jira → `logged_hours`, e le date effettive → `actual_start`/
+   `actual_finish` ricavate dal changelog Jira: prima transizione a
+   "In Progress" (o "On-Going" per le Activity) e ultima transizione a "Done";
+   tutti questi campi sono sempre sovrascritti, Jira e' la fonte di verita'
+   anche se il valore era stato modificato a mano); gli altri campi di
+   pianificazione (sizing, note, in-scope) restano invece gestiti nell'app e
+   non vengono mai sovrascritti dal sync.
 4. **Andamento**: storico di snapshot (data, ore, PBI completati) usato per
    il grafico di trend nella Dashboard.
 

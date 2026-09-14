@@ -78,6 +78,11 @@ class BacklogItem(Base):
     # altri campi qui sopra, Jira e' sempre la fonte di verita' e sovrascrive
     # qualunque valore inserito a mano nell'app.
     logged_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Ricavate dal changelog Jira (prima transizione a In Progress/On-Going,
+    # ultima a Done): sincronizzate come i campi sopra, sovrascritte ad ogni
+    # sync anche se modificate a mano nell'app.
+    actual_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    actual_finish: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Campi di pianificazione, gestiti dall'utente (mai toccati dal sync)
@@ -90,8 +95,6 @@ class BacklogItem(Base):
     planned_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     planned_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     expected_finish: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    actual_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    actual_finish: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="backlog_items")
