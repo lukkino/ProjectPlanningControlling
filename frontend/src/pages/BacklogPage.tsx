@@ -1,0 +1,241 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { api } from '../api/client'
+import type { BacklogItem } from '../api/types'
+import { StatusBadge } from '../components/StatusBadge'
+import { useProjectContext } from './useProjectContext'
+
+export function BacklogPage() {
+  const { project } = useProjectContext()
+  const queryClient = useQueryClient()
+  const [onlyInScope, setOnlyInScope] = useState(true)
+  const [newKey, setNewKey] = useState('')
+
+  const { data: items } = useQuery({
+    queryKey: ['backlog', project.id],
+    queryFn: () => api.backlog.list(project.id),
+  })
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
+    queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
+  }
+
+  const update = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<BacklogItem> }) => api.backlog.update(id, data),
+    onSuccess: invalidate,
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) => api.backlog.remove(id),
+    onSuccess: invalidate,
+  })
+  const create = useMutation({
+    mutationFn: () =>
+      api.backlog.create(project.id, { jira_key: newKey.trim(), priority_order: (items?.length ?? 0) + 1 }),
+    onSuccess: () => {
+      setNewKey('')
+      invalidate()
+    },
+  })
+  const sync = useMutation({
+    mutationFn: () => api.backlog.sync(project.id),
+    onSuccess: invalidate,
+  })
+
+  const num = (v: string) => (v === '' ? null : Number(v))
+  const dateOrNull = (v: string) => v || null
+
+  const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
+
+  return (
+    <div className="card">
+      <div className="page-header" style={{ marginBottom: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Backlog</h3>
+          <span className="sub">
+            {project.jira_jql ? (
+              <span className="muted">JQL: {project.jira_jql}</span>
+            ) : (
+              <span className="muted">Nessuna JQL configurata — modificala nella scheda progetto per abilitare la sync.</span>
+            )}
+          </span>
+        </div>
+        <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
+          {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
+        </button>
+      </div>
+
+      {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
+      {sync.isSuccess && (
+        <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
+          Sync completata: {sync.data.created} nuove issue, {sync.data.updated} aggiornate (totale trovate:{' '}
+          {sync.data.total_matched}).
+        </div>
+      )}
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 13 }}>
+        <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
+        Mostra solo item "In Scope"
+      </label>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Jira Key</th>
+              <th>Summary</th>
+              <th>Tipo</th>
+              <th>Stato Jira</th>
+              <th>In Scope</th>
+              <th>Stato</th>
+              <th>Sizing (gg)</th>
+              <th>Dev (h)</th>
+              <th>Test (h)</th>
+              <th>Planned (h)</th>
+              <th>Start pian.</th>
+              <th>Fine pian.</th>
+              <th>Start eff.</th>
+              <th>Fine eff.</th>
+              <th>Ore loggate</th>
+              <th>Note</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {visibleItems.map((item) => (
+              <tr key={item.id}>
+                <td className="editable-cell" style={{ width: 44 }}>
+                  <input
+                    type="number"
+                    defaultValue={item.priority_order}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { priority_order: Number(e.target.value) } })}
+                  />
+                </td>
+                <td>
+                  {project.jira_jql ? (
+                    <a
+                      href={`https://inpeco.atlassian.net/browse/${item.jira_key}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {item.jira_key}
+                    </a>
+                  ) : (
+                    item.jira_key
+                  )}
+                </td>
+                <td style={{ whiteSpace: 'normal', minWidth: 220 }}>{item.summary ?? <span className="muted">—</span>}</td>
+                <td>{item.issue_type ?? '—'}</td>
+                <td>{item.jira_status ?? '—'}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={item.in_scope}
+                    onChange={(e) => update.mutate({ id: item.id, data: { in_scope: e.target.checked } })}
+                  />
+                </td>
+                <td>
+                  <StatusBadge status={item.status} />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="number"
+                    defaultValue={item.planned_duration_days ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_duration_days: num(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="number"
+                    defaultValue={item.dev_estimate_hours ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { dev_estimate_hours: num(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="number"
+                    defaultValue={item.test_estimate_hours ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { test_estimate_hours: num(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="number"
+                    defaultValue={item.planned_hours ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_hours: num(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="date"
+                    defaultValue={item.planned_start ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { planned_start: dateOrNull(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="date"
+                    defaultValue={item.expected_finish ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="date"
+                    defaultValue={item.actual_start ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { actual_start: dateOrNull(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="date"
+                    defaultValue={item.actual_finish ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { actual_finish: dateOrNull(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell">
+                  <input
+                    type="number"
+                    defaultValue={item.logged_hours ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
+                  />
+                </td>
+                <td className="editable-cell" style={{ minWidth: 160 }}>
+                  <input
+                    defaultValue={item.notes ?? ''}
+                    onBlur={(e) => update.mutate({ id: item.id, data: { notes: e.target.value || null } })}
+                  />
+                </td>
+                <td>
+                  <button className="btn btn-danger" onClick={() => remove.mutate(item.id)}>
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {visibleItems.length === 0 && (
+              <tr>
+                <td colSpan={18} className="muted">
+                  Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <input
+          placeholder="Chiave Jira (es. PTBSYS-1234)"
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <button className="btn" disabled={!newKey.trim() || create.isPending} onClick={() => create.mutate()}>
+          + Aggiungi manualmente
+        </button>
+      </div>
+    </div>
+  )
+}

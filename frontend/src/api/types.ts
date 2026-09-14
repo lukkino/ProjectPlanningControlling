@@ -1,0 +1,94 @@
+export type Phase = {
+  id: number
+  project_id: number
+  name: string
+  planned_date: string | null
+  actual_date: string | null
+  order: number
+}
+
+export type BudgetLine = {
+  id: number
+  project_id: number
+  role_name: string
+  budget_hours: number
+  order: number
+}
+
+export type BacklogItem = {
+  id: number
+  project_id: number
+  jira_key: string
+  priority_order: number
+  summary: string | null
+  issue_type: string | null
+  jira_status: string | null
+  labels: string | null
+  last_synced_at: string | null
+  ready_for_refinement: boolean
+  in_scope: boolean
+  planned: boolean
+  planned_duration_days: number | null
+  dev_estimate_hours: number | null
+  test_estimate_hours: number | null
+  planned_hours: number | null
+  planned_start: string | null
+  expected_finish: string | null
+  actual_start: string | null
+  actual_finish: string | null
+  logged_hours: number | null
+  notes: string | null
+  status: 'To Do' | 'In Progress' | 'Done'
+}
+
+export type SyncResult = {
+  created: number
+  updated: number
+  total_matched: number
+  errors: string[]
+}
+
+export type Snapshot = {
+  id: number
+  project_id: number
+  snapshot_date: string
+  actual_hours: number | null
+  logged_hours: number | null
+  pbi_total: number | null
+  pbi_done: number | null
+  note: string | null
+}
+
+export type Project = {
+  id: number
+  code: string
+  name: string
+  status: string
+  scope: string | null
+  start_date: string | null
+  code_freeze_date: string | null
+  estimated_budget_hours: number
+  estimated_budget_material: number
+  jira_jql: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProjectDetail = Project & {
+  phases: Phase[]
+  budget_lines: BudgetLine[]
+}
+
+export type DashboardMetrics = {
+  backlog_total: number
+  backlog_in_scope: number
+  backlog_done: number
+  percent_complete: number
+  budget_hours_total: number
+  logged_hours_total: number
+  percent_budget_used: number
+  percent_time_elapsed: number | null
+  spi: number | null
+  phases: Phase[]
+  budget_lines: BudgetLine[]
+}

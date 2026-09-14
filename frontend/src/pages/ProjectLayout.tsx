@@ -1,0 +1,77 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom'
+import { api } from '../api/client'
+import { ProjectFormModal } from '../components/ProjectFormModal'
+import type { ProjectDetail } from '../api/types'
+
+export function ProjectLayout() {
+  const { projectId } = useParams()
+  const id = Number(projectId)
+  const [showEdit, setShowEdit] = useState(false)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  const { data: project, isLoading } = useQuery({
+    queryKey: ['project', id],
+    queryFn: () => api.projects.get(id),
+    enabled: !Number.isNaN(id),
+  })
+
+  const remove = useMutation({
+    mutationFn: () => api.projects.remove(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      navigate('/')
+    },
+  })
+
+  if (isLoading || !project) return <p className="muted">Caricamento...</p>
+
+  const handleDelete = () => {
+    if (confirm(`Eliminare il progetto "${project.code}"? L'operazione non è reversibile.`)) {
+      remove.mutate()
+    }
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1>
+            {project.code} · {project.name}
+          </h1>
+          <div className="sub">
+            Stato: {project.status}
+            {project.start_date && ` · Inizio: ${project.start_date}`}
+            {project.code_freeze_date && ` · Code freeze: ${project.code_freeze_date}`}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setShowEdit(true)}>
+            Modifica
+          </button>
+          <button className="btn btn-danger" onClick={handleDelete}>
+            Elimina
+          </button>
+        </div>
+      </div>
+
+      <div className="tabs">
+        <NavLink to={`/projects/${id}`} end className={({ isActive }) => (isActive ? 'active' : '')}>
+          Dashboard
+        </NavLink>
+        <NavLink to={`/projects/${id}/backlog`} className={({ isActive }) => (isActive ? 'active' : '')}>
+          Backlog
+        </NavLink>
+        <NavLink to={`/projects/${id}/snapshots`} className={({ isActive }) => (isActive ? 'active' : '')}>
+          Andamento
+        </NavLink>
+      </div>
+
+      <Outlet context={{ project } satisfies { project: ProjectDetail }} />
+
+      {showEdit && <ProjectFormModal project={project} onClose={() => setShowEdit(false)} />}
+    </div>
+  )
+}
