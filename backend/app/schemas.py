@@ -108,6 +108,8 @@ class BacklogItem(BacklogItemBase):
     issue_type: str | None = None
     jira_status: str | None = None
     labels: str | None = None
+    parent_key: str | None = None
+    parent_summary: str | None = None
     last_synced_at: dt.datetime | None = None
     status: str
 
@@ -152,6 +154,8 @@ class ForecastSimulationBase(BaseModel):
     pbi_done: int | None = None
     planned_pbi_done: int | None = None
     unplanned_pbi_done: int | None = None
+    planned_pbi_keys: str | None = None
+    unplanned_pbi_keys: str | None = None
     traditional_forecasting: str | None = None
     code_freeze_deadline: dt.date | None = None
     completion_likelihood: float | None = None
@@ -171,6 +175,8 @@ class ForecastSimulationUpdate(BaseModel):
     pbi_done: int | None = None
     planned_pbi_done: int | None = None
     unplanned_pbi_done: int | None = None
+    planned_pbi_keys: str | None = None
+    unplanned_pbi_keys: str | None = None
     traditional_forecasting: str | None = None
     code_freeze_deadline: dt.date | None = None
     completion_likelihood: float | None = None

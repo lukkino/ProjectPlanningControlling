@@ -82,6 +82,10 @@ class BacklogItem(Base):
     issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     labels: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Epic/parent dell'issue (se presente): sincronizzato come gli altri
+    # campi qui sopra.
+    parent_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parent_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ore da Time Tracking Jira (timeSpentSeconds): sincronizzato come gli
     # altri campi qui sopra, Jira e' sempre la fonte di verita' e sovrascrive
     # qualunque valore inserito a mano nell'app.
@@ -146,6 +150,11 @@ class ForecastSimulation(Base):
     pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
     planned_pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
     unplanned_pbi_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Jira key dei PBI contati in planned_pbi_done/unplanned_pbi_done al
+    # momento della creazione (", " come separatore), per il tooltip "i" in
+    # UI. Congelate come i conteggi: non si aggiornano da sole in seguito.
+    planned_pbi_keys: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unplanned_pbi_keys: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Testo libero (non Date) perche' nel foglio originale può restare vuoto
     # o contenere una nota invece di una data vera e propria.
     traditional_forecasting: Mapped[str | None] = mapped_column(String(32), nullable=True)

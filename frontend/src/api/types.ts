@@ -25,6 +25,8 @@ export type BacklogItem = {
   issue_type: string | null
   jira_status: string | null
   labels: string | null
+  parent_key: string | null
+  parent_summary: string | null
   last_synced_at: string | null
   ready_for_refinement: boolean
   in_scope: boolean
@@ -71,6 +73,8 @@ export type ForecastSimulation = {
   pbi_done: number | null
   planned_pbi_done: number | null
   unplanned_pbi_done: number | null
+  planned_pbi_keys: string | null
+  unplanned_pbi_keys: string | null
   traditional_forecasting: string | null
   code_freeze_deadline: string | null
   completion_likelihood: number | null

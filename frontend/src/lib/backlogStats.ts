@@ -28,13 +28,13 @@ function hasLabel(labels: string | null, label: string): boolean {
 // pianificato); un item senza nessuna delle due label non viene contato in
 // nessuna delle due colonne.
 export function countPlannedUnplannedDone(items: BacklogItem[], sinceDate: string | null) {
-  let planned = 0
-  let unplanned = 0
+  const plannedKeys: string[] = []
+  const unplannedKeys: string[] = []
   for (const item of items) {
     if (!item.in_scope || item.status !== 'Done' || !item.actual_finish) continue
     if (sinceDate && item.actual_finish < sinceDate) continue
-    if (hasLabel(item.labels, 'oos')) unplanned++
-    else if (hasLabel(item.labels, 'planned')) planned++
+    if (hasLabel(item.labels, 'oos')) unplannedKeys.push(item.jira_key)
+    else if (hasLabel(item.labels, 'planned')) plannedKeys.push(item.jira_key)
   }
-  return { planned, unplanned }
+  return { planned: plannedKeys.length, unplanned: unplannedKeys.length, plannedKeys, unplannedKeys }
 }

@@ -35,6 +35,8 @@ class JiraIssue:
         logged_hours: float | None = None,
         actual_start: dt.date | None = None,
         actual_finish: dt.date | None = None,
+        parent_key: str | None = None,
+        parent_summary: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -44,6 +46,8 @@ class JiraIssue:
         self.logged_hours = logged_hours
         self.actual_start = actual_start
         self.actual_finish = actual_finish
+        self.parent_key = parent_key
+        self.parent_summary = parent_summary
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -102,7 +106,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
     base_url = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    fields = ["summary", "issuetype", "status", "labels", "timetracking"]
+    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent"]
 
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
@@ -128,6 +132,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                     issue_type = (f.get("issuetype") or {}).get("name", "")
                     time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
+                    parent = f.get("parent") or {}
                     issues.append(
                         JiraIssue(
                             key=key,
@@ -138,6 +143,8 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             logged_hours=(time_spent_seconds / 3600) if time_spent_seconds is not None else None,
                             actual_start=actual_start,
                             actual_finish=actual_finish,
+                            parent_key=parent.get("key"),
+                            parent_summary=(parent.get("fields") or {}).get("summary"),
                         )
                     )
 

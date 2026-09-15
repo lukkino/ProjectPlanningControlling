@@ -248,5 +248,21 @@ tbody tr:hover { background: var(--bg); }
 .draggable-col { cursor: grab; }
 .draggable-col:active { cursor: grabbing; }
 
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  font-family: Georgia, serif;
+  cursor: help;
+}
+
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }

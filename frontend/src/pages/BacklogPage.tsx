@@ -38,6 +38,7 @@ export function BacklogPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
   const [draggedCol, setDraggedCol] = useState<string | null>(null)
@@ -107,6 +108,28 @@ export function BacklogPage() {
       label: 'Summary',
       style: { whiteSpace: 'normal', minWidth: 220 },
       render: (item) => item.summary ?? <span className="muted">—</span>,
+    },
+    {
+      key: 'parent',
+      label: 'Parent',
+      style: { minWidth: 140 },
+      render: (item) =>
+        item.parent_key ? (
+          project.jira_jql ? (
+            <a
+              href={`https://inpeco.atlassian.net/browse/${item.parent_key}`}
+              target="_blank"
+              rel="noreferrer"
+              title={item.parent_summary ?? undefined}
+            >
+              {item.parent_key}
+            </a>
+          ) : (
+            <span title={item.parent_summary ?? undefined}>{item.parent_key}</span>
+          )
+        ) : (
+          <span className="muted">—</span>
+        ),
     },
     { key: 'issue_type', label: 'Tipo', render: (item) => item.issue_type ?? '—' },
     { key: 'jira_status', label: 'Stato Jira', render: (item) => item.jira_status ?? '—' },
@@ -327,7 +350,25 @@ export function BacklogPage() {
 
   const { inScopeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
 
-  const visibleItems = (items ?? []).filter((i) => !onlyInScope || i.in_scope)
+  const availableTypes = Array.from(
+    new Set((items ?? []).map((i) => i.issue_type).filter((t): t is string => !!t)),
+  ).sort()
+  const typeCounts = (items ?? []).reduce<Record<string, number>>((acc, i) => {
+    if (i.issue_type) acc[i.issue_type] = (acc[i.issue_type] ?? 0) + 1
+    return acc
+  }, {})
+  const toggleType = (type: string) => {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
+
+  const visibleItems = (items ?? []).filter(
+    (i) => (!onlyInScope || i.in_scope) && (!i.issue_type || !hiddenTypes.has(i.issue_type)),
+  )
 
   const handleDrop = (targetId: number) => {
     if (draggedId === null || draggedId === targetId) {
@@ -396,10 +437,24 @@ export function BacklogPage() {
         </div>
       )}
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 13 }}>
-        <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
-        Mostra solo item "In Scope"
-      </label>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 10, fontSize: 13 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
+          Mostra solo item "In Scope"
+        </label>
+
+        {availableTypes.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="muted">Tipo:</span>
+            {availableTypes.map((type) => (
+              <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={!hiddenTypes.has(type)} onChange={() => toggleType(type)} />
+                {type} ({typeCounts[type]})
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="table-wrap">
         <table className="backlog-table">

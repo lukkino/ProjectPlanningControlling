@@ -27,6 +27,11 @@ const COLOR_CODE_FREEZE = '#eda100'
 const COLOR_MONTE_CARLO = '#e87ba4'
 const COLOR_TRADITIONAL = '#008300'
 
+function formatKeysTooltip(keys: string | null): string {
+  if (!keys) return 'Nessun dettaglio disponibile (simulazione creata prima di questa funzione, o nessun PBI trovato)'
+  return keys.split(', ').join('\n')
+}
+
 export function ForecastingPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
@@ -43,10 +48,12 @@ export function ForecastingPage() {
     queryFn: () => api.backlog.list(project.id),
   })
   const { remainingCount } = countBacklogStats(backlogItems ?? [])
-  const { planned: plannedDoneCount, unplanned: unplannedDoneCount } = countPlannedUnplannedDone(
-    backlogItems ?? [],
-    project.dev_start_date,
-  )
+  const {
+    planned: plannedDoneCount,
+    unplanned: unplannedDoneCount,
+    plannedKeys,
+    unplannedKeys,
+  } = countPlannedUnplannedDone(backlogItems ?? [], project.dev_start_date)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['forecasting', project.id] })
 
@@ -67,6 +74,8 @@ export function ForecastingPage() {
         pbi_done: plannedDoneCount + unplannedDoneCount,
         planned_pbi_done: plannedDoneCount,
         unplanned_pbi_done: unplannedDoneCount,
+        planned_pbi_keys: plannedKeys.join(', ') || null,
+        unplanned_pbi_keys: unplannedKeys.join(', ') || null,
         code_freeze_deadline: project.code_freeze_date,
       }),
     onSuccess: invalidate,
@@ -192,18 +201,28 @@ export function ForecastingPage() {
                   />
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={sim.planned_pbi_done ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { planned_pbi_done: num(e.target.value) } })}
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="number"
+                      defaultValue={sim.planned_pbi_done ?? ''}
+                      onBlur={(e) => update.mutate({ id: sim.id, data: { planned_pbi_done: num(e.target.value) } })}
+                    />
+                    <span className="info-icon" title={formatKeysTooltip(sim.planned_pbi_keys)}>
+                      i
+                    </span>
+                  </div>
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={sim.unplanned_pbi_done ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { unplanned_pbi_done: num(e.target.value) } })}
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="number"
+                      defaultValue={sim.unplanned_pbi_done ?? ''}
+                      onBlur={(e) => update.mutate({ id: sim.id, data: { unplanned_pbi_done: num(e.target.value) } })}
+                    />
+                    <span className="info-icon" title={formatKeysTooltip(sim.unplanned_pbi_keys)}>
+                      i
+                    </span>
+                  </div>
                 </td>
                 <td className="editable-cell">
                   <input
