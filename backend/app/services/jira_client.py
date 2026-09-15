@@ -43,6 +43,7 @@ class JiraIssue:
         parent_key: str | None = None,
         parent_summary: str | None = None,
         implemented_by: list[dict] | None = None,
+        description: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -57,6 +58,7 @@ class JiraIssue:
         # Lista di {"key", "summary", "fix_version"} per i Task che
         # implementano questa issue (link Jira "is implemented by").
         self.implemented_by = implemented_by or []
+        self.description = description
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -126,6 +128,53 @@ def _extract_implemented_by(issuelinks: list[dict]) -> list[dict]:
     return result
 
 
+def _adf_to_text(node: dict, depth: int = 0) -> str:
+    """Converte in testo semplice un nodo ADF (Atlassian Document Format,
+    il formato ricco della description di Jira Cloud). Non e' un rendering
+    fedele (niente numerazione automatica delle liste), ma resta leggibile
+    in una cella Excel: paragrafi separati da riga vuota, grassetto tra
+    asterischi, elenchi con trattino e indentazione."""
+    node_type = node.get("type")
+
+    if node_type == "text":
+        text = node.get("text", "")
+        if any(m.get("type") == "strong" for m in node.get("marks", [])):
+            text = f"*{text}*"
+        return text
+    if node_type == "hardBreak":
+        return "\n"
+    if node_type == "inlineCard":
+        return node.get("attrs", {}).get("url", "")
+    if node_type == "mention":
+        return f"@{node.get('attrs', {}).get('text', '')}"
+
+    children = node.get("content", [])
+
+    if node_type == "paragraph":
+        return "".join(_adf_to_text(c, depth) for c in children)
+    if node_type == "listItem":
+        prefix = "  " * depth + "- "
+        parts = [_adf_to_text(c, depth) for c in children]
+        parts = [p for p in parts if p]
+        if not parts:
+            return prefix
+        return prefix + parts[0] + ("\n" + "\n".join(parts[1:]) if len(parts) > 1 else "")
+    if node_type in ("orderedList", "bulletList"):
+        return "\n".join(_adf_to_text(c, depth + 1) for c in children)
+    if node_type == "doc":
+        parts = [_adf_to_text(c, depth) for c in children]
+        return "\n\n".join(p for p in parts if p.strip())
+
+    return "".join(_adf_to_text(c, depth) for c in children)
+
+
+def _extract_description(description_adf: dict | None) -> str | None:
+    if not description_adf:
+        return None
+    text = _adf_to_text(description_adf).strip()
+    return text or None
+
+
 def _fetch_fix_versions(client: httpx.Client, base_url: str, keys: list[str]) -> dict[str, str]:
     """Una singola query batch (paginata se necessario) per le fix version
     di un elenco di issue key, invece di una chiamata per issue."""
@@ -167,7 +216,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
     base_url = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent", "issuelinks"]
+    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent", "issuelinks", "description"]
 
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
@@ -208,6 +257,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             parent_key=parent.get("key"),
                             parent_summary=(parent.get("fields") or {}).get("summary"),
                             implemented_by=implemented_by,
+                            description=_extract_description(f.get("description")),
                         )
                     )
 

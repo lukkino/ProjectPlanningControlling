@@ -93,6 +93,17 @@ export function DocumentsPage() {
       </div>
 
       <div className="card">
+        <h3 style={{ marginTop: 0 }}>Genera documenti</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Compila la Cover (titolo, firmatari, revision history) del template Regression Analysis con i dati di
+          questo progetto. Il foglio dati (righe PBI) non è ancora popolato.
+        </p>
+        <a href={`/api/projects/${project.id}/documents/regression-analysis`} className="btn btn-primary">
+          ⬇ Scarica Regression Analysis (.xlsx)
+        </a>
+      </div>
+
+      <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, fontSize: 13 }}>
           <span className="muted">Tipo:</span>
           {DOCUMENT_TYPES.map((type) => (

@@ -107,6 +107,7 @@ class BacklogItem(BacklogItemBase):
     id: int
     project_id: int
     summary: str | None = None
+    description: str | None = None
     issue_type: str | None = None
     jira_status: str | None = None
     labels: str | None = None

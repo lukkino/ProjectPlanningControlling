@@ -92,6 +92,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
         if issue.key in existing:
             item = existing[issue.key]
             item.summary = issue.summary
+            item.description = issue.description
             item.issue_type = issue.issue_type
             item.jira_status = issue.status
             item.labels = labels
@@ -110,6 +111,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
                 jira_key=issue.key,
                 priority_order=max_order,
                 summary=issue.summary,
+                description=issue.description,
                 issue_type=issue.issue_type,
                 jira_status=issue.status,
                 labels=labels,
