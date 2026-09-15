@@ -2,12 +2,13 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BacklogPage } from './pages/BacklogPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents']
 
 export default function App() {
   const location = useLocation()
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="backlog" element={<BacklogPage />} />
             <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="forecasting" element={<ForecastingPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

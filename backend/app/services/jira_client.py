@@ -18,6 +18,11 @@ ACTIVITY_START_STATUS = "On-Going"
 DEFAULT_START_STATUS = "In Progress"
 DONE_STATUS = "Done"
 
+# Frase esatta (case-sensitive) usata da Jira per il link "Polaris work item
+# link" quando l'issue corrente e' il lato "inward" della relazione, cioe'
+# "questa Story/Bug e' implementata da <Task>".
+IMPLEMENTED_BY_PHRASE = "is implemented by"
+
 
 class JiraClientError(Exception):
     """Raised for any Jira configuration or API failure, with a message
@@ -37,6 +42,7 @@ class JiraIssue:
         actual_finish: dt.date | None = None,
         parent_key: str | None = None,
         parent_summary: str | None = None,
+        implemented_by: list[dict] | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -48,6 +54,9 @@ class JiraIssue:
         self.actual_finish = actual_finish
         self.parent_key = parent_key
         self.parent_summary = parent_summary
+        # Lista di {"key", "summary", "fix_version"} per i Task che
+        # implementano questa issue (link Jira "is implemented by").
+        self.implemented_by = implemented_by or []
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -97,6 +106,58 @@ def _fetch_status_dates(
     return actual_start, actual_finish
 
 
+def _extract_implemented_by(issuelinks: list[dict]) -> list[dict]:
+    """Task collegati a questa issue tramite un link "is implemented by"
+    (l'issue corrente e' il lato inward: "questa issue e' implementata
+    da <Task>"). La fix version viene aggiunta in un secondo momento con
+    una query batch, qui e' sempre None."""
+    result = []
+    for link in issuelinks:
+        link_type = link.get("type", {})
+        inward_issue = link.get("inwardIssue")
+        if link_type.get("inward") == IMPLEMENTED_BY_PHRASE and inward_issue:
+            result.append(
+                {
+                    "key": inward_issue.get("key"),
+                    "summary": (inward_issue.get("fields") or {}).get("summary"),
+                    "fix_version": None,
+                }
+            )
+    return result
+
+
+def _fetch_fix_versions(client: httpx.Client, base_url: str, keys: list[str]) -> dict[str, str]:
+    """Una singola query batch (paginata se necessario) per le fix version
+    di un elenco di issue key, invece di una chiamata per issue."""
+    if not keys:
+        return {}
+
+    fix_versions: dict[str, str] = {}
+    unique_keys = sorted(set(keys))
+
+    # "key in (...)" regge query molto lunghe, ma per sicurezza spezziamo
+    # in blocchi da 100 chiavi.
+    for i in range(0, len(unique_keys), 100):
+        chunk = unique_keys[i : i + 100]
+        jql = "key in (" + ", ".join(chunk) + ")"
+        next_page_token: str | None = None
+        while True:
+            payload = {"jql": jql, "maxResults": 100, "fields": ["fixVersions"]}
+            if next_page_token:
+                payload["nextPageToken"] = next_page_token
+            response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            for raw in data.get("issues", []):
+                versions = (raw.get("fields", {}) or {}).get("fixVersions") or []
+                fix_versions[raw.get("key")] = ", ".join(v.get("name", "") for v in versions) or None
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token or data.get("isLast", True):
+                break
+
+    return fix_versions
+
+
 def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
     if not settings.jira_configured:
         raise JiraClientError(
@@ -106,7 +167,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
     base_url = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent"]
+    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent", "issuelinks"]
 
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
@@ -133,6 +194,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                     time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
                     parent = f.get("parent") or {}
+                    implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
                     issues.append(
                         JiraIssue(
                             key=key,
@@ -145,12 +207,21 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             actual_finish=actual_finish,
                             parent_key=parent.get("key"),
                             parent_summary=(parent.get("fields") or {}).get("summary"),
+                            implemented_by=implemented_by,
                         )
                     )
 
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):
                     break
+
+            # Una sola query batch per la fix version di tutti i Task
+            # collegati trovati, invece di una chiamata per task.
+            all_task_keys = [t["key"] for issue in issues for t in issue.implemented_by if t.get("key")]
+            fix_versions = _fetch_fix_versions(client, base_url, all_task_keys)
+            for issue in issues:
+                for task in issue.implemented_by:
+                    task["fix_version"] = fix_versions.get(task["key"])
     except httpx.HTTPError as exc:
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 

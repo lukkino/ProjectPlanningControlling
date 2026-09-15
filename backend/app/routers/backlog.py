@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -87,6 +88,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
 
     for issue in issues:
         labels = ";".join(issue.labels)
+        implemented_by_json = json.dumps(issue.implemented_by) if issue.implemented_by else None
         if issue.key in existing:
             item = existing[issue.key]
             item.summary = issue.summary
@@ -95,6 +97,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
             item.labels = labels
             item.parent_key = issue.parent_key
             item.parent_summary = issue.parent_summary
+            item.implemented_by_json = implemented_by_json
             item.logged_hours = issue.logged_hours
             item.actual_start = issue.actual_start
             item.actual_finish = issue.actual_finish
@@ -112,6 +115,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
                 labels=labels,
                 parent_key=issue.parent_key,
                 parent_summary=issue.parent_summary,
+                implemented_by_json=implemented_by_json,
                 logged_hours=issue.logged_hours,
                 actual_start=issue.actual_start,
                 actual_finish=issue.actual_finish,

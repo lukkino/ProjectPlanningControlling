@@ -86,6 +86,9 @@ class BacklogItem(Base):
     # campi qui sopra.
     parent_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parent_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Task collegati via link Jira "is implemented by", come JSON:
+    # [{"key","summary","fix_version"}, ...]. Usato dalla sezione Documents.
+    implemented_by_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ore da Time Tracking Jira (timeSpentSeconds): sincronizzato come gli
     # altri campi qui sopra, Jira e' sempre la fonte di verita' e sovrascrive
     # qualunque valore inserito a mano nell'app.

@@ -112,6 +112,7 @@ class BacklogItem(BacklogItemBase):
     labels: str | None = None
     parent_key: str | None = None
     parent_summary: str | None = None
+    implemented_by_json: str | None = None
     last_synced_at: dt.datetime | None = None
     status: str
 

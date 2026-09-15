@@ -16,6 +16,12 @@ export type BudgetLine = {
   order: number
 }
 
+export type ImplementedByTask = {
+  key: string
+  summary: string | null
+  fix_version: string | null
+}
+
 export type BacklogItem = {
   id: number
   project_id: number
@@ -27,6 +33,7 @@ export type BacklogItem = {
   labels: string | null
   parent_key: string | null
   parent_summary: string | null
+  implemented_by_json: string | null
   last_synced_at: string | null
   ready_for_refinement: boolean
   in_scope: boolean
