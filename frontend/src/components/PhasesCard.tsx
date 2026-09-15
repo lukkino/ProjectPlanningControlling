@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import type { Phase } from '../api/types'
 import { dateStrToEpochDays, formatEpochDaysAsDate } from '../lib/dates'
 
-type Props = { projectId: number }
+type Props = { projectId: number; currentStatus: string }
 
 // Palette categorica validata del progetto (vedi skill data-viz), primi due
 // slot fissi: blu, arancio.
@@ -13,7 +13,7 @@ const COLOR_ACTUAL = '#eb6834'
 
 type TimelinePoint = { x: number; y: string }
 
-export function PhasesCard({ projectId }: Props) {
+export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
   const { data: phases } = useQuery({ queryKey: ['phases', projectId], queryFn: () => api.phases.list(projectId) })
 
@@ -35,6 +35,10 @@ export function PhasesCard({ projectId }: Props) {
 
   const error = update.error ?? addPhase.error ?? removePhase.error
 
+  // Fase corrente: quella il cui nome corrisponde allo Stato progetto scelto
+  // in Dashboard (il menu li' e' popolato proprio dai nomi di queste fasi).
+  const currentPhaseIndex = (phases ?? []).findIndex((p) => p.name === currentStatus)
+
   const phaseNames = (phases ?? []).map((p) => p.name)
   const isPoint = (p: TimelinePoint | { x: number | null; y: string }): p is TimelinePoint => p.x !== null
   const plannedPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.planned_date), y: p.name })).filter(isPoint)
@@ -47,12 +51,12 @@ export function PhasesCard({ projectId }: Props) {
     <div className="card">
       <h3>Fasi progetto</h3>
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
-      <div className="grid-2">
+      <div className="grid-3-2">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Fase</th>
+                <th style={{ minWidth: 140 }}>Fase</th>
                 <th>Pianificata</th>
                 <th>Effettiva</th>
                 <th>Note</th>
@@ -60,13 +64,20 @@ export function PhasesCard({ projectId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {phases?.map((phase) => (
-                <tr key={phase.id}>
+              {phases?.map((phase, index) => (
+                <tr key={phase.id} className={index === currentPhaseIndex ? 'phase-current' : undefined}>
                   <td className="editable-cell">
-                    <input
-                      defaultValue={phase.name}
-                      onBlur={(e) => e.target.value !== phase.name && update.mutate({ id: phase.id, data: { name: e.target.value } })}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        defaultValue={phase.name}
+                        onBlur={(e) => e.target.value !== phase.name && update.mutate({ id: phase.id, data: { name: e.target.value } })}
+                      />
+                      {index === currentPhaseIndex && (
+                        <span className="badge current" title="Fase in cui ci troviamo ora">
+                          Ora
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="editable-cell">
                     <input

@@ -76,16 +76,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
         </div>
         <div className="form-row">
-          <label>Stato</label>
-          <select value={form.status} onChange={(e) => set('status', e.target.value)}>
-            <option>Kick-off</option>
-            <option>Planning</option>
-            <option>Execution</option>
-            <option>Deployment</option>
-            <option>Closed</option>
-          </select>
-        </div>
-        <div className="form-row">
           <label>Scope</label>
           <textarea rows={2} value={form.scope} onChange={(e) => set('scope', e.target.value)} />
         </div>

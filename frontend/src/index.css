@@ -112,8 +112,14 @@ input, select, textarea {
 .card h2, .card h3 { margin-top: 0; }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3-2 { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+/* Senza questo, un figlio con contenuto largo (es. una tabella) puo'
+   allargare la sua colonna oltre la quota assegnata invece di scorrere al
+   suo interno - stesso bug gia' risolto per .main-content nel Backlog. */
+.grid-2 > div,
+.grid-3-2 > div { min-width: 0; }
 .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
 
 .stat {
@@ -264,6 +270,10 @@ tbody tr:hover { background: var(--bg); }
 .badge.todo { background: #eef0f3; color: var(--text-muted); }
 .badge.progress { background: #fff2df; color: var(--warning); }
 .badge.done { background: #e3f6ea; color: var(--success); }
+.badge.current { background: var(--primary); color: white; }
+
+tr.phase-current td { background: #e6eefc; }
+tr.phase-current input { background: #e6eefc; }
 
 .empty-state {
   text-align: center;

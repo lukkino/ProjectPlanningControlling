@@ -1,10 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import { BudgetLinesCard } from '../components/BudgetLinesCard'
 import { PhasesCard } from '../components/PhasesCard'
-import { formatIsoDate } from '../lib/dates'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
+
+// Palette categorica validata del progetto (skill data-viz): blu e arancio
+// per le due serie di ore reali; grigio tratteggiato per la retta ideale
+// (non e' una categoria ma una linea di riferimento/obiettivo).
+const COLOR_ACTUAL_HOURS = '#2a78d6'
+const COLOR_ACTUAL_LOGGED = '#eb6834'
+const COLOR_IDEAL = '#898781'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 
@@ -28,6 +35,22 @@ const BADGE_CLASS_BY_TONE: Record<string, string> = { done: 'done', progress: 'p
 
 export function DashboardPage() {
   const { project } = useProjectContext()
+  const queryClient = useQueryClient()
+
+  const updateStatus = useMutation({
+    mutationFn: (status: string) => api.projects.update(project.id, { status }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+  })
+
+  // Stessa query cache di PhasesCard (query key condivisa): lo stato del
+  // progetto e' scelto tra le fasi definite, non un elenco fisso - fasi
+  // diverse per processi diversi danno stati diversi.
+  const { data: phases } = useQuery({
+    queryKey: ['phases', project.id],
+    queryFn: () => api.phases.list(project.id),
+  })
+  const phaseNames = (phases ?? []).map((p) => p.name)
+  const statusOptions = phaseNames
 
   const { data: metrics } = useQuery({
     queryKey: ['dashboard', project.id],
@@ -44,14 +67,57 @@ export function DashboardPage() {
     completamento: s.pbi_total ? Math.round(((s.pbi_done ?? 0) / s.pbi_total) * 100) : null,
   }))
 
+  // Ore pianificate (consumo ideale lineare da inizio progetto a code
+  // freeze) vs ore effettive dagli snapshot di Andamento (actual_hours =
+  // "Actual (PowerBI)", logged_hours = "Actual logged").
+  const startEpoch = dateStrToEpochDays(project.start_date)
+  const freezeEpoch = dateStrToEpochDays(project.code_freeze_date)
+  const budgetTotal = metrics?.budget_hours_total ?? 0
+
+  let hoursChartData: { x: number; ideal: number; actualHours: number | null; actualLogged: number | null }[] = []
+  if (startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch) {
+    const snapshotByEpoch = new Map((snapshots ?? []).map((s) => [dateStrToEpochDays(s.snapshot_date), s]))
+    const allEpochs = Array.from(new Set([startEpoch, freezeEpoch, ...snapshotByEpoch.keys()]))
+      .filter((e): e is number => e !== null)
+      .sort((a, b) => a - b)
+
+    hoursChartData = allEpochs.map((epoch) => {
+      const ratio = Math.max(0, Math.min(1, (epoch - startEpoch) / (freezeEpoch - startEpoch)))
+      const snap = snapshotByEpoch.get(epoch)
+      return {
+        x: epoch,
+        ideal: Math.round(budgetTotal * ratio),
+        actualHours: snap?.actual_hours ?? null,
+        actualLogged: snap?.logged_hours ?? null,
+      }
+    })
+  }
+
   return (
     <div>
+      <div className="card">
+        <div className="page-header" style={{ marginBottom: 0 }}>
+          <h3 style={{ margin: 0 }}>Stato progetto</h3>
+          <select
+            value={project.status}
+            onChange={(e) => updateStatus.mutate(e.target.value)}
+            disabled={updateStatus.isPending}
+          >
+            {statusOptions.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {project.scope && (
         <div className="card">
           <h3>Scope</h3>
           <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{project.scope}</p>
         </div>
       )}
+
+      <PhasesCard projectId={project.id} currentStatus={project.status} />
 
       <div className="card">
         <div className="grid-5">
@@ -103,7 +169,62 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <PhasesCard projectId={project.id} />
+      <div className="card">
+        <h3>Ore Pianificate (lineari) vs Ore Usate nel Tempo</h3>
+        {hoursChartData.length === 0 ? (
+          <p className="muted">
+            Servono la data di inizio progetto e la data di code freeze (scheda progetto) per calcolare il consumo
+            ideale di ore.
+          </p>
+        ) : (
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={hoursChartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="x"
+                  type="number"
+                  domain={[startEpoch ?? 0, freezeEpoch ?? 1]}
+                  tickFormatter={formatEpochDaysAsDate}
+                  tick={{ fontSize: 12 }}
+                />
+                <YAxis tick={{ fontSize: 12 }} label={{ value: 'Ore', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#898781' } }} />
+                <Tooltip labelFormatter={(v) => formatEpochDaysAsDate(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line
+                  type="monotone"
+                  dataKey="ideal"
+                  name="Ore Pianificate to date"
+                  stroke={COLOR_IDEAL}
+                  strokeDasharray="5 4"
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actualHours"
+                  name="Actual (PowerBI) (h)"
+                  stroke={COLOR_ACTUAL_HOURS}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actualLogged"
+                  name="Actual logged (dev+test)"
+                  stroke={COLOR_ACTUAL_LOGGED}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
       <BudgetLinesCard projectId={project.id} />
 
       <div className="card">
