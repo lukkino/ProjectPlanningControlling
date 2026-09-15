@@ -15,7 +15,7 @@ import {
 import { api } from '../api/client'
 import type { ForecastSimulation, Project } from '../api/types'
 import { countBacklogStats, countPlannedUnplannedDone } from '../lib/backlogStats'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDateShort } from '../lib/forecastChart'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Palette categorica validata del progetto (vedi skill data-viz), ordine
@@ -90,7 +90,7 @@ export function ForecastingPage() {
   const textOrNull = (v: string) => v.trim() || null
 
   const chartData = (simulations ?? []).map((sim) => ({
-    label: sim.simulation_date ? formatIsoDateShort(sim.simulation_date) : `#${sim.id}`,
+    label: formatIsoDate(sim.simulation_date) ?? `#${sim.id}`,
     pbi_remaining: sim.pbi_remaining ?? 0,
     planned_pbi_done: sim.planned_pbi_done ?? 0,
     unplanned_pbi_done: sim.unplanned_pbi_done ?? 0,

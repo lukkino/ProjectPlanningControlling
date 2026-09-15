@@ -213,6 +213,8 @@ class ProjectBase(BaseModel):
     estimated_budget_hours: float = 0
     estimated_budget_material: float = 0
     jira_jql: str | None = None
+    change_order_url: str | None = None
+    change_order_label: str | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -230,6 +232,8 @@ class ProjectUpdate(BaseModel):
     estimated_budget_hours: float | None = None
     estimated_budget_material: float | None = None
     jira_jql: str | None = None
+    change_order_url: str | None = None
+    change_order_label: str | None = None
 
 
 class ProjectListItem(ProjectBase):

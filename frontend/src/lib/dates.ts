@@ -1,8 +1,7 @@
-// Helpers per il grafico di Forecasting: le tre linee (Code Freeze Deadline,
-// Monte Carlo 85% Forecast, Traditional Forecasting) sono date, ma per
-// disegnarle su un asse numerico (necessario per condividere il grafico con
-// le barre impilate dei conteggi PBI) le convertiamo in "giorni da un
-// epoch" e le riformattiamo come data per gli assi/etichette.
+// Utility data condivise da tutta l'app: formattazione in italiano
+// (gg/mm/aaaa) e conversione data<->"giorni da un epoch" usata dai grafici
+// (Forecasting, Fasi progetto) per poter disegnare le date su un asse
+// numerico condiviso con valori non-data (conteggi PBI, ecc.).
 
 const EPOCH_UTC = Date.UTC(2020, 0, 1)
 const MS_PER_DAY = 86_400_000
@@ -15,12 +14,21 @@ function epochDaysToDate(days: number): Date {
   return new Date(EPOCH_UTC + days * MS_PER_DAY)
 }
 
+// "2026-10-15" -> "15/10/2026". Pura manipolazione di stringa (niente
+// Date/fuso orario) per i campi Date veri, sempre in ISO yyyy-mm-dd.
+// Ritorna null se il valore e' vuoto o non in quel formato.
+export function formatIsoDate(value: string | null | undefined): string | null {
+  if (!value) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : null
+}
+
 export function formatEpochDaysAsDate(days: number): string {
   const d = epochDaysToDate(days)
   const dd = String(d.getUTCDate()).padStart(2, '0')
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const yy = String(d.getUTCFullYear()).slice(-2)
-  return `${dd}/${mm}/${yy}`
+  const yyyy = d.getUTCFullYear()
+  return `${dd}/${mm}/${yyyy}`
 }
 
 // I campi Date veri (code_freeze_deadline, completion_date_85pct...) sono
@@ -41,17 +49,9 @@ function parseFlexibleDate(value: string | null): Date | null {
 }
 
 // null se il testo e' vuoto, "n.a." o non riconoscibile come data: il punto
-// viene semplicemente omesso dalla linea (comportamento identico a una
+// viene semplicemente omesso dal grafico (comportamento identico a una
 // cella vuota in un grafico Excel).
 export function dateStrToEpochDays(value: string | null): number | null {
   const d = parseFlexibleDate(value)
   return d ? toEpochDays(d) : null
-}
-
-// Solo per l'etichetta sull'asse X (simulation_date e' sempre ISO): niente
-// Date/epoch, pura manipolazione di stringa per evitare insidie di fuso orario.
-export function formatIsoDateShort(value: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!m) return value
-  return `${m[3]}/${m[2]}/${m[1].slice(2)}`
 }

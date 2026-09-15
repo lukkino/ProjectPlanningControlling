@@ -1,9 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState, type ReactNode, type CSSProperties } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useState,
+  type ReactNode,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats } from '../lib/backlogStats'
+import { formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
@@ -25,6 +33,39 @@ function workingDaysBetween(startStr: string | null, endStr: string | null): num
 }
 
 const COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v1'
+const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
+const MIN_COLUMN_WIDTH = 32
+
+// Larghezza in pixel di default per colonna con table-layout:fixed, cosi' la
+// tabella (~22 colonne) parte compatta invece di allargarsi al contenuto.
+// L'utente puo' poi trascinare il bordo destro di ogni intestazione per
+// regolarla: il valore scelto sovrascrive questo default e resta salvato.
+const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
+  priority_order: 44,
+  jira_key: 90,
+  summary: 220,
+  parent: 110,
+  issue_type: 70,
+  jira_status: 80,
+  in_scope: 60,
+  included_in_codefreeze: 80,
+  status: 70,
+  refinement_date: 110,
+  ta_date: 110,
+  planned_duration_days: 70,
+  dev_estimate_hours: 65,
+  test_estimate_hours: 65,
+  planned_hours: 70,
+  planned_start: 90,
+  expected_finish: 90,
+  actual_start: 90,
+  actual_finish: 90,
+  duration: 70,
+  logged_hours: 75,
+  notes: 160,
+}
+const HANDLE_COLUMN_WIDTH = 30
+const DELETE_COLUMN_WIDTH = 36
 
 type Column = {
   key: string
@@ -47,6 +88,13 @@ export function BacklogPage() {
   const { data: items } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
+  })
+
+  // Stessa query cache di ForecastingPage: serve solo a capire quali PBI
+  // rientrano nell'ultima previsione, per evidenziarli in tabella.
+  const { data: simulations } = useQuery({
+    queryKey: ['forecasting', project.id],
+    queryFn: () => api.forecasting.list(project.id),
   })
 
   const invalidate = () => {
@@ -83,7 +131,6 @@ export function BacklogPage() {
       key: 'priority_order',
       label: '#',
       className: 'editable-cell',
-      style: { width: 44 },
       render: (item) => (
         <input
           type="number"
@@ -107,13 +154,12 @@ export function BacklogPage() {
     {
       key: 'summary',
       label: 'Summary',
-      style: { whiteSpace: 'normal', minWidth: 220 },
+      style: { whiteSpace: 'normal' },
       render: (item) => item.summary ?? <span className="muted">—</span>,
     },
     {
       key: 'parent',
       label: 'Parent',
-      style: { minWidth: 140 },
       render: (item) =>
         item.parent_key ? (
           project.jira_jql ? (
@@ -176,7 +222,6 @@ export function BacklogPage() {
       key: 'ta_date',
       label: 'Data TA',
       className: 'editable-cell',
-      style: { minWidth: 130 },
       render: (item) => (
         <input
           defaultValue={item.ta_date ?? ''}
@@ -200,42 +245,9 @@ export function BacklogPage() {
         />
       ),
     },
-    {
-      key: 'dev_estimate_hours',
-      label: 'Dev (h)',
-      className: 'editable-cell',
-      render: (item) => (
-        <input
-          type="number"
-          defaultValue={item.dev_estimate_hours ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { dev_estimate_hours: num(e.target.value) } })}
-        />
-      ),
-    },
-    {
-      key: 'test_estimate_hours',
-      label: 'Test (h)',
-      className: 'editable-cell',
-      render: (item) => (
-        <input
-          type="number"
-          defaultValue={item.test_estimate_hours ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { test_estimate_hours: num(e.target.value) } })}
-        />
-      ),
-    },
-    {
-      key: 'planned_hours',
-      label: 'Planned (h)',
-      className: 'editable-cell',
-      render: (item) => (
-        <input
-          type="number"
-          defaultValue={item.planned_hours ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { planned_hours: num(e.target.value) } })}
-        />
-      ),
-    },
+    // Dev (h) / Test (h) / Planned (h) tolte per ora dalla vista - i campi
+    // restano sul modello dati, basta ri-aggiungere le colonne qui sotto per
+    // rimetterle.
     {
       key: 'planned_start',
       label: 'Start pian.',
@@ -306,7 +318,6 @@ export function BacklogPage() {
       key: 'notes',
       label: 'Note',
       className: 'editable-cell',
-      style: { minWidth: 160 },
       render: (item) => (
         <input
           defaultValue={item.notes ?? ''}
@@ -343,6 +354,43 @@ export function BacklogPage() {
 
   const orderedColumns = columnOrder.map((key) => columns.find((c) => c.key === key)).filter((c): c is Column => !!c)
 
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY)
+      if (stored) return { ...DEFAULT_COLUMN_WIDTH, ...(JSON.parse(stored) as Record<string, number>) }
+    } catch {
+      // localStorage non disponibile o dato corrotto: usa i default
+    }
+    return DEFAULT_COLUMN_WIDTH
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths))
+    } catch {
+      // ignora: e' solo una comodita' per-browser, non deve bloccare l'uso
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnWidths])
+
+  const handleResizeStart = (e: ReactMouseEvent, key: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = columnWidths[key] ?? DEFAULT_COLUMN_WIDTH[key] ?? 80
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.round(startWidth + (moveEvent.clientX - startX)))
+      setColumnWidths((prev) => ({ ...prev, [key]: nextWidth }))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
   const handleColumnDrop = (targetKey: string) => {
     if (draggedCol === null || draggedCol === targetKey) {
       setDraggedCol(null)
@@ -361,6 +409,22 @@ export function BacklogPage() {
   }
 
   const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
+
+  // PBI che rientrano nell'ultima previsione di Forecasting: i primi N item
+  // non-Done (In Progress/To Do), in scope e inclusi nel codefreeze,
+  // nell'ordine attuale della tabella, dove N = "85% #PBI Completed by
+  // Release Deadline Forecasting" dell'ultima simulazione registrata.
+  const latestSimulation = simulations && simulations.length > 0 ? simulations[simulations.length - 1] : null
+  const forecastTarget = latestSimulation?.pbi_completed_by_deadline_85pct ?? null
+  const forecastCandidates = (items ?? []).filter((i) => i.in_scope && i.included_in_codefreeze && i.status !== 'Done')
+  const forecastHighlightIds = new Set(
+    forecastTarget != null ? forecastCandidates.slice(0, forecastTarget).map((i) => i.id) : [],
+  )
+  const forecastCutoffId =
+    forecastTarget != null && forecastCandidates.length > 0
+      ? forecastCandidates[Math.min(forecastTarget, forecastCandidates.length) - 1]?.id
+      : undefined
+  const forecastCutoffLabel = `Forecasting - Code Freeze ${formatIsoDate(project.code_freeze_date) ?? '(data non impostata)'}`
 
   const availableTypes = Array.from(
     new Set((items ?? []).map((i) => i.issue_type).filter((t): t is string => !!t)),
@@ -448,6 +512,15 @@ export function BacklogPage() {
         </div>
       </div>
 
+      {forecastTarget != null && (
+        <p className="muted" style={{ fontSize: 12, marginTop: -8, marginBottom: 12 }}>
+          Righe evidenziate in verde: i primi {forecastTarget} PBI non ancora Done che, secondo l'ultima simulazione
+          di Forecasting ({formatIsoDate(latestSimulation?.simulation_date) ?? '—'}), dovrebbero rientrare entro il
+          Code Freeze — la linea
+          segna il taglio.
+        </p>
+      )}
+
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
@@ -481,7 +554,14 @@ export function BacklogPage() {
       </div>
 
       <div className="table-wrap">
-        <table className="backlog-table">
+        <table className="backlog-table backlog-table--fixed">
+          <colgroup>
+            <col style={{ width: HANDLE_COLUMN_WIDTH }} />
+            {orderedColumns.map((col) => (
+              <col key={col.key} style={{ width: columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80 }} />
+            ))}
+            <col style={{ width: DELETE_COLUMN_WIDTH }} />
+          </colgroup>
           <thead>
             <tr>
               <th />
@@ -502,6 +582,13 @@ export function BacklogPage() {
                   title="Trascina per riordinare la colonna"
                 >
                   {col.label}
+                  <span
+                    className="col-resize-handle"
+                    draggable={false}
+                    onMouseDown={(e) => handleResizeStart(e, col.key)}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Trascina per ridimensionare la colonna"
+                  />
                 </th>
               ))}
               <th />
@@ -509,8 +596,9 @@ export function BacklogPage() {
           </thead>
           <tbody>
             {visibleItems.map((item) => (
+              <Fragment key={item.id}>
               <tr
-                key={item.id}
+                className={forecastHighlightIds.has(item.id) ? 'forecast-highlight' : undefined}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => handleDrop(item.id)}
                 style={draggedId === item.id ? { opacity: 0.4 } : undefined}
@@ -539,6 +627,12 @@ export function BacklogPage() {
                   </button>
                 </td>
               </tr>
+              {item.id === forecastCutoffId && (
+                <tr className="forecast-cutoff-label-row">
+                  <td colSpan={orderedColumns.length + 2}>{forecastCutoffLabel}</td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {visibleItems.length === 0 && (
               <tr>

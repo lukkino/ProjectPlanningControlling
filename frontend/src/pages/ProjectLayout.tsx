@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { ProjectFormModal } from '../components/ProjectFormModal'
+import { formatIsoDate } from '../lib/dates'
 import type { ProjectDetail } from '../api/types'
 
 export function ProjectLayout() {
@@ -43,8 +44,8 @@ export function ProjectLayout() {
           </h1>
           <div className="sub">
             Stato: {project.status}
-            {project.start_date && ` · Inizio: ${project.start_date}`}
-            {project.code_freeze_date && ` · Code freeze: ${project.code_freeze_date}`}
+            {project.start_date && ` · Inizio: ${formatIsoDate(project.start_date)}`}
+            {project.code_freeze_date && ` · Code freeze: ${formatIsoDate(project.code_freeze_date)}`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

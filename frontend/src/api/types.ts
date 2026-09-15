@@ -103,6 +103,8 @@ export type Project = {
   estimated_budget_hours: number
   estimated_budget_material: number
   jira_jql: string | null
+  change_order_url: string | null
+  change_order_label: string | null
   created_at: string
   updated_at: string
 }

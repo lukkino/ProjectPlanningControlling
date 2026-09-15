@@ -63,7 +63,7 @@ body {
 .project-list .name { display: block; font-size: 12px; color: var(--text-muted); }
 .project-list a.active .name { color: #dbe6ff; }
 
-.main-content { padding: 28px 36px; max-width: 1200px; }
+.main-content { padding: 28px 36px; max-width: 1200px; min-width: 0; }
 .main-content--wide { max-width: none; }
 
 .btn {
@@ -196,6 +196,63 @@ tbody tr:hover { background: var(--bg); }
 .backlog-table td input,
 .backlog-table td textarea,
 .backlog-table td select { text-align: center; }
+
+.backlog-table--fixed {
+  table-layout: fixed;
+  /* Niente width:100%: la larghezza e' la somma delle colonne (regolabili a
+     mano), cosi' il ridimensionamento si comporta in modo prevedibile - se
+     il totale supera lo schermo, e' .table-wrap a farla scorrere. */
+}
+.backlog-table--fixed th {
+  position: relative;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.25;
+  padding: 6px 12px 6px 4px;
+}
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+}
+.col-resize-handle:hover,
+.col-resize-handle:active {
+  background: var(--primary);
+  opacity: 0.5;
+}
+.backlog-table--fixed td {
+  padding: 4px;
+  overflow: hidden;
+}
+.backlog-table--fixed td input,
+.backlog-table--fixed td textarea,
+.backlog-table--fixed td select {
+  width: 100%;
+  min-width: 0;
+  padding: 2px;
+}
+
+/* PBI che rientrano nell'ultima previsione di Forecasting (85% #PBI
+   Completed by Release Deadline). L'ultimo evidenziato ha in piu' una
+   linea di demarcazione, a separare cio' che rientra da cio' che no. */
+.backlog-table tr.forecast-highlight td { background: #e3f6ea; }
+.backlog-table tr.forecast-highlight input,
+.backlog-table tr.forecast-highlight textarea,
+.backlog-table tr.forecast-highlight select { background: #e3f6ea; }
+.backlog-table tr.forecast-highlight:hover td { background: #cdeed7; }
+.backlog-table tr.forecast-cutoff-label-row td {
+  padding: 3px 8px;
+  background: var(--success);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  border-bottom: none;
+}
 
 .badge {
   display: inline-block;

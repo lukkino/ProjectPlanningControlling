@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 backend/data/*.db
 backend/.env
+backend/uvicorn.log
 
 # Node / frontend
 frontend/node_modules/

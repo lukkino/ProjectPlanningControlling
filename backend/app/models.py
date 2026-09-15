@@ -28,6 +28,10 @@ class Project(Base):
     estimated_budget_hours: Mapped[float] = mapped_column(Float, default=0)
     estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
     jira_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Link al Change Order (sezione Documents), globale per il progetto, con
+    # testo alternativo opzionale da mostrare al posto dell'URL.
+    change_order_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    change_order_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

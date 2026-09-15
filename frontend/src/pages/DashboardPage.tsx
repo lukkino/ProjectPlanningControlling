@@ -3,6 +3,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { api } from '../api/client'
 import { BudgetLinesCard } from '../components/BudgetLinesCard'
 import { PhasesCard } from '../components/PhasesCard'
+import { formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
@@ -39,7 +40,7 @@ export function DashboardPage() {
   })
 
   const chartData = (snapshots ?? []).map((s) => ({
-    date: s.snapshot_date,
+    date: formatIsoDate(s.snapshot_date) ?? s.snapshot_date,
     completamento: s.pbi_total ? Math.round(((s.pbi_done ?? 0) / s.pbi_total) * 100) : null,
   }))
 
@@ -61,7 +62,7 @@ export function DashboardPage() {
             </span>
             {metrics?.completion_source === 'snapshot' && (
               <span className="muted" style={{ fontSize: 11 }}>
-                da snapshot del {metrics.last_snapshot_date}
+                da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
               </span>
             )}
           </div>
@@ -72,7 +73,7 @@ export function DashboardPage() {
             </span>
             {metrics?.logged_hours_source === 'snapshot' && (
               <span className="muted" style={{ fontSize: 11 }}>
-                da snapshot del {metrics.last_snapshot_date}
+                da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
               </span>
             )}
           </div>
