@@ -21,7 +21,7 @@ export function SnapshotsPage() {
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
   })
-  const { inScopeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
+  const { codefreezeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['snapshots', project.id] })
@@ -37,7 +37,7 @@ export function SnapshotsPage() {
       api.snapshots.create(project.id, {
         snapshot_date: new Date().toISOString().slice(0, 10),
         logged_hours: loggedHoursTotal,
-        pbi_total: inScopeCount,
+        pbi_total: codefreezeCount,
         pbi_done: doneCount,
       }),
     onSuccess: invalidate,

@@ -100,6 +100,11 @@ class BacklogItem(Base):
     # Campi di pianificazione, gestiti dall'utente (mai toccati dal sync)
     ready_for_refinement: Mapped[bool] = mapped_column(Boolean, default=False)
     in_scope: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Un item puo' essere in scope ma senza impatto diretto sul team di
+    # sviluppo (es. attivita' amministrative): questo flag permette di
+    # escluderlo dai totali PBI (Backlog, Snapshot, Forecasting) senza
+    # doverlo anche togliere dallo scope del progetto.
+    included_in_codefreeze: Mapped[bool] = mapped_column(Boolean, default=True)
     planned: Mapped[bool] = mapped_column(Boolean, default=False)
     planned_duration_days: Mapped[float | None] = mapped_column(Float, nullable=True)
     dev_estimate_hours: Mapped[float | None] = mapped_column(Float, nullable=True)

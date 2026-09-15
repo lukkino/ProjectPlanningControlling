@@ -30,6 +30,7 @@ export type BacklogItem = {
   last_synced_at: string | null
   ready_for_refinement: boolean
   in_scope: boolean
+  included_in_codefreeze: boolean
   planned: boolean
   planned_duration_days: number | null
   dev_estimate_hours: number | null

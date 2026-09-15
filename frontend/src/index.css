@@ -124,6 +124,27 @@ input, select, textarea {
 .stat .value { font-size: 26px; font-weight: 700; }
 .stat .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
+.stat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  flex: 0 0 auto;
+}
+.stat-chip .value { font-size: 22px; font-weight: 700; }
+.stat-chip .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.85; }
+.stat-chip.blue { background: #e6eefc; color: var(--primary-dark); }
+.stat-chip.violet { background: #ede7fb; color: #5b3fb0; }
+.stat-chip.green { background: #e3f6ea; color: var(--success); }
+.stat-chip.orange { background: #fff2df; color: var(--warning); }
+
 .tabs {
   display: flex;
   gap: 4px;

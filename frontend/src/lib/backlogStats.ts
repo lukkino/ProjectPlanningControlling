@@ -4,13 +4,25 @@ import type { BacklogItem } from '../api/types'
 // (default di #PBI Remaining su una nuova simulazione) e SnapshotsPage
 // (default di PBI totali/Done/ore loggate su un nuovo snapshot).
 export function countBacklogStats(items: BacklogItem[]) {
-  const inScopeItems = items.filter((i) => i.in_scope)
-  const doneCount = inScopeItems.filter((i) => i.status === 'Done').length
-  const remainingCount = inScopeItems.length - doneCount
+  // Due totali distinti perche' si usano per scopi diversi: "in scope" e'
+  // l'intero perimetro del progetto, "code freeze" e' il sottoinsieme che
+  // impatta davvero il team di sviluppo (in scope, ma non escluso col
+  // flag "Incluso in codefreeze"). Done/Rimanenti si basano sul secondo,
+  // perche' e' quello rilevante per l'avanzamento del team.
+  const totalInScopeCount = items.filter((i) => i.in_scope).length
+  const codefreezeItems = items.filter((i) => i.in_scope && i.included_in_codefreeze)
+  const doneCount = codefreezeItems.filter((i) => i.status === 'Done').length
+  const remainingCount = codefreezeItems.length - doneCount
   // Somma su TUTTI gli item (non solo in-scope), coerente con la stat "Ore
   // loggate" della Dashboard (backend/app/services/metrics.py).
   const loggedHoursTotal = items.reduce((sum, i) => sum + (i.logged_hours ?? 0), 0)
-  return { inScopeCount: inScopeItems.length, doneCount, remainingCount, loggedHoursTotal }
+  return {
+    totalInScopeCount,
+    codefreezeCount: codefreezeItems.length,
+    doneCount,
+    remainingCount,
+    loggedHoursTotal,
+  }
 }
 
 function hasLabel(labels: string | null, label: string): boolean {
@@ -31,7 +43,7 @@ export function countPlannedUnplannedDone(items: BacklogItem[], sinceDate: strin
   const plannedKeys: string[] = []
   const unplannedKeys: string[] = []
   for (const item of items) {
-    if (!item.in_scope || item.status !== 'Done' || !item.actual_finish) continue
+    if (!item.in_scope || !item.included_in_codefreeze || item.status !== 'Done' || !item.actual_finish) continue
     if (sinceDate && item.actual_finish < sinceDate) continue
     if (hasLabel(item.labels, 'oos')) unplannedKeys.push(item.jira_key)
     else if (hasLabel(item.labels, 'planned')) plannedKeys.push(item.jira_key)

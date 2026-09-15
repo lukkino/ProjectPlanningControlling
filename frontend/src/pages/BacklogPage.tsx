@@ -38,6 +38,7 @@ export function BacklogPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
+  const [onlyCodefreeze, setOnlyCodefreeze] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
@@ -141,6 +142,17 @@ export function BacklogPage() {
           type="checkbox"
           checked={item.in_scope}
           onChange={(e) => update.mutate({ id: item.id, data: { in_scope: e.target.checked } })}
+        />
+      ),
+    },
+    {
+      key: 'included_in_codefreeze',
+      label: 'Incluso in codefreeze',
+      render: (item) => (
+        <input
+          type="checkbox"
+          checked={item.included_in_codefreeze}
+          onChange={(e) => update.mutate({ id: item.id, data: { included_in_codefreeze: e.target.checked } })}
         />
       ),
     },
@@ -348,7 +360,7 @@ export function BacklogPage() {
     setDraggedCol(null)
   }
 
-  const { inScopeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
+  const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
 
   const availableTypes = Array.from(
     new Set((items ?? []).map((i) => i.issue_type).filter((t): t is string => !!t)),
@@ -367,7 +379,10 @@ export function BacklogPage() {
   }
 
   const visibleItems = (items ?? []).filter(
-    (i) => (!onlyInScope || i.in_scope) && (!i.issue_type || !hiddenTypes.has(i.issue_type)),
+    (i) =>
+      (!onlyInScope || i.in_scope) &&
+      (!onlyCodefreeze || i.included_in_codefreeze) &&
+      (!i.issue_type || !hiddenTypes.has(i.issue_type)),
   )
 
   const handleDrop = (targetId: number) => {
@@ -414,16 +429,20 @@ export function BacklogPage() {
         </button>
       </div>
 
-      <div className="grid-3" style={{ marginBottom: 16 }}>
-        <div className="stat">
-          <span className="value">{inScopeCount}</span>
+      <div className="stat-chips">
+        <div className="stat-chip blue">
+          <span className="value">{totalInScopeCount}</span>
           <span className="label">PBI in Scope</span>
         </div>
-        <div className="stat">
+        <div className="stat-chip violet">
+          <span className="value">{codefreezeCount}</span>
+          <span className="label">PBI in Code Freeze</span>
+        </div>
+        <div className="stat-chip green">
           <span className="value">{doneCount}</span>
           <span className="label">Done</span>
         </div>
-        <div className="stat">
+        <div className="stat-chip orange">
           <span className="value">{remainingCount}</span>
           <span className="label">Rimanenti (In Progress + To Do)</span>
         </div>
@@ -441,6 +460,11 @@ export function BacklogPage() {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
           Mostra solo item "In Scope"
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={onlyCodefreeze} onChange={(e) => setOnlyCodefreeze(e.target.checked)} />
+          Mostra solo item "Incluso in codefreeze"
         </label>
 
         {availableTypes.length > 0 && (

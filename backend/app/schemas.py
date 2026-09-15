@@ -62,6 +62,7 @@ class BacklogItemBase(BaseModel):
     priority_order: float = 0
     ready_for_refinement: bool = False
     in_scope: bool = True
+    included_in_codefreeze: bool = True
     planned: bool = False
     planned_duration_days: float | None = None
     dev_estimate_hours: float | None = None
@@ -85,6 +86,7 @@ class BacklogItemUpdate(BaseModel):
     priority_order: float | None = None
     ready_for_refinement: bool | None = None
     in_scope: bool | None = None
+    included_in_codefreeze: bool | None = None
     planned: bool | None = None
     planned_duration_days: float | None = None
     dev_estimate_hours: float | None = None
