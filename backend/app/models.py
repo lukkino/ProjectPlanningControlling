@@ -89,6 +89,12 @@ class BacklogItem(Base):
     # Campo custom Jira "Change Description": per i Bug sostituisce la
     # description standard nella colonna D dei documenti generati.
     change_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Campo custom Jira "Problem Cause": per i Bug in colonna D del Release
+    # Report generato.
+    problem_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Campo standard Jira "Components" (nomi separati da virgola): colonna F
+    # del Release Report generato.
+    components: Mapped[str | None] = mapped_column(String(255), nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     labels: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -109,6 +109,8 @@ class BacklogItem(BacklogItemBase):
     summary: str | None = None
     description: str | None = None
     change_description: str | None = None
+    problem_cause: str | None = None
+    components: str | None = None
     issue_type: str | None = None
     jira_status: str | None = None
     labels: str | None = None

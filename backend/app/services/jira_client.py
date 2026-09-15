@@ -45,6 +45,8 @@ class JiraIssue:
         implemented_by: list[dict] | None = None,
         description: str | None = None,
         change_description: str | None = None,
+        problem_cause: str | None = None,
+        components: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -64,6 +66,11 @@ class JiraIssue:
         # Bug va in colonna D dei documenti generati al posto della
         # description standard.
         self.change_description = change_description
+        # Campo custom Jira "Problem Cause" (customfield_10129) e campo
+        # standard "Components" (nomi uniti da virgola): usati nel Release
+        # Report generato.
+        self.problem_cause = problem_cause
+        self.components = components
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -116,8 +123,8 @@ def _fetch_status_dates(
 def _extract_implemented_by(issuelinks: list[dict]) -> list[dict]:
     """Task collegati a questa issue tramite un link "is implemented by"
     (l'issue corrente e' il lato inward: "questa issue e' implementata
-    da <Task>"). La fix version viene aggiunta in un secondo momento con
-    una query batch, qui e' sempre None."""
+    da <Task>"). Fix version/labels/components vengono aggiunti in un
+    secondo momento con una query batch, qui sono sempre None."""
     result = []
     for link in issuelinks:
         link_type = link.get("type", {})
@@ -128,6 +135,8 @@ def _extract_implemented_by(issuelinks: list[dict]) -> list[dict]:
                     "key": inward_issue.get("key"),
                     "summary": (inward_issue.get("fields") or {}).get("summary"),
                     "fix_version": None,
+                    "labels": None,
+                    "components": None,
                 }
             )
     return result
@@ -180,13 +189,16 @@ def _extract_description(description_adf: dict | None) -> str | None:
     return text or None
 
 
-def _fetch_fix_versions(client: httpx.Client, base_url: str, keys: list[str]) -> dict[str, str]:
-    """Una singola query batch (paginata se necessario) per le fix version
-    di un elenco di issue key, invece di una chiamata per issue."""
+def _fetch_task_details(client: httpx.Client, base_url: str, keys: list[str]) -> dict[str, dict]:
+    """Una singola query batch (paginata se necessario) per fix version,
+    labels e components di un elenco di issue key (i Task collegati via
+    "is implemented by"), invece di una chiamata per issue. Usato sia per
+    la colonna Fix Version dei Documents sia per "Fix Version + Label" /
+    "Components" del Release Report."""
     if not keys:
         return {}
 
-    fix_versions: dict[str, str] = {}
+    details: dict[str, dict] = {}
     unique_keys = sorted(set(keys))
 
     # "key in (...)" regge query molto lunghe, ma per sicurezza spezziamo
@@ -196,20 +208,26 @@ def _fetch_fix_versions(client: httpx.Client, base_url: str, keys: list[str]) ->
         jql = "key in (" + ", ".join(chunk) + ")"
         next_page_token: str | None = None
         while True:
-            payload = {"jql": jql, "maxResults": 100, "fields": ["fixVersions"]}
+            payload = {"jql": jql, "maxResults": 100, "fields": ["fixVersions", "labels", "components"]}
             if next_page_token:
                 payload["nextPageToken"] = next_page_token
             response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
             response.raise_for_status()
             data = response.json()
             for raw in data.get("issues", []):
-                versions = (raw.get("fields", {}) or {}).get("fixVersions") or []
-                fix_versions[raw.get("key")] = ", ".join(v.get("name", "") for v in versions) or None
+                f = raw.get("fields", {}) or {}
+                versions = f.get("fixVersions") or []
+                components = f.get("components") or []
+                details[raw.get("key")] = {
+                    "fix_version": ", ".join(v.get("name", "") for v in versions) or None,
+                    "labels": ";".join(f.get("labels") or []) or None,
+                    "components": ", ".join(c.get("name", "") for c in components) or None,
+                }
             next_page_token = data.get("nextPageToken")
             if not next_page_token or data.get("isLast", True):
                 break
 
-    return fix_versions
+    return details
 
 
 def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
@@ -224,6 +242,8 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
     # customfield_10130 = "Change Description", usato per i Bug al posto
     # della description standard nei documenti generati.
     CHANGE_DESCRIPTION_FIELD = "customfield_10130"
+    # customfield_10129 = "Problem Cause", usato nel Release Report generato.
+    PROBLEM_CAUSE_FIELD = "customfield_10129"
     fields = [
         "summary",
         "issuetype",
@@ -233,7 +253,9 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
         "parent",
         "issuelinks",
         "description",
+        "components",
         CHANGE_DESCRIPTION_FIELD,
+        PROBLEM_CAUSE_FIELD,
     ]
 
     issues: list[JiraIssue] = []
@@ -262,6 +284,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
                     parent = f.get("parent") or {}
                     implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
+                    components = ", ".join(c.get("name", "") for c in (f.get("components") or [])) or None
                     issues.append(
                         JiraIssue(
                             key=key,
@@ -277,6 +300,8 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             implemented_by=implemented_by,
                             description=_extract_description(f.get("description")),
                             change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
+                            problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
+                            components=components,
                         )
                     )
 
@@ -284,13 +309,16 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                 if not next_page_token or data.get("isLast", True):
                     break
 
-            # Una sola query batch per la fix version di tutti i Task
-            # collegati trovati, invece di una chiamata per task.
+            # Una sola query batch per fix version/labels/components di tutti
+            # i Task collegati trovati, invece di una chiamata per task.
             all_task_keys = [t["key"] for issue in issues for t in issue.implemented_by if t.get("key")]
-            fix_versions = _fetch_fix_versions(client, base_url, all_task_keys)
+            task_details = _fetch_task_details(client, base_url, all_task_keys)
             for issue in issues:
                 for task in issue.implemented_by:
-                    task["fix_version"] = fix_versions.get(task["key"])
+                    details = task_details.get(task["key"], {})
+                    task["fix_version"] = details.get("fix_version")
+                    task["labels"] = details.get("labels")
+                    task["components"] = details.get("components")
     except httpx.HTTPError as exc:
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 
