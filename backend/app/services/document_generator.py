@@ -26,6 +26,22 @@ DEV_MANAGER = "Alberto Vidili"
 
 CHANGE_ORDER_RE = re.compile(r"^CO(\d{4})-(\d+)$")
 
+# Stima dell'altezza riga in base alla lunghezza del testo in colonna D
+# (larghezza ~100 unita', wrap_text attivo nel template): non e' un calcolo
+# esatto (dipende da font/rendering), ma si avvicina a sufficienza per
+# rendere leggibile la description senza doverla ritagliare a mano.
+CHARS_PER_LINE = 95
+LINE_HEIGHT_PT = 14.5
+MIN_ROW_HEIGHT = 15.0
+MAX_ROW_HEIGHT = 409.0  # limite massimo di Excel per l'altezza di una riga
+
+
+def _estimate_row_height(text: str) -> float:
+    if not text:
+        return MIN_ROW_HEIGHT
+    lines = sum(max(1, -(-len(segment) // CHARS_PER_LINE)) for segment in text.split("\n"))
+    return max(MIN_ROW_HEIGHT, min(MAX_ROW_HEIGHT, lines * LINE_HEIGHT_PT))
+
 
 def build_document_id(project: models.Project, version: int) -> str:
     """"TIH-REA-PTBSYS-{anno CO}-{codice CO}.{versione}", stesso schema del
@@ -94,10 +110,22 @@ def generate_regression_analysis(project: models.Project) -> tuple[bytes, str]:
         row_idx = 3 + offset
         if row_idx > original_last_row:
             _copy_row_style(reg, 3, row_idx, max_col=12)
+
+        # Per i Bug la colonna D e' il campo Jira "Change Description"
+        # (customfield_10130), non la description standard del Bug.
+        if item.issue_type == "Bug":
+            # Nessun fallback su description/summary: se il campo Jira e'
+            # vuoto deve restare visibile come tale ("n.a."), per capire
+            # su quali Bug manca ancora la compilazione.
+            change_description = item.change_description or "n.a."
+        else:
+            change_description = item.description or item.summary or ""
+
         reg.cell(row=row_idx, column=1, value=change_order_code)
         reg.cell(row=row_idx, column=2, value=item.jira_key)
         reg.cell(row=row_idx, column=3, value=item.issue_type)
-        reg.cell(row=row_idx, column=4, value=item.description or item.summary or "")
+        reg.cell(row=row_idx, column=4, value=change_description)
+        reg.row_dimensions[row_idx].height = _estimate_row_height(change_description)
 
     # Righe del template rimaste vuote dopo l'ultimo item: eliminate del
     # tutto (non solo svuotate), cosi' la tabella finisce dove finiscono i

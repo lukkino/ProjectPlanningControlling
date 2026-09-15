@@ -86,6 +86,9 @@ class BacklogItem(Base):
     # Description completa (convertita da ADF a testo semplice), usata per
     # esempio nella colonna "Change Description" dei documenti generati.
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Campo custom Jira "Change Description": per i Bug sostituisce la
+    # description standard nella colonna D dei documenti generati.
+    change_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     labels: Mapped[str | None] = mapped_column(String(255), nullable=True)

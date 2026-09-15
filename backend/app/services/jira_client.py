@@ -44,6 +44,7 @@ class JiraIssue:
         parent_summary: str | None = None,
         implemented_by: list[dict] | None = None,
         description: str | None = None,
+        change_description: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -59,6 +60,10 @@ class JiraIssue:
         # implementano questa issue (link Jira "is implemented by").
         self.implemented_by = implemented_by or []
         self.description = description
+        # Campo custom Jira "Change Description" (customfield_10130): per i
+        # Bug va in colonna D dei documenti generati al posto della
+        # description standard.
+        self.change_description = change_description
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -216,7 +221,20 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
 
     base_url = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    fields = ["summary", "issuetype", "status", "labels", "timetracking", "parent", "issuelinks", "description"]
+    # customfield_10130 = "Change Description", usato per i Bug al posto
+    # della description standard nei documenti generati.
+    CHANGE_DESCRIPTION_FIELD = "customfield_10130"
+    fields = [
+        "summary",
+        "issuetype",
+        "status",
+        "labels",
+        "timetracking",
+        "parent",
+        "issuelinks",
+        "description",
+        CHANGE_DESCRIPTION_FIELD,
+    ]
 
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
@@ -258,6 +276,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             parent_summary=(parent.get("fields") or {}).get("summary"),
                             implemented_by=implemented_by,
                             description=_extract_description(f.get("description")),
+                            change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
                         )
                     )
 
