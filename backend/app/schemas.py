@@ -200,6 +200,7 @@ class ProjectBase(BaseModel):
     scope: str | None = None
     start_date: dt.date | None = None
     code_freeze_date: dt.date | None = None
+    dev_start_date: dt.date | None = None
     estimated_budget_hours: float = 0
     estimated_budget_material: float = 0
     jira_jql: str | None = None
@@ -216,6 +217,7 @@ class ProjectUpdate(BaseModel):
     scope: str | None = None
     start_date: dt.date | None = None
     code_freeze_date: dt.date | None = None
+    dev_start_date: dt.date | None = None
     estimated_budget_hours: float | None = None
     estimated_budget_material: float | None = None
     jira_jql: str | None = None

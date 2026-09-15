@@ -20,6 +20,11 @@ class Project(Base):
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     code_freeze_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
+    # solo l'avvio formale del progetto): usato in Forecasting per contare
+    # solo i PBI Done da quella data in poi quando si crea una nuova
+    # simulazione.
+    dev_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     estimated_budget_hours: Mapped[float] = mapped_column(Float, default=0)
     estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
     jira_jql: Mapped[str | None] = mapped_column(Text, nullable=True)

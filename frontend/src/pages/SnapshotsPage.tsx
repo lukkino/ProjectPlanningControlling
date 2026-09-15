@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Snapshot } from '../api/types'
+import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
 
 export function SnapshotsPage() {
@@ -11,6 +12,16 @@ export function SnapshotsPage() {
     queryKey: ['snapshots', project.id],
     queryFn: () => api.snapshots.list(project.id),
   })
+
+  // Stessa query cache di BacklogPage: serve solo a precompilare i totali
+  // di un nuovo snapshot con lo stato ATTUALE del backlog. Una volta creato,
+  // lo snapshot e' un valore congelato nel DB: non si ricalcola piu' da
+  // solo, resta com'e' finche' non lo modifichi tu a mano.
+  const { data: backlogItems } = useQuery({
+    queryKey: ['backlog', project.id],
+    queryFn: () => api.backlog.list(project.id),
+  })
+  const { inScopeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['snapshots', project.id] })
@@ -25,6 +36,9 @@ export function SnapshotsPage() {
     mutationFn: () =>
       api.snapshots.create(project.id, {
         snapshot_date: new Date().toISOString().slice(0, 10),
+        logged_hours: loggedHoursTotal,
+        pbi_total: inScopeCount,
+        pbi_done: doneCount,
       }),
     onSuccess: invalidate,
   })

@@ -13,8 +13,8 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
-import type { ForecastSimulation } from '../api/types'
-import { countBacklogStats } from '../lib/backlogStats'
+import type { ForecastSimulation, Project } from '../api/types'
+import { countBacklogStats, countPlannedUnplannedDone } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDateShort } from '../lib/forecastChart'
 import { useProjectContext } from './useProjectContext'
 
@@ -43,8 +43,17 @@ export function ForecastingPage() {
     queryFn: () => api.backlog.list(project.id),
   })
   const { remainingCount } = countBacklogStats(backlogItems ?? [])
+  const { planned: plannedDoneCount, unplanned: unplannedDoneCount } = countPlannedUnplannedDone(
+    backlogItems ?? [],
+    project.dev_start_date,
+  )
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['forecasting', project.id] })
+
+  const updateProject = useMutation({
+    mutationFn: (data: Partial<Project>) => api.projects.update(project.id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+  })
 
   const update = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<ForecastSimulation> }) => api.forecasting.update(id, data),
@@ -55,6 +64,9 @@ export function ForecastingPage() {
       api.forecasting.create(project.id, {
         simulation_date: new Date().toISOString().slice(0, 10),
         pbi_remaining: remainingCount,
+        pbi_done: plannedDoneCount + unplannedDoneCount,
+        planned_pbi_done: plannedDoneCount,
+        unplanned_pbi_done: unplannedDoneCount,
         code_freeze_deadline: project.code_freeze_date,
       }),
     onSuccess: invalidate,
@@ -93,7 +105,22 @@ export function ForecastingPage() {
             Simulazioni periodiche di throughput usate per proiettare la data di completamento del progetto.
           </span>
         </div>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+          <span className="muted">Inizio sviluppi effettivo</span>
+          <input
+            type="date"
+            defaultValue={project.dev_start_date ?? ''}
+            onBlur={(e) => {
+              const value = e.target.value || null
+              if (value !== project.dev_start_date) updateProject.mutate({ dev_start_date: value })
+            }}
+          />
+        </label>
       </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 12 }}>
+        Una nuova simulazione conta come Planned/Unplanned #PBI Done solo i PBI completati da questa data in poi
+        (label "planned" → Planned, label "oos" → Unplanned; se presenti entrambe vince "oos").
+      </p>
 
       <div className="table-wrap">
         <table className="forecast-table">
