@@ -122,16 +122,40 @@ export function ProjectsDashboardPage() {
     return aStart - bStart
   })
 
+  // Quante fasi ha il progetto con piu' segmenti: la legenda mostra solo le
+  // posizioni effettivamente usate da almeno un progetto, non tutta la
+  // palette.
+  const maxSegments = Math.max(0, ...rows.map((r) => Math.max(0, r.milestones.length - 1)))
+  const ordinal = (n: number) => (n === 1 ? '1ª' : n === 2 ? '2ª' : n === 3 ? '3ª' : `${n}ª`)
+
   return (
     <div>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Dashboard progetti</h3>
-        <p className="muted" style={{ marginTop: 0, marginBottom: 0 }}>
+        <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
           Panoramica di tutti i progetti: ogni barra va dalla data di inizio progetto alla fase di deployment/rilascio,
           passando per le fasi intermedie, per individuare sovrapposizioni e date di rilascio vicine. Il colore segue
           la posizione della fase nella sequenza del progetto (1ª, 2ª, 3ª...), non un nome fisso: passa il mouse su un
           segmento per vedere la fase e le date esatte. La linea rossa tratteggiata indica la data odierna.
         </p>
+        {maxSegments > 0 && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            {Array.from({ length: maxSegments }).map((_, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 3,
+                    background: PHASE_COLORS[i % PHASE_COLORS.length],
+                    display: 'inline-block',
+                  }}
+                />
+                <span className="muted">{ordinal(i + 1)} fase</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card">
