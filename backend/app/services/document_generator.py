@@ -26,6 +26,9 @@ QUALITY_MANAGER = "Stefania Ingrosso"
 DEV_MANAGER = "Alberto Vidili"
 
 CHANGE_ORDER_RE = re.compile(r"^CO(\d{4})-(\d+)$")
+# Codice del Release Report: sempre lo stesso (non dipende dal Change
+# Order), e' anche il nome con cui il file va salvato.
+RELEASE_REPORT_CODE = "TIH-RR-PTBSYS"
 # Codice incremento (es. "PTBSYS-03-003") incorporato nel nome del progetto
 # ("ProTube Increment PTBSYS-03-003"), usato nel titolo della Cover del
 # Release Report (indipendente dal Change Order corrente).
@@ -48,16 +51,16 @@ def _estimate_row_height(text: str) -> float:
     return max(MIN_ROW_HEIGHT, min(MAX_ROW_HEIGHT, lines * LINE_HEIGHT_PT))
 
 
-def build_document_id(project: models.Project, version: int, prefix: str = "TIH-REA-PTBSYS") -> str:
-    """"{prefix}-{anno CO}-{codice CO}.{versione}", stesso schema del numero
-    di documento che compare nell'header di stampa del template (es.
-    "TIH-REA-PTBSYS-2026-0129.1" per CO2026-0129). Ricade su project.code se
-    il Change Order non e' nel formato "CO<anno>-<codice>"."""
+def build_document_id(project: models.Project, version: int) -> str:
+    """"TIH-REA-PTBSYS-{anno CO}-{codice CO}.{versione}", stesso schema del
+    numero di documento che compare nell'header di stampa del template
+    (es. "TIH-REA-PTBSYS-2026-0129.1" per CO2026-0129). Ricade su
+    project.code se il Change Order non e' nel formato "CO<anno>-<codice>"."""
     match = CHANGE_ORDER_RE.match((project.change_order_label or "").strip())
     if match:
         year, code = match.groups()
-        return f"{prefix}-{year}-{code}.{version}"
-    return f"{prefix.replace('-PTBSYS', '')}-{project.code}.{version}"
+        return f"TIH-REA-PTBSYS-{year}-{code}.{version}"
+    return f"TIH-REA-{project.code}.{version}"
 
 
 def _increment_code(project: models.Project) -> str:
@@ -168,12 +171,20 @@ def generate_release_report(project: models.Project) -> tuple[bytes, str]:
     """Release Report: come la Regression Analysis ma limitata ai Bug in
     scope (non le Story) piu' una riga per ogni Task collegato via "is
     implemented by" a qualunque Story/Bug in scope (flatten di
-    implemented_by_json, gia' usato dalla pagina Documents)."""
+    implemented_by_json, gia' usato dalla pagina Documents).
+
+    Restituisce (contenuto, nome file senza estensione): per il Release
+    Report il nome file e' sempre "TIH-RR-PTBSYS", senza Change Order ne'
+    versione."""
     wb = openpyxl.load_workbook(TEMPLATES_DIR / "release_report_template.xlsx")
     cover = wb["Cover"]
 
+    # A differenza della Regression Analysis, il Release Report non e' legato
+    # a un Change Order: e' un documento unico del sistema, sempre salvato
+    # come "TIH-RR-PTBSYS.xlsx". La versione compare solo nel numero di
+    # documento (titolo e header di stampa), non nel nome del file.
     version = 1
-    document_id = build_document_id(project, version, prefix="TIH-RR-PTBSYS")
+    document_id = f"{RELEASE_REPORT_CODE}.{version}"
     # Codice incremento (es. "PTBSYS-03-003"), indipendente dal Change
     # Order: usato nel titolo della Cover e come "Version" dei Bug in
     # colonna G (stesso schema osservato nel template originale, dove la
@@ -251,4 +262,4 @@ def generate_release_report(project: models.Project) -> tuple[bytes, str]:
 
     buffer = BytesIO()
     wb.save(buffer)
-    return buffer.getvalue(), document_id
+    return buffer.getvalue(), RELEASE_REPORT_CODE

@@ -16,8 +16,8 @@ def _get_project_or_404(db: Session, project_id: int) -> models.Project:
     return project
 
 
-def _xlsx_response(content: bytes, document_id: str) -> Response:
-    filename = f"{document_id}.xlsx"
+def _xlsx_response(content: bytes, filename_stem: str) -> Response:
+    filename = f"{filename_stem}.xlsx"
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -28,12 +28,12 @@ def _xlsx_response(content: bytes, document_id: str) -> Response:
 @router.get("/api/projects/{project_id}/documents/regression-analysis")
 def download_regression_analysis(project_id: int, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
-    content, document_id = generate_regression_analysis(project)
-    return _xlsx_response(content, document_id)
+    content, filename_stem = generate_regression_analysis(project)
+    return _xlsx_response(content, filename_stem)
 
 
 @router.get("/api/projects/{project_id}/documents/release-report")
 def download_release_report(project_id: int, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
-    content, document_id = generate_release_report(project)
-    return _xlsx_response(content, document_id)
+    content, filename_stem = generate_release_report(project)
+    return _xlsx_response(content, filename_stem)
