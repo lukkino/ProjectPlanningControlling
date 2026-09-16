@@ -409,9 +409,27 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     cover["D12"] = PROJECT_MANAGER
     cover["D13"] = QUALITY_MANAGER
     cover["D17"] = DEV_MANAGER
+
+    # B15/B17 nel template hanno testo condizionale ("only for...") in un
+    # colore diverso (arancione) da B13: essendo sempre applicabili a
+    # questo progetto, riportiamo solo il nome del ruolo con lo stesso
+    # font "normale" di B13.
+    normal_font = copy(cover["B13"].font)
+    cover["B15"] = "Product Manager"
+    cover["B15"].font = copy(normal_font)
+    cover["B17"] = "Product Development Manager"
+    cover["B17"].font = copy(normal_font)
+
     cover.cell(row=PPR_REVISION_ROW, column=1, value=version)
     cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
     cover.cell(row=PPR_REVISION_ROW, column=4, value=revision_text)
+
+    # Ruoli non applicabili a questo progetto (Head of Development per
+    # progetti AP, Medical Affairs, Third Party): rimossi dalla Cover.
+    # Ordine decrescente per non invalidare gli indici delle righe
+    # successive da eliminare.
+    for row in (22, 21, 18):
+        cover.delete_rows(row, 1)
 
     for sheet in wb.worksheets:
         sheet.oddHeader.right.text = document_id
