@@ -458,6 +458,10 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     cover["B19"] = "Head of SW & Integrated System"
     cover["B19"].font = copy(normal_font)
     cover["D19"] = HEAD_OF_SW_INTEGRATED_SYSTEM
+    # A differenza delle altre righe firmatario, nel template D19 non e'
+    # unita a F19 (probabile disallineamento del template originale): la
+    # uniamo qui, il testo eredita l'allineamento gia' centrato di D19.
+    cover.merge_cells("D19:F19")
     cover["B20"] = "Head of Mechatronics"
     cover["B20"].font = copy(normal_font)
     cover["D20"] = HEAD_OF_MECHATRONICS
