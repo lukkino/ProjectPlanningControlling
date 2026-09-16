@@ -18,12 +18,16 @@ ISSUE_TYPE_ORDER = {"Story": 0, "Bug": 1}
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# "ProTube System" e i tre firmatari sono valori fissi per questa linea di
+# "ProTube System" e i firmatari sono valori fissi per questa linea di
 # prodotto (non cambiano da progetto a progetto).
 SYSTEM_NAME = "ProTube System"
 PROJECT_MANAGER = "Luca Contini"
 QUALITY_MANAGER = "Stefania Ingrosso"
 DEV_MANAGER = "Alberto Vidili"
+# Firmatari specifici della Cover Planning/Execution/Deployment/Release to
+# Market Review (ruoli diversi da quelli della Regression Analysis).
+PRODUCT_COMPLIANCE_ENGINEER_SENIOR = "Francesca Marchese"
+PRODUCT_MANAGER_TTP = "Antimo Bianco"
 
 CHANGE_ORDER_RE = re.compile(r"^CO(\d{4})-(\d+)$")
 # Codice del Release Report: sempre lo stesso (non dipende dal Change
@@ -407,16 +411,18 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     cover = wb["Cover"]
     cover["D5"] = f"{config['title_word']}\n {SYSTEM_NAME} - Increment {increment}"
     cover["D12"] = PROJECT_MANAGER
-    cover["D13"] = QUALITY_MANAGER
+    normal_font = copy(cover["B13"].font)
+    cover["B13"] = "Product Compliance Engineer Senior"
+    cover["D13"] = PRODUCT_COMPLIANCE_ENGINEER_SENIOR
     cover["D17"] = DEV_MANAGER
 
     # B15/B17 nel template hanno testo condizionale ("only for...") in un
     # colore diverso (arancione) da B13: essendo sempre applicabili a
     # questo progetto, riportiamo solo il nome del ruolo con lo stesso
     # font "normale" di B13.
-    normal_font = copy(cover["B13"].font)
-    cover["B15"] = "Product Manager"
+    cover["B15"] = "Product Manager TTP"
     cover["B15"].font = copy(normal_font)
+    cover["D15"] = PRODUCT_MANAGER_TTP
     cover["B17"] = "Product Development Manager"
     cover["B17"].font = copy(normal_font)
 
