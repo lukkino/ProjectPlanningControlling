@@ -10,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 
 import openpyxl
+from openpyxl.utils.cell import get_column_letter, range_boundaries
 
 from app import models
 
@@ -28,6 +29,8 @@ DEV_MANAGER = "Alberto Vidili"
 # Market Review (ruoli diversi da quelli della Regression Analysis).
 PRODUCT_COMPLIANCE_ENGINEER_SENIOR = "Francesca Marchese"
 PRODUCT_MANAGER_TTP = "Antimo Bianco"
+HEAD_OF_SW_INTEGRATED_SYSTEM = "Elisa Simoncini"
+HEAD_OF_MECHATRONICS = "n.a."
 
 CHANGE_ORDER_RE = re.compile(r"^CO(\d{4})-(\d+)$")
 # Codice del Release Report: sempre lo stesso (non dipende dal Change
@@ -135,6 +138,33 @@ def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
         dst.alignment = copy(src.alignment)
     if ws.row_dimensions[src_row].height:
         ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
+
+
+def _delete_rows_preserving_merges(ws, rows_to_delete: list[int]) -> None:
+    """ws.delete_rows() chiamato piu' volte per righe non contigue lascia a
+    volte celle unite non aggiornate (bug osservato in openpyxl 3.1.5:
+    alcuni merge non vengono spostati e finiscono per coprire celle di
+    un'altra riga, rendendole di fatto non scrivibili). Per sicurezza
+    smerge tutto, elimina le righe, poi ricrea le unioni nelle posizioni
+    corrette (le righe eliminate stesse non vengono ovviamente ricreate)."""
+    original_merges = [str(m) for m in ws.merged_cells.ranges]
+    for rng in original_merges:
+        ws.unmerge_cells(rng)
+
+    for row in sorted(rows_to_delete, reverse=True):
+        ws.delete_rows(row, 1)
+
+    deleted = set(rows_to_delete)
+    for rng in original_merges:
+        min_col, min_row, max_col, max_row = range_boundaries(rng)
+        if min_row in deleted:
+            continue  # la riga (e la sua unione) e' stata eliminata
+        new_min_row = min_row - sum(1 for r in deleted if r < min_row)
+        new_max_row = max_row - sum(1 for r in deleted if r < max_row)
+        new_rng = (
+            f"{get_column_letter(min_col)}{new_min_row}:{get_column_letter(max_col)}{new_max_row}"
+        )
+        ws.merge_cells(new_rng)
 
 
 def _find_last_revision_row(cover) -> tuple[int, int | None, str | None]:
@@ -425,17 +455,21 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     cover["D15"] = PRODUCT_MANAGER_TTP
     cover["B17"] = "Product Development Manager"
     cover["B17"].font = copy(normal_font)
+    cover["B19"] = "Head of SW & Integrated System"
+    cover["B19"].font = copy(normal_font)
+    cover["D19"] = HEAD_OF_SW_INTEGRATED_SYSTEM
+    cover["B20"] = "Head of Mechatronics"
+    cover["B20"].font = copy(normal_font)
+    cover["D20"] = HEAD_OF_MECHATRONICS
 
     cover.cell(row=PPR_REVISION_ROW, column=1, value=version)
     cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
     cover.cell(row=PPR_REVISION_ROW, column=4, value=revision_text)
 
-    # Ruoli non applicabili a questo progetto (Head of Development per
-    # progetti AP, Medical Affairs, Third Party): rimossi dalla Cover.
-    # Ordine decrescente per non invalidare gli indici delle righe
-    # successive da eliminare.
-    for row in (22, 21, 18):
-        cover.delete_rows(row, 1)
+    # Ruoli non applicabili a questo progetto (Production Quality Manager
+    # per la Pre-Serie Launch Review, Head of Development per progetti AP,
+    # Medical Affairs, Third Party): rimossi dalla Cover.
+    _delete_rows_preserving_merges(cover, [22, 21, 18, 16])
 
     for sheet in wb.worksheets:
         sheet.oddHeader.right.text = document_id
