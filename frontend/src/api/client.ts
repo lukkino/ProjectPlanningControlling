@@ -6,6 +6,7 @@ import type {
   Phase,
   Project,
   ProjectDetail,
+  ReleaseReportMeta,
   Snapshot,
   SyncResult,
 } from './types'
@@ -34,6 +35,40 @@ const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined })
 const put = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+
+// Scarica un file binario (es. un documento .xlsx generato dal backend),
+// leggendo il nome file dall'header Content-Disposition invece di doverlo
+// ricostruire lato client.
+async function downloadFile(path: string, params?: Record<string, string>): Promise<{ blob: Blob; filename: string }> {
+  const qs = params ? `?${new URLSearchParams(params).toString()}` : ''
+  const response = await fetch(`/api${path}${qs}`)
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      const body = await response.json()
+      detail = body.detail ?? detail
+    } catch {
+      // ignore, keep statusText
+    }
+    throw new Error(detail)
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  const filename = match ? match[1] : 'download.xlsx'
+  const blob = await response.blob()
+  return { blob, filename }
+}
+
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 
 export const api = {
   projects: {
@@ -80,5 +115,15 @@ export const api = {
       post<ForecastSimulation>(`/projects/${projectId}/forecasting`, data),
     update: (id: number, data: Partial<ForecastSimulation>) => put<ForecastSimulation>(`/forecasting/${id}`, data),
     remove: (id: number) => del(`/forecasting/${id}`),
+  },
+  documents: {
+    regressionAnalysis: (projectId: number) => downloadFile(`/projects/${projectId}/documents/regression-analysis`),
+    releaseReportMeta: (projectId: number) =>
+      request<ReleaseReportMeta>(`/projects/${projectId}/documents/release-report/meta`),
+    releaseReport: (projectId: number, version: number, revisionText: string) =>
+      downloadFile(`/projects/${projectId}/documents/release-report`, {
+        version: String(version),
+        revision_text: revisionText,
+      }),
   },
 }

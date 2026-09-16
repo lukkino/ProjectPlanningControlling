@@ -1,11 +1,85 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment, useState } from 'react'
-import { api } from '../api/client'
+import { Fragment, useEffect, useState } from 'react'
+import { api, saveBlob } from '../api/client'
 import type { ImplementedByTask, Project } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
 const DOCUMENT_TYPES = ['Story', 'Bug']
+
+function ReleaseReportGenerator({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient()
+  const metaQuery = useQuery({
+    queryKey: ['release-report-meta', projectId],
+    queryFn: () => api.documents.releaseReportMeta(projectId),
+  })
+  const [version, setVersion] = useState('')
+  const [revisionText, setRevisionText] = useState('')
+  const [touched, setTouched] = useState(false)
+
+  // Precompila i campi con i valori proposti (versione incrementale,
+  // ultimo testo di revisione) solo finche' l'utente non li ha modificati
+  // a mano: dopo la generazione la query viene invalidata cosi' i valori
+  // proposti ripartono aggiornati per la prossima volta.
+  useEffect(() => {
+    if (metaQuery.data && !touched) {
+      setVersion(String(metaQuery.data.next_version))
+      setRevisionText(metaQuery.data.last_revision_text)
+    }
+  }, [metaQuery.data, touched])
+
+  const generate = useMutation({
+    mutationFn: () => {
+      const versionNumber = Number(version) || metaQuery.data?.next_version || 1
+      return api.documents.releaseReport(projectId, versionNumber, revisionText)
+    },
+    onSuccess: ({ blob, filename }) => {
+      saveBlob(blob, filename)
+      setTouched(false)
+      queryClient.invalidateQueries({ queryKey: ['release-report-meta', projectId] })
+    },
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320, flex: 1 }}>
+      <strong style={{ fontSize: 14 }}>Release Report</strong>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="form-row" style={{ marginBottom: 0, width: 100 }}>
+          <label>Versione</label>
+          <input
+            type="number"
+            value={version}
+            onChange={(e) => {
+              setVersion(e.target.value)
+              setTouched(true)
+            }}
+          />
+        </div>
+        <div className="form-row" style={{ marginBottom: 0, flex: 1, minWidth: 260 }}>
+          <label>Descrizione revisione</label>
+          <textarea
+            rows={2}
+            value={revisionText}
+            onChange={(e) => {
+              setRevisionText(e.target.value)
+              setTouched(true)
+            }}
+          />
+        </div>
+      </div>
+      <div>
+        <button
+          className="btn btn-primary"
+          disabled={!metaQuery.data || generate.isPending}
+          onClick={() => generate.mutate()}
+        >
+          {generate.isPending ? 'Generazione…' : '⬇ Scarica Release Report (.xlsx)'}
+        </button>
+      </div>
+      {generate.isError && <span style={{ color: 'var(--danger, #c0392b)' }}>{(generate.error as Error).message}</span>}
+    </div>
+  )
+}
 
 function parseImplementedBy(json: string | null): ImplementedByTask[] {
   if (!json) return []
@@ -30,6 +104,11 @@ export function DocumentsPage() {
   const updateProject = useMutation({
     mutationFn: (data: Partial<Project>) => api.projects.update(project.id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+  })
+
+  const downloadRegressionAnalysis = useMutation({
+    mutationFn: () => api.documents.regressionAnalysis(project.id),
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
   })
 
   const toggleType = (type: string) => {
@@ -97,13 +176,17 @@ export function DocumentsPage() {
         <p className="muted" style={{ marginTop: 0 }}>
           Compila Cover e foglio dati dei template Excel ufficiali con i dati di questo progetto.
         </p>
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          <a href={`/api/projects/${project.id}/documents/regression-analysis`} className="btn btn-primary">
-            ⬇ Scarica Regression Analysis (.xlsx)
-          </a>
-          <a href={`/api/projects/${project.id}/documents/release-report`} className="btn btn-primary">
-            ⬇ Scarica Release Report (.xlsx)
-          </a>
+        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div>
+            <button
+              className="btn btn-primary"
+              disabled={downloadRegressionAnalysis.isPending}
+              onClick={() => downloadRegressionAnalysis.mutate()}
+            >
+              {downloadRegressionAnalysis.isPending ? 'Generazione…' : '⬇ Scarica Regression Analysis (.xlsx)'}
+            </button>
+          </div>
+          <ReleaseReportGenerator projectId={project.id} />
         </div>
       </div>
 

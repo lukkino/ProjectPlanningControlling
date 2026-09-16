@@ -252,6 +252,13 @@ class ProjectDetail(ProjectListItem):
     budget_lines: list[BudgetLine] = []
 
 
+# ---------- Documents ----------
+
+class ReleaseReportMeta(BaseModel):
+    next_version: int
+    last_revision_text: str
+
+
 # ---------- Dashboard ----------
 
 class DashboardMetrics(BaseModel):

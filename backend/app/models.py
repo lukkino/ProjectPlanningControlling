@@ -32,6 +32,12 @@ class Project(Base):
     # testo alternativo opzionale da mostrare al posto dell'URL.
     change_order_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     change_order_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ultima versione e ultimo testo di revisione usati per generare il
+    # Release Report da questa app: propongono i valori di default (versione
+    # incrementata, testo da modificare) alla generazione successiva. None
+    # finche' il progetto non ha mai generato un Release Report da qui.
+    rr_last_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rr_last_revision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

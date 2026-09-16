@@ -1,6 +1,5 @@
 """Genera documenti Excel formali a partire da template statici (cartella
-app/templates/). Per ora solo il foglio Cover della Regression Analysis; il
-foglio dati verra' popolato in un passo successivo."""
+app/templates/): Regression Analysis e Release Report."""
 
 import datetime as dt
 import json
@@ -33,6 +32,12 @@ RELEASE_REPORT_CODE = "TIH-RR-PTBSYS"
 # ("ProTube Increment PTBSYS-03-003"), usato nel titolo della Cover del
 # Release Report (indipendente dal Change Order corrente).
 INCREMENT_RE = re.compile(r"PTBSYS-\d{2}-\d{3}")
+
+# Riga di intestazione ("Version"/"Export executor"/"Change Description") e
+# prima riga dati della tabella Revision History nella Cover del Release
+# Report: layout fisso del template, come le altre celle hardcoded qui sopra.
+REVISION_HISTORY_HEADER_ROW = 28
+REVISION_HISTORY_FIRST_ROW = 29
 
 # Stima dell'altezza riga in base alla lunghezza del testo in colonna D
 # (larghezza ~100 unita', wrap_text attivo nel template): non e' un calcolo
@@ -85,6 +90,56 @@ def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
         dst.alignment = copy(src.alignment)
     if ws.row_dimensions[src_row].height:
         ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
+
+
+def _find_last_revision_row(cover) -> tuple[int, int | None, str | None]:
+    """Scorre la tabella Revision History della Cover del Release Report
+    (colonna B=Version, E=Change Description) finche' trova righe compilate.
+    Restituisce (indice ultima riga con dati o header se vuota, ultima
+    versione, ultimo testo)."""
+    row = REVISION_HISTORY_FIRST_ROW
+    last_row = REVISION_HISTORY_HEADER_ROW
+    last_version: int | None = None
+    last_text: str | None = None
+    while cover.cell(row=row, column=2).value not in (None, ""):
+        last_row = row
+        last_version = cover.cell(row=row, column=2).value
+        last_text = cover.cell(row=row, column=5).value
+        row += 1
+    return last_row, last_version, last_text
+
+
+def get_release_report_defaults(project: models.Project) -> tuple[int, str]:
+    """Prossima versione proposta (ultima usata + 1) e testo di revisione
+    proposto (ultimo usato, da modificare) per il form di generazione del
+    Release Report. Finche' il progetto non ha mai generato un Release
+    Report da questa app, ricade sull'ultima riga gia' presente nel
+    template (che nel documento reale contiene lo storico di tutti gli
+    incrementi passati)."""
+    if project.rr_last_version is not None and project.rr_last_revision_note is not None:
+        return project.rr_last_version + 1, project.rr_last_revision_note
+
+    wb = openpyxl.load_workbook(TEMPLATES_DIR / "release_report_template.xlsx", read_only=True)
+    try:
+        _, last_version, last_text = _find_last_revision_row(wb["Cover"])
+    finally:
+        wb.close()
+    return (last_version or 0) + 1, last_text or ""
+
+
+def _append_revision_row(cover, version: int, author: str, text: str) -> None:
+    """Aggiunge una riga alla tabella Revision History della Cover, subito
+    dopo l'ultima gia' presente, copiandone stile e merge (colonne C:D ed
+    E:J unite come nelle righe esistenti)."""
+    last_row, _, _ = _find_last_revision_row(cover)
+    new_row = last_row + 1
+    _copy_row_style(cover, last_row, new_row, max_col=10)
+    cover.cell(row=new_row, column=2, value=version)
+    cover.cell(row=new_row, column=3, value=author)
+    cover.cell(row=new_row, column=5, value=text)
+    cover.merge_cells(f"C{new_row}:D{new_row}")
+    cover.merge_cells(f"E{new_row}:J{new_row}")
+    cover.row_dimensions[new_row].height = _estimate_row_height(text)
 
 
 def generate_regression_analysis(project: models.Project) -> tuple[bytes, str]:
@@ -167,11 +222,16 @@ def _fix_version_label(version: str | None, labels: str | None) -> str:
     return f"Version: {version or 'n.a.'}, Labels: {labels or 'n.a.'}"
 
 
-def generate_release_report(project: models.Project) -> tuple[bytes, str]:
+def generate_release_report(project: models.Project, version: int, revision_text: str) -> tuple[bytes, str]:
     """Release Report: come la Regression Analysis ma limitata ai Bug in
     scope (non le Story) piu' una riga per ogni Task collegato via "is
     implemented by" a qualunque Story/Bug in scope (flatten di
     implemented_by_json, gia' usato dalla pagina Documents).
+
+    version e revision_text arrivano dal form di conferma mostrato
+    all'utente (proposti di default da get_release_report_defaults, ma
+    modificabili): version diventa il nuovo numero di documento e
+    revision_text la nuova riga della Revision History della Cover.
 
     Restituisce (contenuto, nome file senza estensione): per il Release
     Report il nome file e' sempre "TIH-RR-PTBSYS", senza Change Order ne'
@@ -183,7 +243,6 @@ def generate_release_report(project: models.Project) -> tuple[bytes, str]:
     # a un Change Order: e' un documento unico del sistema, sempre salvato
     # come "TIH-RR-PTBSYS.xlsx". La versione compare solo nel numero di
     # documento (titolo e header di stampa), non nel nome del file.
-    version = 1
     document_id = f"{RELEASE_REPORT_CODE}.{version}"
     # Codice incremento (es. "PTBSYS-03-003"), indipendente dal Change
     # Order: usato nel titolo della Cover e come "Version" dei Bug in
@@ -191,6 +250,7 @@ def generate_release_report(project: models.Project) -> tuple[bytes, str]:
     # versione dei Bug e' l'incremento corrente, non il CO).
     increment = _increment_code(project)
     cover["C3"] = f"RELEASE REPORT\n PROTUBE SYSTEM\nIncrement {increment} "
+    _append_revision_row(cover, version, PROJECT_MANAGER, revision_text)
 
     report = wb["Release Report"]
     report["A2"] = f"Release Report - {SYSTEM_NAME} - {document_id}"

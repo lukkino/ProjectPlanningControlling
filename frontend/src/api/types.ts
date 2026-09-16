@@ -114,6 +114,11 @@ export type ProjectDetail = Project & {
   budget_lines: BudgetLine[]
 }
 
+export type ReleaseReportMeta = {
+  next_version: number
+  last_revision_text: string
+}
+
 export type DashboardMetrics = {
   backlog_total: number
   backlog_in_scope: number
