@@ -16,6 +16,7 @@ const emptyForm = {
   scope: '',
   start_date: '',
   code_freeze_date: '',
+  planned_finish_date: '',
   estimated_budget_hours: 0,
   estimated_budget_material: 0,
   jira_jql: '',
@@ -31,6 +32,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
           scope: project.scope ?? '',
           start_date: project.start_date ?? '',
           code_freeze_date: project.code_freeze_date ?? '',
+          planned_finish_date: project.planned_finish_date ?? '',
           estimated_budget_hours: project.estimated_budget_hours,
           estimated_budget_material: project.estimated_budget_material,
           jira_jql: project.jira_jql ?? '',
@@ -46,6 +48,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
         ...form,
         start_date: form.start_date || null,
         code_freeze_date: form.code_freeze_date || null,
+        planned_finish_date: form.planned_finish_date || null,
         scope: form.scope || null,
         jira_jql: form.jira_jql || null,
       }
@@ -87,7 +90,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
           <label>Scope</label>
           <textarea rows={2} value={form.scope} onChange={(e) => set('scope', e.target.value)} />
         </div>
-        <div className="grid-2">
+        <div className="grid-3">
           <div className="form-row">
             <label>Project start</label>
             <input type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
@@ -98,6 +101,14 @@ export function ProjectFormModal({ project, onClose }: Props) {
               type="date"
               value={form.code_freeze_date}
               onChange={(e) => set('code_freeze_date', e.target.value)}
+            />
+          </div>
+          <div className="form-row">
+            <label>Planned finish</label>
+            <input
+              type="date"
+              value={form.planned_finish_date}
+              onChange={(e) => set('planned_finish_date', e.target.value)}
             />
           </div>
         </div>

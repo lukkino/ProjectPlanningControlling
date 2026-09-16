@@ -46,6 +46,7 @@ export function ProjectLayout() {
             Stato: {project.status}
             {project.start_date && ` · Inizio: ${formatIsoDate(project.start_date)}`}
             {project.code_freeze_date && ` · Code freeze: ${formatIsoDate(project.code_freeze_date)}`}
+            {project.planned_finish_date && ` · Planned finish: ${formatIsoDate(project.planned_finish_date)}`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

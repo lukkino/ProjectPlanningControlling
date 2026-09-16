@@ -99,6 +99,7 @@ export type Project = {
   scope: string | null
   start_date: string | null
   code_freeze_date: string | null
+  planned_finish_date: string | null
   dev_start_date: string | null
   estimated_budget_hours: number
   estimated_budget_material: number

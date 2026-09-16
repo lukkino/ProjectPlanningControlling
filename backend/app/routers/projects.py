@@ -6,6 +6,12 @@ from app.database import get_db
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
+# Fasi standard che ogni progetto deve avere almeno (create automaticamente
+# alla creazione del progetto, senza date): la Dashboard progetti (Gantt) si
+# affida a questo elenco fisso per colorare/etichettare le fasi in modo
+# uniforme tra progetti diversi.
+STANDARD_PHASE_NAMES = ["Kick-off", "Planning", "Execution", "Deployment", "Release to Market"]
+
 
 def _get_project_or_404(db: Session, project_id: int) -> models.Project:
     project = db.get(models.Project, project_id)
@@ -23,6 +29,9 @@ def list_projects(db: Session = Depends(get_db)):
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
     project = models.Project(**payload.model_dump())
     db.add(project)
+    db.flush()  # assegna project.id, serve per le fasi sotto
+    for order, name in enumerate(STANDARD_PHASE_NAMES, start=1):
+        db.add(models.Phase(project_id=project.id, name=name, order=order))
     db.commit()
     db.refresh(project)
     return project

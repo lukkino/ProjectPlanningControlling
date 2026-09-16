@@ -20,6 +20,10 @@ class Project(Base):
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     code_freeze_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Data di fine pianificata del progetto (rilascio finale/Release to
+    # Market), distinta dal code freeze: usata anche nella Dashboard
+    # progetti per il Gantt.
+    planned_finish_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
     # solo l'avvio formale del progetto): usato in Forecasting per contare
     # solo i PBI Done da quella data in poi quando si crea una nuova

@@ -4,15 +4,25 @@ import { api } from '../api/client'
 import type { Phase, Project } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
 
-// Palette categorica validata del progetto (vedi skill data-viz): il colore
-// segue la POSIZIONE della fase nella sequenza di un progetto (1a, 2a, 3a...),
-// non un nome di fase fisso - progetti diversi possono chiamare le fasi in
-// modo diverso, ma la sequenza (Kick-off -> ... -> Deployment) e' comparabile
-// in ordine.
+// Palette categorica validata del progetto (vedi skill data-viz). Ogni
+// progetto ha sempre almeno queste 5 fasi standard (create automaticamente
+// alla creazione, vedi backend STANDARD_PHASE_NAMES): il colore segue quindi
+// il NOME della fase, uguale in tutti i progetti - non solo la posizione,
+// visto che ora la sequenza e' garantita coerente. Eventuali fasi extra
+// aggiunte a mano ricadono sui colori restanti della palette.
 const PHASE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
+const STANDARD_PHASES = ['Kick-off', 'Planning', 'Execution', 'Deployment', 'Release to Market']
+const PHASE_COLOR_BY_NAME: Record<string, string> = Object.fromEntries(
+  STANDARD_PHASES.map((name, i) => [name, PHASE_COLORS[i]]),
+)
+
+function colorForPhase(name: string, fallbackIndex: number): string {
+  return PHASE_COLOR_BY_NAME[name] ?? PHASE_COLORS[(STANDARD_PHASES.length + fallbackIndex) % PHASE_COLORS.length]
+}
 
 const ROW_LABEL_WIDTH = 220
 const MIN_LABEL_GAP_PCT = 6 // sotto questa distanza in %, un'etichetta data viene saltata per evitare sovrapposizioni
+const MIN_PHASE_NAME_WIDTH_PCT = 7 // sotto questa larghezza il nome fase non ci sta leggibile dentro il segmento
 
 type Milestone = { label: string; epoch: number }
 
@@ -22,7 +32,13 @@ function buildMilestones(project: Project, phases: Phase[]): Milestone[] {
   if (startEpoch !== null) milestones.push({ label: 'Inizio progetto', epoch: startEpoch })
 
   for (const phase of [...phases].sort((a, b) => a.order - b.order)) {
-    const epoch = dateStrToEpochDays(phase.planned_date) ?? dateStrToEpochDays(phase.actual_date)
+    let epoch = dateStrToEpochDays(phase.planned_date) ?? dateStrToEpochDays(phase.actual_date)
+    // "Release to Market" senza data propria: ricade sulla data di fine
+    // pianificata del progetto, se impostata (stesso concetto, spesso non
+    // ancora tracciato come fase a se' stante).
+    if (epoch === null && phase.name === 'Release to Market') {
+      epoch = dateStrToEpochDays(project.planned_finish_date)
+    }
     if (epoch !== null) milestones.push({ label: phase.name, epoch })
   }
 
@@ -122,11 +138,14 @@ export function ProjectsDashboardPage() {
     return aStart - bStart
   })
 
-  // Quante fasi ha il progetto con piu' segmenti: la legenda mostra solo le
-  // posizioni effettivamente usate da almeno un progetto, non tutta la
-  // palette.
-  const maxSegments = Math.max(0, ...rows.map((r) => Math.max(0, r.milestones.length - 1)))
-  const ordinal = (n: number) => (n === 1 ? '1ª' : n === 2 ? '2ª' : n === 3 ? '3ª' : `${n}ª`)
+  // Legenda: i nomi di fase effettivamente presenti in almeno un progetto,
+  // fasi standard per prime (nell'ordine canonico) seguite da eventuali fasi
+  // extra aggiunte a mano, ciascuna col colore che verra' usato nelle barre.
+  const usedNames = new Set(rows.flatMap((r) => r.milestones.slice(1).map((m) => m.label)))
+  const legendNames = [
+    ...STANDARD_PHASES.filter((n) => usedNames.has(n)),
+    ...[...usedNames].filter((n) => !STANDARD_PHASES.includes(n)).sort(),
+  ]
 
   return (
     <div>
@@ -134,24 +153,24 @@ export function ProjectsDashboardPage() {
         <h3 style={{ marginTop: 0 }}>Dashboard progetti</h3>
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
           Panoramica di tutti i progetti: ogni barra va dalla data di inizio progetto alla fase di deployment/rilascio,
-          passando per le fasi intermedie, per individuare sovrapposizioni e date di rilascio vicine. Il colore segue
-          la posizione della fase nella sequenza del progetto (1ª, 2ª, 3ª...), non un nome fisso: passa il mouse su un
-          segmento per vedere la fase e le date esatte. La linea rossa tratteggiata indica la data odierna.
+          passando per le fasi intermedie (sempre almeno Kick-off, Planning, Execution, Deployment, Release to
+          Market), per individuare sovrapposizioni e date di rilascio vicine. Passa il mouse su un segmento per
+          vedere la fase e le date esatte. La linea rossa tratteggiata indica la data odierna.
         </p>
-        {maxSegments > 0 && (
+        {legendNames.length > 0 && (
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            {Array.from({ length: maxSegments }).map((_, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            {legendNames.map((name, i) => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <span
                   style={{
                     width: 12,
                     height: 12,
                     borderRadius: 3,
-                    background: PHASE_COLORS[i % PHASE_COLORS.length],
+                    background: colorForPhase(name, i),
                     display: 'inline-block',
                   }}
                 />
-                <span className="muted">{ordinal(i + 1)} fase</span>
+                <span className="muted">{name}</span>
               </div>
             ))}
           </div>
@@ -256,7 +275,7 @@ export function ProjectsDashboardPage() {
                           width: 10,
                           height: 10,
                           borderRadius: '50%',
-                          background: PHASE_COLORS[0],
+                          background: colorForPhase(milestones[0].label, 0),
                           transform: 'translate(-50%, -50%)',
                         }}
                       />
@@ -276,10 +295,28 @@ export function ProjectsDashboardPage() {
                             width: `${width}%`,
                             top: 8,
                             bottom: 8,
-                            background: PHASE_COLORS[i % PHASE_COLORS.length],
+                            background: colorForPhase(next.label, i),
                             borderRadius: 4,
+                            overflow: 'hidden',
+                            display: 'flex',
+                            alignItems: 'center',
                           }}
-                        />
+                        >
+                          {width >= MIN_PHASE_NAME_WIDTH_PCT && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: 'white',
+                                padding: '0 5px',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {next.label}
+                            </span>
+                          )}
+                        </div>
                       )
                     })}
 
