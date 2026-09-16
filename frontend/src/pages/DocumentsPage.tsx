@@ -59,7 +59,10 @@ function DocumentDownloadButton({
         {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
       </button>
       {open && (
-        <div className="modal-overlay" onClick={close}>
+        // onMouseDown (non onClick): un drag di selezione testo che parte
+        // dentro il modale e termina fuori chiuderebbe il popup per
+        // errore, perche' il click va all'antenato comune (l'overlay).
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>{label}</h3>
             <div className="form-row">
@@ -137,7 +140,8 @@ function PprDownloadButton({
         {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
       </button>
       {open && (
-        <div className="modal-overlay" onClick={close}>
+        // onMouseDown (non onClick): vedi commento in DocumentDownloadButton.
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>{label}</h3>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

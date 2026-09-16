@@ -63,7 +63,15 @@ export function ProjectFormModal({ project, onClose }: Props) {
     setForm((f) => ({ ...f, [key]: value }))
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    // onMouseDown (non onClick) con controllo target===currentTarget: un
+    // trascinamento per selezionare testo che parte dentro il modale e
+    // termina fuori (es. selezionare il numero in "Budget ore stimate")
+    // farebbe altrimenti scattare la chiusura, perche' il click viene
+    // attribuito all'antenato comune (l'overlay) tra dove parte il drag e
+    // dove finisce. Il mousedown invece e' valutato subito, sull'elemento
+    // sotto il cursore in quel momento: chiude solo se il press e' partito
+    // proprio sull'overlay (click "fuori" genuino).
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{project ? 'Modifica progetto' : 'Nuovo progetto'}</h3>
 
