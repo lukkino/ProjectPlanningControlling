@@ -125,5 +125,6 @@ export const api = {
         version: String(version),
         revision_text: revisionText,
       }),
+    ppr: (projectId: number, docType: string) => downloadFile(`/projects/${projectId}/documents/ppr/${docType}`),
   },
 }

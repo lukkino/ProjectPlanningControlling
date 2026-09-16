@@ -1,5 +1,6 @@
 """Genera documenti Excel formali a partire da template statici (cartella
-app/templates/): Regression Analysis e Release Report."""
+app/templates/): Regression Analysis, Release Report e i verbali di review
+Planning/Execution/Deployment/Release to Market."""
 
 import datetime as dt
 import json
@@ -38,6 +39,46 @@ INCREMENT_RE = re.compile(r"PTBSYS-\d{2}-\d{3}")
 # Report: layout fisso del template, come le altre celle hardcoded qui sopra.
 REVISION_HISTORY_HEADER_ROW = 28
 REVISION_HISTORY_FIRST_ROW = 29
+
+# Master corporate (blank) da cui si generano i verbali di review
+# Planning/Execution/Deployment/Release to Market: a differenza di REA/RR
+# non c'e' uno storico reale da cui dedurre il formato, e i fogli di review
+# sono verbali di riunione da compilare a mano (partecipanti, minute,
+# domande SI/NO che richiedono giudizio umano) quindi generiamo solo la
+# Cover, lasciando le review cosi' come sono nel template.
+PPR_TEMPLATE_FILENAME = "ppr_template.xlsx"
+
+# Ogni tipo di documento include cumulativamente le review dei tipi
+# precedenti, oltre a Task Guideline/Cover (sempre in testa) e Action Items
+# (sempre in coda), nell'ordine originale del master.
+PPR_DOCUMENT_TYPES = {
+    "planning": {
+        "reviews": ["Planning Review"],
+        "title_word": "PLANNING REVIEW",
+        "filename": "TIH-PLANNING-PTBSYS",
+    },
+    "execution": {
+        "reviews": ["Planning Review", "Execution Review"],
+        "title_word": "EXECUTION REVIEW",
+        "filename": "TIH-EXECUTION-PTBSYS",
+    },
+    "deployment": {
+        "reviews": ["Planning Review", "Execution Review", "Deployment Review"],
+        "title_word": "DEPLOYMENT REVIEW",
+        "filename": "TIH-DEPLOYMENT-PTBSYS",
+    },
+    "release-to-market": {
+        "reviews": ["Planning Review", "Execution Review", "Deployment Review", "Release to Market Review"],
+        "title_word": "RELEASE TO MARKET REVIEW",
+        "filename": "TIH-RELEASE_TO_MARKET-PTBSYS",
+    },
+}
+PPR_LEADING_SHEETS = ["Task Guideline", "Cover"]
+PPR_TRAILING_SHEETS = ["Action Items"]
+# Riga della Cover in cui scrivere la prima (e unica, per ora) voce della
+# Revision History: A=Version, B:C=Author (merged), D:L=Change Description
+# (merged) - stesso layout osservato nel master.
+PPR_REVISION_ROW = 31
 
 # Stima dell'altezza riga in base alla lunghezza del testo in colonna D
 # (larghezza ~100 unita', wrap_text attivo nel template): non e' un calcolo
@@ -323,3 +364,45 @@ def generate_release_report(project: models.Project, version: int, revision_text
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue(), RELEASE_REPORT_CODE
+
+
+def generate_ppr_document(project: models.Project, doc_type: str) -> tuple[bytes, str]:
+    """Planning/Execution/Deployment/Release to Market Review: dal master
+    "Copy of MOD-PPR.xlsx" tiene solo i fogli richiesti per questo tipo di
+    documento (cumulativi: ogni tipo include anche le review dei tipi
+    precedenti) e compila la Cover (titolo, 3 firmatari fissi, prima riga
+    di Revision History). I fogli di review restano com'erano nel
+    template: sono verbali di riunione da compilare a mano (partecipanti,
+    minute, domande SI/NO che richiedono giudizio umano), non dati
+    ricavabili dal Backlog Jira come per REA/RR.
+
+    A differenza del Release Report, questo e' un documento nuovo per ogni
+    incremento (non uno storico cumulativo di sistema): si parte sempre
+    dalla versione 1, senza bisogno di un contatore persistito."""
+    config = PPR_DOCUMENT_TYPES[doc_type]
+    wb = openpyxl.load_workbook(TEMPLATES_DIR / PPR_TEMPLATE_FILENAME)
+
+    keep = set(PPR_LEADING_SHEETS) | set(config["reviews"]) | set(PPR_TRAILING_SHEETS)
+    for name in list(wb.sheetnames):
+        if name not in keep:
+            del wb[name]
+
+    increment = _increment_code(project)
+    filename_stem = config["filename"]
+    document_id = f"{filename_stem}.1"
+
+    cover = wb["Cover"]
+    cover["D5"] = f"{config['title_word']}\n {SYSTEM_NAME} - Increment {increment}"
+    cover["D12"] = PROJECT_MANAGER
+    cover["D13"] = QUALITY_MANAGER
+    cover["D17"] = DEV_MANAGER
+    cover.cell(row=PPR_REVISION_ROW, column=1, value=1)
+    cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
+    cover.cell(row=PPR_REVISION_ROW, column=4, value=f"Initial issue for increment {increment}")
+
+    for sheet in wb.worksheets:
+        sheet.oddHeader.right.text = document_id
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue(), filename_stem

@@ -7,6 +7,25 @@ import { useProjectContext } from './useProjectContext'
 
 const DOCUMENT_TYPES = ['Story', 'Bug']
 
+const PPR_TYPES: { docType: string; label: string }[] = [
+  { docType: 'planning', label: 'Planning Review' },
+  { docType: 'execution', label: 'Execution Review' },
+  { docType: 'deployment', label: 'Deployment Review' },
+  { docType: 'release-to-market', label: 'Release to Market Review' },
+]
+
+function PprDownloadButton({ projectId, docType, label }: { projectId: number; docType: string; label: string }) {
+  const download = useMutation({
+    mutationFn: () => api.documents.ppr(projectId, docType),
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+  })
+  return (
+    <button className="btn btn-primary" disabled={download.isPending} onClick={() => download.mutate()}>
+      {download.isPending ? 'Generazione…' : `⬇ Scarica ${label} (.xlsx)`}
+    </button>
+  )
+}
+
 function ReleaseReportGenerator({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient()
   const metaQuery = useQuery({
@@ -187,6 +206,17 @@ export function DocumentsPage() {
             </button>
           </div>
           <ReleaseReportGenerator projectId={project.id} />
+        </div>
+
+        <p className="muted" style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
+          Planning/Execution/Deployment/Release to Market Review: ogni documento include cumulativamente le review dei
+          tipi precedenti. Viene compilata solo la Cover (titolo, firmatari, prima revisione); i fogli di review
+          restano come nel template, da compilare a mano durante la riunione.
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {PPR_TYPES.map(({ docType, label }) => (
+            <PprDownloadButton key={docType} projectId={project.id} docType={docType} label={label} />
+          ))}
         </div>
       </div>
 

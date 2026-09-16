@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.services.document_generator import (
+    PPR_DOCUMENT_TYPES,
+    generate_ppr_document,
     generate_regression_analysis,
     generate_release_report,
     get_release_report_defaults,
@@ -65,4 +67,13 @@ def download_release_report(
     project.rr_last_revision_note = resolved_text
     db.commit()
 
+    return _xlsx_response(content, filename_stem)
+
+
+@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}")
+def download_ppr_document(project_id: int, doc_type: str, db: Session = Depends(get_db)):
+    if doc_type not in PPR_DOCUMENT_TYPES:
+        raise HTTPException(status_code=404, detail=f"Tipo documento sconosciuto: {doc_type}")
+    project = _get_project_or_404(db, project_id)
+    content, filename_stem = generate_ppr_document(project, doc_type)
     return _xlsx_response(content, filename_stem)
