@@ -14,6 +14,9 @@ export function Sidebar() {
       <button className="btn btn-primary" onClick={() => setShowNewProject(true)}>
         + Nuovo progetto
       </button>
+      <NavLink to="/projects-dashboard" className={({ isActive }) => `btn${isActive ? ' active' : ''}`} style={{ marginTop: 8, textAlign: 'center' }}>
+        📊 Dashboard progetti
+      </NavLink>
       <nav className="project-list">
         {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun progetto ancora.</p>}
         {projects?.map((p) => (

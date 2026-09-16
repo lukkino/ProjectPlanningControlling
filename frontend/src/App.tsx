@@ -5,10 +5,11 @@ import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
 import { ProjectLayout } from './pages/ProjectLayout'
+import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents', '/projects-dashboard']
 
 export default function App() {
   const location = useLocation()
@@ -20,6 +21,7 @@ export default function App() {
       <main className={isWide ? 'main-content main-content--wide' : 'main-content'}>
         <Routes>
           <Route path="/" element={<WelcomePage />} />
+          <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="backlog" element={<BacklogPage />} />

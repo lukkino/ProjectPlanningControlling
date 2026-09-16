@@ -6,11 +6,14 @@
 const EPOCH_UTC = Date.UTC(2020, 0, 1)
 const MS_PER_DAY = 86_400_000
 
-function toEpochDays(d: Date): number {
+// Esportate (oltre che usate internamente qui) per chi deve costruire tick
+// di calendario (es. mesi) a partire dallo stesso asse epoch-days, come la
+// Dashboard progetti.
+export function toEpochDays(d: Date): number {
   return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - EPOCH_UTC) / MS_PER_DAY)
 }
 
-function epochDaysToDate(days: number): Date {
+export function epochDaysToDate(days: number): Date {
   return new Date(EPOCH_UTC + days * MS_PER_DAY)
 }
 
