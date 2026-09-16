@@ -32,6 +32,13 @@ function workingDaysBetween(startStr: string | null, endStr: string | null): num
   return count
 }
 
+// Ordinamento esplicito (facoltativo) per stato, dall'alto verso il basso:
+// Done, In Progress, To Do. Alternativo al drag&drop manuale (che si basa
+// sull'ordine di priorita'), non lo sostituisce: quando attivo il
+// trascinamento delle righe viene disabilitato, perche' l'ordine visibile
+// non corrisponde piu' a priority_order.
+const STATUS_SORT_RANK: Record<string, number> = { Done: 0, 'In Progress': 1, 'To Do': 2 }
+
 const COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v1'
 const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
 const MIN_COLUMN_WIDTH = 32
@@ -80,6 +87,7 @@ export function BacklogPage() {
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
+  const [sortByStatus, setSortByStatus] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
@@ -449,6 +457,12 @@ export function BacklogPage() {
       (!i.issue_type || !hiddenTypes.has(i.issue_type)),
   )
 
+  // Ordinamento per stato su richiesta esplicita: sort stabile, a parita' di
+  // stato l'ordine di priorita' esistente resta invariato.
+  const displayItems = sortByStatus
+    ? [...visibleItems].sort((a, b) => (STATUS_SORT_RANK[a.status] ?? 99) - (STATUS_SORT_RANK[b.status] ?? 99))
+    : visibleItems
+
   const handleDrop = (targetId: number) => {
     if (draggedId === null || draggedId === targetId) {
       setDraggedId(null)
@@ -540,6 +554,11 @@ export function BacklogPage() {
           Mostra solo item "Incluso in codefreeze"
         </label>
 
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Disabilita il riordinamento manuale mentre e' attivo">
+          <input type="checkbox" checked={sortByStatus} onChange={(e) => setSortByStatus(e.target.checked)} />
+          Ordina per stato (Done, In Progress, To Do)
+        </label>
+
         {availableTypes.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="muted">Tipo:</span>
@@ -595,16 +614,16 @@ export function BacklogPage() {
             </tr>
           </thead>
           <tbody>
-            {visibleItems.map((item) => (
+            {displayItems.map((item) => (
               <Fragment key={item.id}>
               <tr
                 className={forecastHighlightIds.has(item.id) ? 'forecast-highlight' : undefined}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => handleDrop(item.id)}
+                onDragOver={(e) => !sortByStatus && e.preventDefault()}
+                onDrop={() => !sortByStatus && handleDrop(item.id)}
                 style={draggedId === item.id ? { opacity: 0.4 } : undefined}
               >
                 <td
-                  draggable
+                  draggable={!sortByStatus}
                   onDragStart={(e) => {
                     setDraggedId(item.id)
                     e.dataTransfer.setData('text/plain', String(item.id))
@@ -612,7 +631,8 @@ export function BacklogPage() {
                   }}
                   onDragEnd={() => setDraggedId(null)}
                   className="drag-handle"
-                  title="Trascina per riordinare"
+                  style={sortByStatus ? { opacity: 0.3, cursor: 'default' } : undefined}
+                  title={sortByStatus ? 'Riordinamento manuale disabilitato con "Ordina per stato" attivo' : 'Trascina per riordinare'}
                 >
                   ⠿
                 </td>
@@ -634,7 +654,7 @@ export function BacklogPage() {
               )}
               </Fragment>
             ))}
-            {visibleItems.length === 0 && (
+            {displayItems.length === 0 && (
               <tr>
                 <td colSpan={orderedColumns.length + 2} className="muted">
                   Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
