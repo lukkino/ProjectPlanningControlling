@@ -465,6 +465,7 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     cover["B20"] = "Head of Mechatronics"
     cover["B20"].font = copy(normal_font)
     cover["D20"] = HEAD_OF_MECHATRONICS
+    cover.merge_cells("D20:F20")
 
     cover.cell(row=PPR_REVISION_ROW, column=1, value=version)
     cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
