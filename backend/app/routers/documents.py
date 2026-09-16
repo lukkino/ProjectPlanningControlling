@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -10,6 +12,7 @@ from app.services.document_generator import (
     generate_regression_analysis,
     generate_release_report,
     get_ppr_defaults,
+    get_ppr_deliverables_defaults,
     get_regression_analysis_defaults,
     get_release_report_defaults,
 )
@@ -99,12 +102,16 @@ def _get_ppr_type_or_404(doc_type: str) -> None:
         raise HTTPException(status_code=404, detail=f"Tipo documento sconosciuto: {doc_type}")
 
 
-@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/meta", response_model=schemas.DocumentRevisionMeta)
+@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/meta", response_model=schemas.PprDocumentMeta)
 def ppr_meta(project_id: int, doc_type: str, db: Session = Depends(get_db)):
     _get_ppr_type_or_404(doc_type)
     project = _get_project_or_404(db, project_id)
     next_version, last_revision_text = get_ppr_defaults(project, doc_type)
-    return schemas.DocumentRevisionMeta(next_version=next_version, last_revision_text=last_revision_text)
+    return schemas.PprDocumentMeta(
+        next_version=next_version,
+        last_revision_text=last_revision_text,
+        deliverables=get_ppr_deliverables_defaults(),
+    )
 
 
 @router.get("/api/projects/{project_id}/documents/ppr/{doc_type}")
@@ -113,10 +120,17 @@ def download_ppr_document(
     doc_type: str,
     version: int | None = Query(None),
     revision_text: str | None = Query(None),
+    deliverables: str | None = Query(None, description="Lista JSON di {row, included, filename, notes}"),
     db: Session = Depends(get_db),
 ):
     _get_ppr_type_or_404(doc_type)
     project = _get_project_or_404(db, project_id)
     resolved_version, resolved_text = _resolve(version, revision_text, get_ppr_defaults(project, doc_type))
-    content, filename_stem = generate_ppr_document(project, doc_type, resolved_version, resolved_text)
+    try:
+        deliverables_list = json.loads(deliverables) if deliverables else None
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Parametro deliverables non valido") from exc
+    content, filename_stem = generate_ppr_document(
+        project, doc_type, resolved_version, resolved_text, deliverables_list
+    )
     return _xlsx_response(content, filename_stem)

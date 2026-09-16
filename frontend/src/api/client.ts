@@ -5,6 +5,8 @@ import type {
   DocumentRevisionMeta,
   ForecastSimulation,
   Phase,
+  PprDeliverable,
+  PprDocumentMeta,
   Project,
   ProjectDetail,
   Snapshot,
@@ -132,11 +134,18 @@ export const api = {
         revision_text: revisionText,
       }),
     pprMeta: (projectId: number, docType: string) =>
-      request<DocumentRevisionMeta>(`/projects/${projectId}/documents/ppr/${docType}/meta`),
-    ppr: (projectId: number, docType: string, version: number, revisionText: string) =>
+      request<PprDocumentMeta>(`/projects/${projectId}/documents/ppr/${docType}/meta`),
+    ppr: (
+      projectId: number,
+      docType: string,
+      version: number,
+      revisionText: string,
+      deliverables: PprDeliverable[],
+    ) =>
       downloadFile(`/projects/${projectId}/documents/ppr/${docType}`, {
         version: String(version),
         revision_text: revisionText,
+        deliverables: JSON.stringify(deliverables),
       }),
   },
 }

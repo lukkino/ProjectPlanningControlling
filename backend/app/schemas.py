@@ -262,6 +262,22 @@ class DocumentRevisionMeta(BaseModel):
     last_revision_text: str
 
 
+class PprDeliverable(BaseModel):
+    """Una riga della sezione "Deliverable Check" del foglio Planning
+    Review: row/name sono fissi (letti dal template), included/filename/
+    notes sono scelti dall'utente nel popup di generazione."""
+
+    row: int
+    name: str
+    included: bool = True
+    filename: str = ""
+    notes: str = ""
+
+
+class PprDocumentMeta(DocumentRevisionMeta):
+    deliverables: list[PprDeliverable]
+
+
 # ---------- Dashboard ----------
 
 class DashboardMetrics(BaseModel):

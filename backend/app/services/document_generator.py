@@ -87,6 +87,32 @@ PPR_TRAILING_SHEETS = ["Action Items"]
 # (merged) - stesso layout osservato nel master.
 PPR_REVISION_ROW = 31
 
+# Sezione "Deliverable Check" del foglio Planning Review (presente in tutti
+# e 4 i tipi di documento, essendo il foglio Planning Review sempre
+# incluso): un elenco fisso di documenti di progetto, ciascuno con colonna
+# A=nome (statica, gia' nel template), F=File (merged F:G, codice+versione
+# del documento), H=Note (merged H:J, motivo di non applicabilita' se non
+# consegnato). Riga per riga, popolata dal popup di generazione.
+PPR_DELIVERABLE_ROWS: list[tuple[int, str]] = [
+    (40, "User Needs"),
+    (41, "Product Qualification and Classification"),
+    (42, "Product Description"),
+    (43, "Change Order draft"),
+    (44, "Change Impact Assessment"),
+    (45, "Performance Evaluation Plan"),
+    (46, "Essential Requirement Checklist"),
+    (47, "Design Input"),
+    (48, "Risk Management Plan"),
+    (49, "Safety FMEA"),
+    (50, "Safety Risk Analysis"),
+    (51, "Security Risk Analysis"),
+    (52, "Product Lifecycle Risk Analysis"),
+    (53, "Production Process Risk Analysis"),
+    (54, "Criticality Matrix"),
+    (55, "Design FMEA"),
+    (56, "Other additional deliverable"),
+]
+
 # Stima dell'altezza riga in base alla lunghezza del testo in colonna D
 # (larghezza ~100 unita', wrap_text attivo nel template): non e' un calcolo
 # esatto (dipende da font/rendering), ma si avvicina a sufficienza per
@@ -417,15 +443,37 @@ def get_ppr_defaults(project: models.Project, doc_type: str) -> tuple[int, str]:
     return 1, f"Initial issue for increment {increment}"
 
 
-def generate_ppr_document(project: models.Project, doc_type: str, version: int, revision_text: str) -> tuple[bytes, str]:
+def get_ppr_deliverables_defaults() -> list[dict]:
+    """Elenco proposto (modificabile) per la sezione "Deliverable Check"
+    del popup di generazione: tutti inclusi di default, nome file e note
+    vuoti. Uguale per tutti e 4 i tipi di documento (la sezione vive sul
+    foglio Planning Review, sempre incluso)."""
+    return [
+        {"row": row, "name": name, "included": True, "filename": "", "notes": ""}
+        for row, name in PPR_DELIVERABLE_ROWS
+    ]
+
+
+def generate_ppr_document(
+    project: models.Project,
+    doc_type: str,
+    version: int,
+    revision_text: str,
+    deliverables: list[dict] | None = None,
+) -> tuple[bytes, str]:
     """Planning/Execution/Deployment/Release to Market Review: dal master
     "Copy of MOD-PPR.xlsx" tiene solo i fogli richiesti per questo tipo di
     documento (cumulativi: ogni tipo include anche le review dei tipi
     precedenti) e compila la Cover (titolo, 3 firmatari fissi, prima riga
-    di Revision History). I fogli di review restano com'erano nel
-    template: sono verbali di riunione da compilare a mano (partecipanti,
-    minute, domande SI/NO che richiedono giudizio umano), non dati
-    ricavabili dal Backlog Jira come per REA/RR."""
+    di Revision History) e, sul foglio Planning Review (sempre incluso),
+    la sezione "Deliverable Check" (righe 40-56): per ciascun documento,
+    scelto dal popup di generazione, se "included" scrive il nome file in
+    F e le note in H, altrimenti "N/A" in F e la nota (tipicamente il
+    motivo di non applicabilita') in H. I fogli di review restano
+    altrimenti com'erano nel template: sono verbali di riunione da
+    compilare a mano (partecipanti, minute, domande SI/NO che richiedono
+    giudizio umano), non dati ricavabili dal Backlog Jira come per
+    REA/RR."""
     config = PPR_DOCUMENT_TYPES[doc_type]
     wb = openpyxl.load_workbook(TEMPLATES_DIR / PPR_TEMPLATE_FILENAME)
 
@@ -475,6 +523,17 @@ def generate_ppr_document(project: models.Project, doc_type: str, version: int, 
     # per la Pre-Serie Launch Review, Head of Development per progetti AP,
     # Medical Affairs, Third Party): rimossi dalla Cover.
     _delete_rows_preserving_merges(cover, [22, 21, 18, 16])
+
+    planning_review = wb["Planning Review"]
+    for item in deliverables or []:
+        row = item.get("row")
+        if row is None:
+            continue
+        included = item.get("included", True)
+        filename = (item.get("filename") or "").strip()
+        notes = (item.get("notes") or "").strip()
+        planning_review.cell(row=row, column=6, value=filename if included else "N/A")
+        planning_review.cell(row=row, column=8, value=notes)
 
     for sheet in wb.worksheets:
         sheet.oddHeader.right.text = document_id

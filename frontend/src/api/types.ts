@@ -119,6 +119,18 @@ export type DocumentRevisionMeta = {
   last_revision_text: string
 }
 
+export type PprDeliverable = {
+  row: number
+  name: string
+  included: boolean
+  filename: string
+  notes: string
+}
+
+export type PprDocumentMeta = DocumentRevisionMeta & {
+  deliverables: PprDeliverable[]
+}
+
 export type DashboardMetrics = {
   backlog_total: number
   backlog_in_scope: number

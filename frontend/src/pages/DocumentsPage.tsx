@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
 import { api, saveBlob } from '../api/client'
-import type { DocumentRevisionMeta, ImplementedByTask, Project } from '../api/types'
+import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -69,6 +69,129 @@ function DocumentDownloadButton({
             <div className="form-row">
               <label>Descrizione revisione</label>
               <textarea rows={3} value={revisionText} onChange={(e) => setRevisionText(e.target.value)} />
+            </div>
+            {confirm.isError && <div className="error-banner">{(confirm.error as Error).message}</div>}
+            <div className="form-actions">
+              <button className="btn" onClick={close} disabled={confirm.isPending}>
+                Annulla
+              </button>
+              <button className="btn btn-primary" onClick={() => confirm.mutate()} disabled={confirm.isPending}>
+                {confirm.isPending ? 'Generazione…' : 'Genera e scarica'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// Come DocumentDownloadButton, ma con in piu' la sezione "Deliverable
+// Check" del foglio Planning Review (righe 40-56, sempre presente in
+// tutti e 4 i tipi di documento PPR): per ciascun documento, un flag
+// incluso/escluso, il nome file e una nota, che vanno a popolare
+// rispettivamente le colonne F e H (unite H:J) di quella riga.
+function PprDownloadButton({
+  projectId,
+  docType,
+  label,
+}: {
+  projectId: number
+  docType: string
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [version, setVersion] = useState('')
+  const [revisionText, setRevisionText] = useState('')
+  const [deliverables, setDeliverables] = useState<PprDeliverable[]>([])
+
+  const prepare = useMutation({
+    mutationFn: () => api.documents.pprMeta(projectId, docType),
+    onSuccess: (meta) => {
+      setVersion(String(meta.next_version))
+      setRevisionText(meta.last_revision_text)
+      setDeliverables(meta.deliverables)
+      setOpen(true)
+    },
+  })
+
+  const confirm = useMutation({
+    mutationFn: () => api.documents.ppr(projectId, docType, Number(version) || 1, revisionText, deliverables),
+    onSuccess: ({ blob, filename }) => {
+      saveBlob(blob, filename)
+      setOpen(false)
+    },
+  })
+
+  const close = () => {
+    if (!confirm.isPending) setOpen(false)
+  }
+
+  const updateDeliverable = (row: number, patch: Partial<PprDeliverable>) => {
+    setDeliverables((prev) => prev.map((d) => (d.row === row ? { ...d, ...patch } : d)))
+  }
+
+  return (
+    <>
+      <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
+        {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={close}>
+          <div className="modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>{label}</h3>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div className="form-row" style={{ width: 100 }}>
+                <label>Versione</label>
+                <input type="number" value={version} onChange={(e) => setVersion(e.target.value)} />
+              </div>
+              <div className="form-row" style={{ flex: 1, minWidth: 260 }}>
+                <label>Descrizione revisione</label>
+                <textarea rows={2} value={revisionText} onChange={(e) => setRevisionText(e.target.value)} />
+              </div>
+            </div>
+            <div className="form-row">
+              <label>Deliverable Check (foglio Planning Review)</label>
+              <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 28 }}></th>
+                      <th>Documento</th>
+                      <th style={{ width: 150 }}>Nome file</th>
+                      <th style={{ width: 200 }}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deliverables.map((d) => (
+                      <tr key={d.row}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={d.included}
+                            onChange={(e) => updateDeliverable(d.row, { included: e.target.checked })}
+                          />
+                        </td>
+                        <td style={{ whiteSpace: 'normal' }}>{d.name}</td>
+                        <td>
+                          <input
+                            value={d.filename}
+                            disabled={!d.included}
+                            placeholder={d.included ? 'es. FL-UN.1' : 'N/A'}
+                            onChange={(e) => updateDeliverable(d.row, { filename: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            value={d.notes}
+                            onChange={(e) => updateDeliverable(d.row, { notes: e.target.value })}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
             {confirm.isError && <div className="error-banner">{(confirm.error as Error).message}</div>}
             <div className="form-actions">
@@ -196,12 +319,7 @@ export function DocumentsPage() {
         </p>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           {PPR_TYPES.map(({ docType, label }) => (
-            <DocumentDownloadButton
-              key={docType}
-              label={label}
-              loadMeta={() => api.documents.pprMeta(project.id, docType)}
-              download={(version, revisionText) => api.documents.ppr(project.id, docType, version, revisionText)}
-            />
+            <PprDownloadButton key={docType} projectId={project.id} docType={docType} label={label} />
           ))}
         </div>
       </div>
