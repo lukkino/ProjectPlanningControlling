@@ -188,6 +188,17 @@ tbody tr:hover { background: var(--bg); }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 
+/* Backlog: tabella alta, l'intestazione deve restare visibile scorrendo.
+   overflow-x:auto da solo farebbe gia' di .table-wrap il contenitore di
+   scroll anche in verticale (regola CSS: se un asse non e' "visible",
+   l'altro asse "visible" diventa "auto"), ma senza un'altezza massima non
+   scorrerebbe mai al suo interno - lo sticky si aggancerebbe comunque a
+   *questo* contenitore (non alla pagina) e sparirebbe non appena il bordo
+   superiore di .table-wrap esce dal viewport scorrendo la pagina. Con
+   max-height + overflow-y:auto lo scroll avviene davvero dentro la tabella,
+   quindi l'intestazione sticky resta visibile come atteso. */
+.table-wrap--scroll { max-height: 65vh; overflow-y: auto; }
+
 .forecast-table { table-layout: fixed; width: 100%; }
 .forecast-table th {
   white-space: normal;
@@ -212,7 +223,12 @@ tbody tr:hover { background: var(--bg); }
      il totale supera lo schermo, e' .table-wrap a farla scorrere. */
 }
 .backlog-table--fixed th {
-  position: relative;
+  /* sticky (non solo relative): resta visibile scorrendo dentro l'area
+     tabella (vedi .table-wrap--scroll, il contenitore di scroll reale). */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
   white-space: normal;
   word-break: break-word;
   line-height: 1.25;

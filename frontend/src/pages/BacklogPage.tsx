@@ -553,7 +553,7 @@ export function BacklogPage() {
         )}
       </div>
 
-      <div className="table-wrap">
+      <div className="table-wrap table-wrap--scroll">
         <table className="backlog-table backlog-table--fixed">
           <colgroup>
             <col style={{ width: HANDLE_COLUMN_WIDTH }} />

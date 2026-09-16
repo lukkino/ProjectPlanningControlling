@@ -75,7 +75,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
     // sotto il cursore in quel momento: chiude solo se il press e' partito
     // proprio sull'overlay (click "fuori" genuino).
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
         <h3>{project ? 'Modifica progetto' : 'Nuovo progetto'}</h3>
 
         <div className="form-row">
