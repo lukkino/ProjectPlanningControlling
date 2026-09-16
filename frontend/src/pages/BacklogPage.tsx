@@ -79,7 +79,7 @@ export function BacklogPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
-  const [onlyCodefreeze, setOnlyCodefreeze] = useState(false)
+  const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
