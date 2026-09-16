@@ -254,7 +254,10 @@ class ProjectDetail(ProjectListItem):
 
 # ---------- Documents ----------
 
-class ReleaseReportMeta(BaseModel):
+class DocumentRevisionMeta(BaseModel):
+    """Versione e testo di revisione proposti (modificabili) per il popup
+    mostrato prima di scaricare un qualunque documento generato."""
+
     next_version: int
     last_revision_text: str
 

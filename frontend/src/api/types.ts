@@ -114,7 +114,7 @@ export type ProjectDetail = Project & {
   budget_lines: BudgetLine[]
 }
 
-export type ReleaseReportMeta = {
+export type DocumentRevisionMeta = {
   next_version: number
   last_revision_text: string
 }

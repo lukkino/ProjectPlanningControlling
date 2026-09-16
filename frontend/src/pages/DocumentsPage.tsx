@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useState } from 'react'
 import { api, saveBlob } from '../api/client'
-import type { ImplementedByTask, Project } from '../api/types'
+import type { DocumentRevisionMeta, ImplementedByTask, Project } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -14,89 +14,75 @@ const PPR_TYPES: { docType: string; label: string }[] = [
   { docType: 'release-to-market', label: 'Release to Market Review' },
 ]
 
-function PprDownloadButton({ projectId, docType, label }: { projectId: number; docType: string; label: string }) {
-  const download = useMutation({
-    mutationFn: () => api.documents.ppr(projectId, docType),
-    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
-  })
-  return (
-    <button className="btn btn-primary" disabled={download.isPending} onClick={() => download.mutate()}>
-      {download.isPending ? 'Generazione…' : `⬇ Scarica ${label} (.xlsx)`}
-    </button>
-  )
-}
-
-function ReleaseReportGenerator({ projectId }: { projectId: number }) {
-  const queryClient = useQueryClient()
-  const metaQuery = useQuery({
-    queryKey: ['release-report-meta', projectId],
-    queryFn: () => api.documents.releaseReportMeta(projectId),
-  })
+// Popup unico (stessa UI per tutti i documenti generati) per inserire
+// versione e testo di revisione prima del download: i valori proposti
+// (loadMeta) arrivano freschi dal backend ogni volta che si apre, cosi'
+// riflettono l'eventuale ultima generazione fatta (es. la RR incrementa il
+// proprio contatore lato server).
+function DocumentDownloadButton({
+  label,
+  loadMeta,
+  download,
+}: {
+  label: string
+  loadMeta: () => Promise<DocumentRevisionMeta>
+  download: (version: number, revisionText: string) => Promise<{ blob: Blob; filename: string }>
+}) {
+  const [open, setOpen] = useState(false)
   const [version, setVersion] = useState('')
   const [revisionText, setRevisionText] = useState('')
-  const [touched, setTouched] = useState(false)
 
-  // Precompila i campi con i valori proposti (versione incrementale,
-  // ultimo testo di revisione) solo finche' l'utente non li ha modificati
-  // a mano: dopo la generazione la query viene invalidata cosi' i valori
-  // proposti ripartono aggiornati per la prossima volta.
-  useEffect(() => {
-    if (metaQuery.data && !touched) {
-      setVersion(String(metaQuery.data.next_version))
-      setRevisionText(metaQuery.data.last_revision_text)
-    }
-  }, [metaQuery.data, touched])
-
-  const generate = useMutation({
-    mutationFn: () => {
-      const versionNumber = Number(version) || metaQuery.data?.next_version || 1
-      return api.documents.releaseReport(projectId, versionNumber, revisionText)
-    },
-    onSuccess: ({ blob, filename }) => {
-      saveBlob(blob, filename)
-      setTouched(false)
-      queryClient.invalidateQueries({ queryKey: ['release-report-meta', projectId] })
+  const prepare = useMutation({
+    mutationFn: loadMeta,
+    onSuccess: (meta) => {
+      setVersion(String(meta.next_version))
+      setRevisionText(meta.last_revision_text)
+      setOpen(true)
     },
   })
 
+  const confirm = useMutation({
+    mutationFn: () => download(Number(version) || 1, revisionText),
+    onSuccess: ({ blob, filename }) => {
+      saveBlob(blob, filename)
+      setOpen(false)
+    },
+  })
+
+  const close = () => {
+    if (!confirm.isPending) setOpen(false)
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320, flex: 1 }}>
-      <strong style={{ fontSize: 14 }}>Release Report</strong>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div className="form-row" style={{ marginBottom: 0, width: 100 }}>
-          <label>Versione</label>
-          <input
-            type="number"
-            value={version}
-            onChange={(e) => {
-              setVersion(e.target.value)
-              setTouched(true)
-            }}
-          />
+    <>
+      <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
+        {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={close}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>{label}</h3>
+            <div className="form-row">
+              <label>Versione</label>
+              <input type="number" value={version} onChange={(e) => setVersion(e.target.value)} />
+            </div>
+            <div className="form-row">
+              <label>Descrizione revisione</label>
+              <textarea rows={3} value={revisionText} onChange={(e) => setRevisionText(e.target.value)} />
+            </div>
+            {confirm.isError && <div className="error-banner">{(confirm.error as Error).message}</div>}
+            <div className="form-actions">
+              <button className="btn" onClick={close} disabled={confirm.isPending}>
+                Annulla
+              </button>
+              <button className="btn btn-primary" onClick={() => confirm.mutate()} disabled={confirm.isPending}>
+                {confirm.isPending ? 'Generazione…' : 'Genera e scarica'}
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="form-row" style={{ marginBottom: 0, flex: 1, minWidth: 260 }}>
-          <label>Descrizione revisione</label>
-          <textarea
-            rows={2}
-            value={revisionText}
-            onChange={(e) => {
-              setRevisionText(e.target.value)
-              setTouched(true)
-            }}
-          />
-        </div>
-      </div>
-      <div>
-        <button
-          className="btn btn-primary"
-          disabled={!metaQuery.data || generate.isPending}
-          onClick={() => generate.mutate()}
-        >
-          {generate.isPending ? 'Generazione…' : '⬇ Scarica Release Report (.xlsx)'}
-        </button>
-      </div>
-      {generate.isError && <span style={{ color: 'var(--danger, #c0392b)' }}>{(generate.error as Error).message}</span>}
-    </div>
+      )}
+    </>
   )
 }
 
@@ -123,11 +109,6 @@ export function DocumentsPage() {
   const updateProject = useMutation({
     mutationFn: (data: Partial<Project>) => api.projects.update(project.id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
-  })
-
-  const downloadRegressionAnalysis = useMutation({
-    mutationFn: () => api.documents.regressionAnalysis(project.id),
-    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
   })
 
   const toggleType = (type: string) => {
@@ -195,17 +176,17 @@ export function DocumentsPage() {
         <p className="muted" style={{ marginTop: 0 }}>
           Compila Cover e foglio dati dei template Excel ufficiali con i dati di questo progetto.
         </p>
-        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <div>
-            <button
-              className="btn btn-primary"
-              disabled={downloadRegressionAnalysis.isPending}
-              onClick={() => downloadRegressionAnalysis.mutate()}
-            >
-              {downloadRegressionAnalysis.isPending ? 'Generazione…' : '⬇ Scarica Regression Analysis (.xlsx)'}
-            </button>
-          </div>
-          <ReleaseReportGenerator projectId={project.id} />
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <DocumentDownloadButton
+            label="Regression Analysis"
+            loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
+            download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
+          />
+          <DocumentDownloadButton
+            label="Release Report"
+            loadMeta={() => api.documents.releaseReportMeta(project.id)}
+            download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}
+          />
         </div>
 
         <p className="muted" style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
@@ -215,7 +196,12 @@ export function DocumentsPage() {
         </p>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           {PPR_TYPES.map(({ docType, label }) => (
-            <PprDownloadButton key={docType} projectId={project.id} docType={docType} label={label} />
+            <DocumentDownloadButton
+              key={docType}
+              label={label}
+              loadMeta={() => api.documents.pprMeta(project.id, docType)}
+              download={(version, revisionText) => api.documents.ppr(project.id, docType, version, revisionText)}
+            />
           ))}
         </div>
       </div>

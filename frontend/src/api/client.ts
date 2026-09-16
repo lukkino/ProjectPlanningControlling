@@ -2,11 +2,11 @@ import type {
   BacklogItem,
   BudgetLine,
   DashboardMetrics,
+  DocumentRevisionMeta,
   ForecastSimulation,
   Phase,
   Project,
   ProjectDetail,
-  ReleaseReportMeta,
   Snapshot,
   SyncResult,
 } from './types'
@@ -117,14 +117,26 @@ export const api = {
     remove: (id: number) => del(`/forecasting/${id}`),
   },
   documents: {
-    regressionAnalysis: (projectId: number) => downloadFile(`/projects/${projectId}/documents/regression-analysis`),
+    regressionAnalysisMeta: (projectId: number) =>
+      request<DocumentRevisionMeta>(`/projects/${projectId}/documents/regression-analysis/meta`),
+    regressionAnalysis: (projectId: number, version: number, revisionText: string) =>
+      downloadFile(`/projects/${projectId}/documents/regression-analysis`, {
+        version: String(version),
+        revision_text: revisionText,
+      }),
     releaseReportMeta: (projectId: number) =>
-      request<ReleaseReportMeta>(`/projects/${projectId}/documents/release-report/meta`),
+      request<DocumentRevisionMeta>(`/projects/${projectId}/documents/release-report/meta`),
     releaseReport: (projectId: number, version: number, revisionText: string) =>
       downloadFile(`/projects/${projectId}/documents/release-report`, {
         version: String(version),
         revision_text: revisionText,
       }),
-    ppr: (projectId: number, docType: string) => downloadFile(`/projects/${projectId}/documents/ppr/${docType}`),
+    pprMeta: (projectId: number, docType: string) =>
+      request<DocumentRevisionMeta>(`/projects/${projectId}/documents/ppr/${docType}/meta`),
+    ppr: (projectId: number, docType: string, version: number, revisionText: string) =>
+      downloadFile(`/projects/${projectId}/documents/ppr/${docType}`, {
+        version: String(version),
+        revision_text: revisionText,
+      }),
   },
 }

@@ -183,11 +183,20 @@ def _append_revision_row(cover, version: int, author: str, text: str) -> None:
     cover.row_dimensions[new_row].height = _estimate_row_height(text)
 
 
-def generate_regression_analysis(project: models.Project) -> tuple[bytes, str]:
+def get_regression_analysis_defaults(project: models.Project) -> tuple[int, str]:
+    """Versione e testo di revisione proposti (modificabili) per il form di
+    generazione: a differenza della RR, la REA non ha una tabella di
+    revision history che cresce nel tempo (una sola riga, C24/G24), quindi
+    propone sempre versione 1 e un testo composto dal Change Order
+    corrente, senza bisogno di leggere uno stato precedente."""
+    change_order = project.change_order_label or project.change_order_url or "N/D"
+    return 1, f"Regression Analysis for Change Order {change_order} for {project.name}"
+
+
+def generate_regression_analysis(project: models.Project, version: int, revision_text: str) -> tuple[bytes, str]:
     wb = openpyxl.load_workbook(TEMPLATES_DIR / "regression_analysis_template.xlsx")
     cover = wb["Cover"]
 
-    version = 1
     document_id = build_document_id(project, version)
 
     cover["E2"] = f"REGRESSION ANALYSIS\n {SYSTEM_NAME}\n {project.code} - {project.name}"
@@ -195,11 +204,10 @@ def generate_regression_analysis(project: models.Project) -> tuple[bytes, str]:
     cover["F13"] = QUALITY_MANAGER
     cover["F15"] = DEV_MANAGER
 
-    change_order = project.change_order_label or project.change_order_url or "N/D"
     cover["C24"] = version
     cover["D24"] = dt.date.today()
     cover["F24"] = PROJECT_MANAGER
-    cover["G24"] = f"Regression Analysis for Change Order {change_order} for {project.name}"
+    cover["G24"] = revision_text
 
     # Il foglio dati contiene ancora l'esempio del template (di un altro
     # progetto): lo svuotiamo prima di scrivere le righe vere.
@@ -366,7 +374,16 @@ def generate_release_report(project: models.Project, version: int, revision_text
     return buffer.getvalue(), RELEASE_REPORT_CODE
 
 
-def generate_ppr_document(project: models.Project, doc_type: str) -> tuple[bytes, str]:
+def get_ppr_defaults(project: models.Project, doc_type: str) -> tuple[int, str]:
+    """Versione e testo di revisione proposti (modificabili) per il form di
+    generazione: come la REA, ogni tipo di documento PPR e' nuovo per ogni
+    incremento (non uno storico cumulativo di sistema come la RR), quindi
+    propone sempre versione 1 senza bisogno di un contatore persistito."""
+    increment = _increment_code(project)
+    return 1, f"Initial issue for increment {increment}"
+
+
+def generate_ppr_document(project: models.Project, doc_type: str, version: int, revision_text: str) -> tuple[bytes, str]:
     """Planning/Execution/Deployment/Release to Market Review: dal master
     "Copy of MOD-PPR.xlsx" tiene solo i fogli richiesti per questo tipo di
     documento (cumulativi: ogni tipo include anche le review dei tipi
@@ -374,11 +391,7 @@ def generate_ppr_document(project: models.Project, doc_type: str) -> tuple[bytes
     di Revision History). I fogli di review restano com'erano nel
     template: sono verbali di riunione da compilare a mano (partecipanti,
     minute, domande SI/NO che richiedono giudizio umano), non dati
-    ricavabili dal Backlog Jira come per REA/RR.
-
-    A differenza del Release Report, questo e' un documento nuovo per ogni
-    incremento (non uno storico cumulativo di sistema): si parte sempre
-    dalla versione 1, senza bisogno di un contatore persistito."""
+    ricavabili dal Backlog Jira come per REA/RR."""
     config = PPR_DOCUMENT_TYPES[doc_type]
     wb = openpyxl.load_workbook(TEMPLATES_DIR / PPR_TEMPLATE_FILENAME)
 
@@ -389,16 +402,16 @@ def generate_ppr_document(project: models.Project, doc_type: str) -> tuple[bytes
 
     increment = _increment_code(project)
     filename_stem = config["filename"]
-    document_id = f"{filename_stem}.1"
+    document_id = f"{filename_stem}.{version}"
 
     cover = wb["Cover"]
     cover["D5"] = f"{config['title_word']}\n {SYSTEM_NAME} - Increment {increment}"
     cover["D12"] = PROJECT_MANAGER
     cover["D13"] = QUALITY_MANAGER
     cover["D17"] = DEV_MANAGER
-    cover.cell(row=PPR_REVISION_ROW, column=1, value=1)
+    cover.cell(row=PPR_REVISION_ROW, column=1, value=version)
     cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
-    cover.cell(row=PPR_REVISION_ROW, column=4, value=f"Initial issue for increment {increment}")
+    cover.cell(row=PPR_REVISION_ROW, column=4, value=revision_text)
 
     for sheet in wb.worksheets:
         sheet.oddHeader.right.text = document_id
