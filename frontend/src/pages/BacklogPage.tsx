@@ -468,7 +468,12 @@ export function BacklogPage() {
       setDraggedId(null)
       return
     }
-    const list = [...visibleItems]
+    // displayItems (non visibleItems): con "Ordina per stato" attivo si
+    // trascina comunque sull'elenco visibile a schermo, cosi' su/giu'
+    // funziona anche li' - il nuovo priority_order si calcola tra i vicini
+    // di QUELLA posizione, qualunque sia l'ordinamento in vista in quel
+    // momento.
+    const list = [...displayItems]
     const fromIndex = list.findIndex((i) => i.id === draggedId)
     const toIndex = list.findIndex((i) => i.id === targetId)
     setDraggedId(null)
@@ -554,7 +559,10 @@ export function BacklogPage() {
           Mostra solo item "Incluso in codefreeze"
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Disabilita il riordinamento manuale mentre e' attivo">
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title="Puoi ancora trascinare le righe per spostarle su e giu' in questo elenco"
+        >
           <input type="checkbox" checked={sortByStatus} onChange={(e) => setSortByStatus(e.target.checked)} />
           Ordina per stato (Done, In Progress, To Do)
         </label>
@@ -618,12 +626,12 @@ export function BacklogPage() {
               <Fragment key={item.id}>
               <tr
                 className={forecastHighlightIds.has(item.id) ? 'forecast-highlight' : undefined}
-                onDragOver={(e) => !sortByStatus && e.preventDefault()}
-                onDrop={() => !sortByStatus && handleDrop(item.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleDrop(item.id)}
                 style={draggedId === item.id ? { opacity: 0.4 } : undefined}
               >
                 <td
-                  draggable={!sortByStatus}
+                  draggable
                   onDragStart={(e) => {
                     setDraggedId(item.id)
                     e.dataTransfer.setData('text/plain', String(item.id))
@@ -631,8 +639,7 @@ export function BacklogPage() {
                   }}
                   onDragEnd={() => setDraggedId(null)}
                   className="drag-handle"
-                  style={sortByStatus ? { opacity: 0.3, cursor: 'default' } : undefined}
-                  title={sortByStatus ? 'Riordinamento manuale disabilitato con "Ordina per stato" attivo' : 'Trascina per riordinare'}
+                  title="Trascina per riordinare"
                 >
                   ⠿
                 </td>
