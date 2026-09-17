@@ -71,6 +71,9 @@ export function IncrementDetailPage() {
     <div>
       <div className="page-header">
         <div>
+          <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+            Progetto
+          </div>
           <h1>{increment.code}</h1>
           <div className="sub">
             {formatIsoDate(increment.start_date) ?? 'inizio n.d.'} → {formatIsoDate(increment.end_date) ?? 'fine n.d.'}

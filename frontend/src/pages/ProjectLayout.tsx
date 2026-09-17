@@ -39,6 +39,9 @@ export function ProjectLayout() {
     <div>
       <div className="page-header">
         <div>
+          <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+            Increment
+          </div>
           <h1>
             {project.code} · {project.name}
           </h1>
