@@ -227,6 +227,12 @@ export function DocumentsPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
+  // Box di configurazione del Change Order: aperto di default solo se non
+  // ancora configurato, altrimenti la pagina mostra solo il nome cliccabile
+  // (si riapre col bottone "Modifica").
+  const [editingChangeOrder, setEditingChangeOrder] = useState(!project.change_order_url)
+  const [coUrl, setCoUrl] = useState(project.change_order_url ?? '')
+  const [coLabel, setCoLabel] = useState(project.change_order_label ?? '')
 
   const { data: items } = useQuery({
     queryKey: ['backlog', project.id],
@@ -267,35 +273,54 @@ export function DocumentsPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Change Order</h3>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div className="form-row" style={{ marginBottom: 0, minWidth: 260, flex: 1 }}>
-            <label>URL Change Order</label>
-            <input
-              placeholder="https://..."
-              defaultValue={project.change_order_url ?? ''}
-              onBlur={(e) => {
-                const value = e.target.value.trim() || null
-                if (value !== project.change_order_url) updateProject.mutate({ change_order_url: value })
-              }}
-            />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0, minWidth: 200, flex: 1 }}>
-            <label>Testo alternativo (opzionale)</label>
-            <input
-              placeholder="es. CO-123"
-              defaultValue={project.change_order_label ?? ''}
-              onBlur={(e) => {
-                const value = e.target.value.trim() || null
-                if (value !== project.change_order_label) updateProject.mutate({ change_order_label: value })
-              }}
-            />
-          </div>
-          {project.change_order_url && (
+        {!editingChangeOrder && project.change_order_url ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <a href={project.change_order_url} target="_blank" rel="noreferrer" className="btn btn-primary">
               {project.change_order_label || project.change_order_url}
             </a>
-          )}
-        </div>
+            <button
+              className="btn"
+              onClick={() => {
+                setCoUrl(project.change_order_url ?? '')
+                setCoLabel(project.change_order_label ?? '')
+                setEditingChangeOrder(true)
+              }}
+            >
+              Modifica
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div className="form-row" style={{ marginBottom: 0, minWidth: 260, flex: 1 }}>
+              <label>URL Change Order</label>
+              <input placeholder="https://..." value={coUrl} onChange={(e) => setCoUrl(e.target.value)} />
+            </div>
+            <div className="form-row" style={{ marginBottom: 0, minWidth: 200, flex: 1 }}>
+              <label>Nome Change Order</label>
+              <input placeholder="es. CO2026-0123" value={coLabel} onChange={(e) => setCoLabel(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {project.change_order_url && (
+                <button className="btn" onClick={() => setEditingChangeOrder(false)} disabled={updateProject.isPending}>
+                  Annulla
+                </button>
+              )}
+              <button
+                className="btn btn-primary"
+                disabled={!coUrl.trim() || updateProject.isPending}
+                onClick={() =>
+                  updateProject.mutate(
+                    { change_order_url: coUrl.trim() || null, change_order_label: coLabel.trim() || null },
+                    { onSuccess: () => setEditingChangeOrder(false) },
+                  )
+                }
+              >
+                {updateProject.isPending ? 'Salvataggio…' : 'Salva'}
+              </button>
+            </div>
+          </div>
+        )}
+        {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
       </div>
 
       <div className="card">
