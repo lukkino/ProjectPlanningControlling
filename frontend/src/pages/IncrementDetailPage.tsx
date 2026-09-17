@@ -4,14 +4,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { IncrementBudgetLinesCard } from '../components/IncrementBudgetLinesCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
-import { ProjectFormModal } from '../components/ProjectFormModal'
 import { formatIsoDate } from '../lib/dates'
 
 export function IncrementDetailPage() {
   const { incrementId } = useParams()
   const id = Number(incrementId)
   const [showEdit, setShowEdit] = useState(false)
-  const [showNewProject, setShowNewProject] = useState(false)
   const [pickedProjectId, setPickedProjectId] = useState('')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -23,7 +21,6 @@ export function IncrementDetailPage() {
   })
 
   const { data: allProjects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
-  const { data: allIncrements } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
 
   const remove = useMutation({
     mutationFn: () => api.increments.remove(id),
@@ -33,35 +30,30 @@ export function IncrementDetailPage() {
     },
   })
 
-  // Collega/scollega un increment GIA' ESISTENTE a questo progetto: e' solo
-  // un update del campo increment_id sull'increment, nessun nuovo increment
-  // viene creato. Usato sia dal picker sotto sia dal bottone "Scollega".
-  const setProjectIncrement = useMutation({
-    mutationFn: ({ projectId, incrementId: newIncrementId }: { projectId: number; incrementId: number | null }) =>
-      api.projects.update(projectId, { increment_id: newIncrementId }),
-    onSuccess: () => {
+  // Collega/scollega questo progetto a un increment GIA' ESISTENTE: e' solo
+  // un update del campo project_id sul progetto, nessun nuovo increment
+  // viene creato. Un progetto appartiene al massimo a un increment.
+  const setProject = useMutation({
+    mutationFn: (projectId: number | null) => api.increments.update(id, { project_id: projectId }),
+    onSuccess: (_saved, projectId) => {
       queryClient.invalidateQueries({ queryKey: ['increment', id] })
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['increments'] })
+      if (increment?.project?.id) queryClient.invalidateQueries({ queryKey: ['project', increment.project.id] })
+      if (projectId) queryClient.invalidateQueries({ queryKey: ['project', projectId] })
     },
   })
 
   if (isLoading || !increment) return <p className="muted">Caricamento...</p>
 
-  const linkedIds = new Set(increment.projects.map((p) => p.id))
-  const incrementCodeById = new Map((allIncrements ?? []).map((inc) => [inc.id, inc.code]))
-  const attachableProjects = (allProjects ?? []).filter((p) => !linkedIds.has(p.id))
-
   const handleAttach = () => {
     if (!pickedProjectId) return
-    setProjectIncrement.mutate({ projectId: Number(pickedProjectId), incrementId: increment.id })
+    setProject.mutate(Number(pickedProjectId))
     setPickedProjectId('')
   }
 
   const handleDelete = () => {
     if (
-      confirm(
-        `Eliminare il progetto "${increment.code}"? Gli increment collegati non vengono cancellati, restano solo scollegati.`,
-      )
+      confirm(`Eliminare il progetto "${increment.code}"? L'increment collegato non viene cancellato, resta solo scollegato.`)
     ) {
       remove.mutate()
     }
@@ -109,7 +101,7 @@ export function IncrementDetailPage() {
           </div>
           <div className="stat-chip orange">
             <span className="value">{increment.logged_hours_total.toFixed(0)}</span>
-            <span className="label">Ore usate (somma increment)</span>
+            <span className="label">Ore usate</span>
           </div>
           <div className="stat-chip blue">
             <span className="value">{increment.estimated_budget_material.toFixed(0)} €</span>
@@ -117,82 +109,63 @@ export function IncrementDetailPage() {
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Il budget (ore e materiali) è proprio di questo progetto; le ore usate sono invece la somma di quanto
-          rendicontato sugli increment collegati qui sotto.
+          Budget (ore e materiali) e ore usate sono proprio di questo progetto: le ore usate sono quelle
+          dell'increment collegato qui sotto (non una somma - un progetto è collegato al massimo a un increment).
         </p>
       </div>
 
       <IncrementBudgetLinesCard incrementId={increment.id} />
 
       <div className="card">
-        <div className="page-header" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Increment collegati</h3>
-          <button className="btn" onClick={() => setShowNewProject(true)}>
-            + Nuovo increment in questo progetto
-          </button>
-        </div>
+        <h3 style={{ marginTop: 0 }}>Increment collegato</h3>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-          <select value={pickedProjectId} onChange={(e) => setPickedProjectId(e.target.value)} style={{ flex: 1 }}>
-            <option value="">Collega un increment già creato...</option>
-            {attachableProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.code} · {p.name}
-                {p.increment_id ? ` (già in ${incrementCodeById.get(p.increment_id) ?? '?'})` : ''}
-              </option>
-            ))}
-          </select>
-          <button className="btn" disabled={!pickedProjectId || setProjectIncrement.isPending} onClick={handleAttach}>
-            Collega
-          </button>
-        </div>
-
-        {increment.by_project.length === 0 && (
-          <p className="muted">Nessun increment collegato ancora: scegline uno esistente qui sopra.</p>
+        {!increment.project && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={pickedProjectId} onChange={(e) => setPickedProjectId(e.target.value)} style={{ flex: 1 }}>
+              <option value="">Collega un increment già creato...</option>
+              {allProjects?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.code} · {p.name}
+                </option>
+              ))}
+            </select>
+            <button className="btn" disabled={!pickedProjectId || setProject.isPending} onClick={handleAttach}>
+              Collega
+            </button>
+          </div>
         )}
-        {increment.by_project.length > 0 && (
+
+        {increment.project && (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Increment</th>
-                  <th>Descrizione</th>
+                  <th>Scope</th>
                   <th>Inizio</th>
-                  <th>Fine</th>
-                  <th>Ore usate</th>
-                  <th>PBI Done</th>
+                  <th>Planned finish</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {increment.by_project.map((row) => (
-                  <tr key={row.project.id}>
-                    <td>
-                      <Link to={`/projects/${row.project.id}`}>{row.project.code}</Link>
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {row.project.name}
-                      </div>
-                    </td>
-                    <td style={{ whiteSpace: 'normal', minWidth: 200 }}>
-                      {row.project.scope ?? <span className="muted">-</span>}
-                    </td>
-                    <td>{formatIsoDate(row.project.start_date) ?? <span className="muted">-</span>}</td>
-                    <td>{formatIsoDate(row.project.planned_finish_date) ?? <span className="muted">-</span>}</td>
-                    <td>{row.logged_hours_total.toFixed(0)}</td>
-                    <td>
-                      {row.backlog_done}/{row.backlog_in_scope}
-                    </td>
-                    <td>
-                      <button
-                        className="btn"
-                        disabled={setProjectIncrement.isPending}
-                        onClick={() => setProjectIncrement.mutate({ projectId: row.project.id, incrementId: null })}
-                      >
-                        Scollega
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td>
+                    <Link to={`/projects/${increment.project.id}`}>{increment.project.code}</Link>
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {increment.project.name}
+                    </div>
+                  </td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 200 }}>
+                    {increment.project.scope ?? <span className="muted">-</span>}
+                  </td>
+                  <td>{formatIsoDate(increment.project.start_date) ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(increment.project.planned_finish_date) ?? <span className="muted">-</span>}</td>
+                  <td>
+                    <button className="btn" disabled={setProject.isPending} onClick={() => setProject.mutate(null)}>
+                      Scollega
+                    </button>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -200,9 +173,6 @@ export function IncrementDetailPage() {
       </div>
 
       {showEdit && <IncrementFormModal increment={increment} onClose={() => setShowEdit(false)} />}
-      {showNewProject && (
-        <ProjectFormModal defaultIncrementId={increment.id} onClose={() => setShowNewProject(false)} />
-      )}
     </div>
   )
 }

@@ -53,6 +53,23 @@ def run_lightweight_migrations() -> None:
             if "release_date" in increment_columns:
                 conn.execute(text("UPDATE increments SET end_date = release_date WHERE release_date IS NOT NULL"))
 
+    if "project_id" not in increment_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE increments ADD COLUMN project_id INTEGER REFERENCES projects(id)"))
+            # La relazione era al contrario (projects.increment_id): un
+            # Project poteva puntare a un solo Increment, mentre in realta'
+            # e' un Increment (Progetto) che appartiene al massimo a un
+            # Project (Increment in UI). Si riporta qui il collegamento
+            # gia' inserito, senza perderlo.
+            if "increment_id" in project_columns:
+                conn.execute(
+                    text(
+                        "UPDATE increments SET project_id = ("
+                        "SELECT MIN(p.id) FROM projects p WHERE p.increment_id = increments.id"
+                        ") WHERE EXISTS (SELECT 1 FROM projects p WHERE p.increment_id = increments.id)"
+                    )
+                )
+
 
 def get_db():
     db: Session = SessionLocal()

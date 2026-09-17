@@ -144,13 +144,14 @@ def build_document_id(project: models.Project, version: int) -> str:
 
 def _increment_code(project: models.Project) -> str:
     """Codice incremento (es. "PTBSYS-03-003") per il titolo della Cover del
-    Release Report: se il progetto e' collegato a un Increment esplicito usa
-    quello, altrimenti ricade sull'estrazione via regex dal nome del
-    progetto (comportamento storico, per i progetti non ancora migrati)."""
-    if project.increment is not None:
-        return project.increment.code
+    Release Report: e' il codice stesso del Project (un Project e' proprio
+    l'Increment/rilascio, identificato dalla sua fix version Jira). Ricade
+    sull'estrazione via regex dal nome solo per i progetti storici il cui
+    codice non segue ancora questo formato."""
+    if INCREMENT_RE.fullmatch(project.code):
+        return project.code
     match = INCREMENT_RE.search(project.name or "")
-    return match.group(0) if match else (project.name or "")
+    return match.group(0) if match else (project.name or project.code)
 
 
 def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:

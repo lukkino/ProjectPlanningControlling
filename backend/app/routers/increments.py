@@ -63,11 +63,6 @@ def update_increment(increment_id: int, payload: schemas.IncrementUpdate, db: Se
 @router.delete("/{increment_id}", status_code=204)
 def delete_increment(increment_id: int, db: Session = Depends(get_db)):
     increment = _get_increment_or_404(db, increment_id)
-    # Scollega gli increment invece di lasciarli orfani/cancellarli: il
-    # progetto e' solo un raggruppamento, gli Increment (con la loro
-    # rendicontazione) restano validi anche senza un progetto.
-    for project in increment.projects:
-        project.increment_id = None
     db.delete(increment)
     db.commit()
 

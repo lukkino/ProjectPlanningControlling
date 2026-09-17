@@ -71,20 +71,14 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
 
 def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:
-    """Il budget (ore totali/per ruolo + materiali) e' sempre proprio
-    dell'Increment (vedi models.Increment), mai derivato: qui viene solo
-    confrontato con le ore effettivamente loggate, sommate dai Project
-    collegati. La rendicontazione ore resta per-progetto in by_project."""
-    projects = list(increment.projects)
-    per_project = [compute_dashboard_metrics(p) for p in projects]
-
-    backlog_total = sum(m.backlog_total for m in per_project)
-    backlog_in_scope = sum(m.backlog_in_scope for m in per_project)
-    backlog_done = sum(m.backlog_done for m in per_project)
-    logged_hours_total = sum(m.logged_hours_total for m in per_project)
-    dev_logged_hours_total = sum(m.dev_logged_hours_total for m in per_project)
+    """Il budget (ore totali/per ruolo + materiali) e' sempre proprio di
+    questo progetto (vedi models.Increment), mai derivato. Backlog/ore usate
+    invece non sono suoi: sono presi pari pari dal Project (rilascio)
+    collegato, se assegnato - un progetto non ha un backlog Jira proprio."""
+    project_metrics = compute_dashboard_metrics(increment.project) if increment.project else None
 
     budget_hours_total = sum(b.budget_hours for b in increment.budget_lines) or increment.estimated_budget_hours
+    logged_hours_total = project_metrics.logged_hours_total if project_metrics else 0.0
 
     return schemas.IncrementDetail(
         id=increment.id,
@@ -94,26 +88,17 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         end_date=increment.end_date,
         estimated_budget_hours=increment.estimated_budget_hours,
         estimated_budget_material=increment.estimated_budget_material,
+        project_id=increment.project_id,
         created_at=increment.created_at,
         updated_at=increment.updated_at,
-        projects=projects,
-        backlog_total=backlog_total,
-        backlog_in_scope=backlog_in_scope,
-        backlog_done=backlog_done,
-        percent_complete=(backlog_done / backlog_in_scope) if backlog_in_scope else 0.0,
+        project=increment.project,
+        backlog_total=project_metrics.backlog_total if project_metrics else 0,
+        backlog_in_scope=project_metrics.backlog_in_scope if project_metrics else 0,
+        backlog_done=project_metrics.backlog_done if project_metrics else 0,
+        percent_complete=project_metrics.percent_complete if project_metrics else 0.0,
         budget_hours_total=budget_hours_total,
         logged_hours_total=logged_hours_total,
-        dev_logged_hours_total=dev_logged_hours_total,
+        dev_logged_hours_total=project_metrics.dev_logged_hours_total if project_metrics else 0.0,
         percent_budget_used=(logged_hours_total / budget_hours_total) if budget_hours_total else 0.0,
         budget_lines=list(increment.budget_lines),
-        by_project=[
-            schemas.IncrementProjectMetrics(
-                project=project,
-                backlog_total=m.backlog_total,
-                backlog_in_scope=m.backlog_in_scope,
-                backlog_done=m.backlog_done,
-                logged_hours_total=m.logged_hours_total,
-            )
-            for project, m in zip(projects, per_project)
-        ],
     )

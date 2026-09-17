@@ -55,6 +55,11 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
+    # Scollega i progetti invece di lasciarli orfani/cancellarli: sono
+    # un'entita' a se' (budget/rendicontazione), valida anche senza un
+    # Project (rilascio) a cui essere collegata.
+    for progetto in project.progetti:
+        progetto.project_id = None
     db.delete(project)
     db.commit()
 

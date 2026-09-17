@@ -105,13 +105,8 @@ export type Project = {
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
-  increment_id: number | null
   created_at: string
   updated_at: string
-}
-
-export type ProjectDetail = Project & {
-  phases: Phase[]
 }
 
 export type Increment = {
@@ -122,20 +117,22 @@ export type Increment = {
   end_date: string | null
   estimated_budget_hours: number
   estimated_budget_material: number
+  project_id: number | null
   created_at: string
   updated_at: string
 }
 
-export type IncrementProjectMetrics = {
-  project: Project
-  backlog_total: number
-  backlog_in_scope: number
-  backlog_done: number
-  logged_hours_total: number
+export type ProjectDetail = Project & {
+  phases: Phase[]
+  // Progetti (budget/rendicontazione) collegati a questo rilascio: un
+  // rilascio puo' averne piu' di uno (vedi Increment.project_id).
+  progetti: Increment[]
 }
 
 export type IncrementDetail = Increment & {
-  projects: Project[]
+  // Il rilascio (Project) a cui questo progetto rendiconta le ore, se
+  // assegnato: un progetto appartiene al massimo a un Project.
+  project: Project | null
   backlog_total: number
   backlog_in_scope: number
   backlog_done: number
@@ -145,7 +142,6 @@ export type IncrementDetail = Increment & {
   dev_logged_hours_total: number
   percent_budget_used: number
   budget_lines: IncrementBudgetLine[]
-  by_project: IncrementProjectMetrics[]
 }
 
 export type DocumentRevisionMeta = {

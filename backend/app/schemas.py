@@ -219,7 +219,6 @@ class ProjectBase(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
-    increment_id: int | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -238,7 +237,6 @@ class ProjectUpdate(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
-    increment_id: int | None = None
 
 
 class ProjectListItem(ProjectBase):
@@ -246,10 +244,6 @@ class ProjectListItem(ProjectBase):
     id: int
     created_at: dt.datetime
     updated_at: dt.datetime
-
-
-class ProjectDetail(ProjectListItem):
-    phases: list[Phase] = []
 
 
 # ---------- Increment ----------
@@ -261,6 +255,7 @@ class IncrementBase(BaseModel):
     end_date: dt.date | None = None
     estimated_budget_hours: float = 0
     estimated_budget_material: float = 0
+    project_id: int | None = None
 
 
 class IncrementCreate(IncrementBase):
@@ -274,6 +269,7 @@ class IncrementUpdate(BaseModel):
     end_date: dt.date | None = None
     estimated_budget_hours: float | None = None
     estimated_budget_material: float | None = None
+    project_id: int | None = None
 
 
 class Increment(IncrementBase):
@@ -283,30 +279,29 @@ class Increment(IncrementBase):
     updated_at: dt.datetime
 
 
-class IncrementProjectMetrics(BaseModel):
-    """Ore/PBI del singolo increment collegato a un progetto: e' la vista
-    di rendicontazione, sempre disponibile accanto al totale aggregato (che
-    e' solo una somma, mai la fonte di verita')."""
-
-    project: ProjectListItem
-    backlog_total: int
-    backlog_in_scope: int
-    backlog_done: int
-    logged_hours_total: float
+class ProjectDetail(ProjectListItem):
+    phases: list[Phase] = []
+    # Progetti (budget/rendicontazione) collegati a questo rilascio: un
+    # rilascio puo' averne piu' di uno (vedi Increment.project_id).
+    progetti: list[Increment] = []
 
 
 class IncrementDetail(Increment):
-    projects: list[ProjectListItem] = []
-    backlog_total: int
-    backlog_in_scope: int
-    backlog_done: int
-    percent_complete: float
+    """Il budget (ore totali/per ruolo + materiali) e' sempre proprio di
+    questo progetto, mai derivato. Le ore usate/il backlog invece sono presi
+    pari pari dal Project (rilascio) collegato, se assegnato: il progetto
+    non ha un proprio backlog Jira."""
+
+    project: ProjectListItem | None = None
+    backlog_total: int = 0
+    backlog_in_scope: int = 0
+    backlog_done: int = 0
+    percent_complete: float = 0.0
     budget_hours_total: float
-    logged_hours_total: float
-    dev_logged_hours_total: float
-    percent_budget_used: float
+    logged_hours_total: float = 0.0
+    dev_logged_hours_total: float = 0.0
+    percent_budget_used: float = 0.0
     budget_lines: list[IncrementBudgetLine] = []
-    by_project: list[IncrementProjectMetrics] = []
 
 
 # ---------- Documents ----------

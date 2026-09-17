@@ -5,96 +5,100 @@ import { api } from '../api/client'
 import { formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
-// Tab "Progetti" di un increment: mostra/gestisce a quale progetto (entità
-// con codice tipo PTIH-PT13, budget e durata) questo increment è collegato -
-// il lato opposto del picker già presente nella pagina di dettaglio del
-// progetto stesso. Un increment appartiene al massimo a un progetto.
+// Tab "Progetti" di un increment: mostra/gestisce quali progetti (entita'
+// con codice tipo PTIH-PT13, budget e durata) rendicontano le ore su questo
+// increment. Un increment puo' averne piu' di uno (es. un progetto
+// "principale" + uno di maintenance); ogni progetto appartiene al massimo a
+// un increment (il lato singolo si gestisce dalla pagina del progetto).
 export function ProjectIncrementLinkPage() {
   const { project } = useProjectContext()
   const [pickedId, setPickedId] = useState('')
   const queryClient = useQueryClient()
 
-  const { data: allIncrements } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
-  const { data: linked } = useQuery({
-    queryKey: ['increment', project.increment_id],
-    queryFn: () => api.increments.get(project.increment_id as number),
-    enabled: project.increment_id != null,
-  })
+  const { data: allProgetti } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
 
-  const setIncrement = useMutation({
-    mutationFn: (incrementId: number | null) => api.projects.update(project.id, { increment_id: incrementId }),
-    onSuccess: (_saved, incrementId) => {
+  const setProgettoProject = useMutation({
+    mutationFn: ({ progettoId, projectId }: { progettoId: number; projectId: number | null }) =>
+      api.increments.update(progettoId, { project_id: projectId }),
+    onSuccess: (_saved, { progettoId }) => {
       queryClient.invalidateQueries({ queryKey: ['project', project.id] })
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      if (project.increment_id) queryClient.invalidateQueries({ queryKey: ['increment', project.increment_id] })
-      if (incrementId) queryClient.invalidateQueries({ queryKey: ['increment', incrementId] })
+      queryClient.invalidateQueries({ queryKey: ['increment', progettoId] })
+      queryClient.invalidateQueries({ queryKey: ['increments'] })
     },
   })
 
+  const linkedIds = new Set(project.progetti.map((p) => p.id))
+  const attachable = (allProgetti ?? []).filter((p) => !linkedIds.has(p.id))
+
   const handleAttach = () => {
     if (!pickedId) return
-    setIncrement.mutate(Number(pickedId))
+    setProgettoProject.mutate({ progettoId: Number(pickedId), projectId: project.id })
     setPickedId('')
   }
 
-  const siblings = (linked?.projects ?? []).filter((p) => p.id !== project.id)
-
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Progetto associato</h3>
+      <h3 style={{ marginTop: 0 }}>Progetti collegati</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Il progetto raggruppa più increment sotto lo stesso rilascio (contenuto e data), quando alcune ore vanno
-        rendicontate su questo increment e altre su increment diversi dello stesso rilascio.
+        I progetti su cui vengono rendicontate le ore di questo increment: normalmente uno solo, ma possono essere
+        più di uno quando alcune ore vanno rendicontate su un progetto diverso (es. maintenance).
       </p>
 
-      {!project.increment_id && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} style={{ flex: 1 }}>
-            <option value="">Collega un progetto già creato...</option>
-            {allIncrements?.map((inc) => (
-              <option key={inc.id} value={inc.id}>
-                {inc.code}
-                {inc.notes ? ` · ${inc.notes}` : ''}
-              </option>
-            ))}
-          </select>
-          <button className="btn" disabled={!pickedId || setIncrement.isPending} onClick={handleAttach}>
-            Collega
-          </button>
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+        <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} style={{ flex: 1 }}>
+          <option value="">Collega un progetto già creato...</option>
+          {attachable.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.code}
+              {p.notes ? ` · ${p.notes}` : ''}
+              {p.project_id ? ` (già collegato a un altro increment)` : ''}
+            </option>
+          ))}
+        </select>
+        <button className="btn" disabled={!pickedId || setProgettoProject.isPending} onClick={handleAttach}>
+          Collega
+        </button>
+      </div>
 
-      {project.increment_id && linked && (
+      {project.progetti.length === 0 && (
+        <p className="muted">Nessun progetto collegato ancora: scegline uno esistente qui sopra.</p>
+      )}
+      {project.progetti.length > 0 && (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Codice</th>
+                <th>Progetto</th>
                 <th>Descrizione</th>
                 <th>Inizio</th>
                 <th>Fine</th>
-                <th>Altri increment nello stesso progetto</th>
+                <th>Budget ore</th>
+                <th>Budget materiali</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <Link to={`/increments/${linked.id}`}>{linked.code}</Link>
-                </td>
-                <td style={{ whiteSpace: 'normal', minWidth: 200 }}>{linked.notes ?? <span className="muted">-</span>}</td>
-                <td>{formatIsoDate(linked.start_date) ?? <span className="muted">-</span>}</td>
-                <td>{formatIsoDate(linked.end_date) ?? <span className="muted">-</span>}</td>
-                <td>
-                  {siblings.length === 0 && <span className="muted">-</span>}
-                  {siblings.length > 0 && siblings.map((s) => s.code).join(', ')}
-                </td>
-                <td>
-                  <button className="btn" disabled={setIncrement.isPending} onClick={() => setIncrement.mutate(null)}>
-                    Scollega
-                  </button>
-                </td>
-              </tr>
+              {project.progetti.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <Link to={`/increments/${p.id}`}>{p.code}</Link>
+                  </td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 200 }}>{p.notes ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(p.start_date) ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(p.end_date) ?? <span className="muted">-</span>}</td>
+                  <td>{p.estimated_budget_hours}</td>
+                  <td>{p.estimated_budget_material} €</td>
+                  <td>
+                    <button
+                      className="btn"
+                      disabled={setProgettoProject.isPending}
+                      onClick={() => setProgettoProject.mutate({ progettoId: p.id, projectId: null })}
+                    >
+                      Scollega
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

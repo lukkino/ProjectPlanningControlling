@@ -12,9 +12,11 @@ def _utcnow() -> dt.datetime:
 
 class Increment(Base):
     """Un progetto (es. "PTIH-PT13"), con budget (ore per ruolo + materiali)
-    e durata: puo' raggruppare uno o piu' Project quando le ore vanno
-    rendicontate su Project diversi per lo stesso progetto (es. un Project
-    "principale" + un Project di maintenance)."""
+    e durata: modello UI "Progetto". Appartiene al massimo a un Project (il
+    rilascio/"Increment" in UI): piu' Increment (Progetto) possono
+    condividere lo stesso Project (rilascio) quando le ore di quel rilascio
+    vanno rendicontate su piu' progetti diversi (es. un progetto
+    "principale" + uno di maintenance)."""
 
     __tablename__ = "increments"
 
@@ -25,28 +27,29 @@ class Increment(Base):
     end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     estimated_budget_hours: Mapped[float] = mapped_column(Float, default=0)
     estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
+    # Project (rilascio/"Increment" in UI) su cui questo progetto rendiconta
+    # le ore, se assegnato: un progetto appartiene al massimo a un Project.
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    projects: Mapped[list["Project"]] = relationship(back_populates="increment", order_by="Project.code")
+    project: Mapped["Project | None"] = relationship(back_populates="progetti")
     budget_lines: Mapped[list["IncrementBudgetLine"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetLine.order"
     )
 
 
 class Project(Base):
+    """Un rilascio (es. "PTBSYS-03-004"), sincronizzato da Jira via una fix
+    version: modello UI "Increment". Puo' avere piu' Increment (Progetto)
+    collegati (vedi Increment.project_id) quando le sue ore vanno
+    rendicontate su progetti diversi."""
+
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
-    # Increment (rilascio) a cui questo progetto appartiene, se composto in
-    # uno: un progetto appartiene al massimo a un Increment, ma piu' Project
-    # possono condividere lo stesso Increment (es. un progetto + il progetto
-    # maintenance su cui vengono rendicontate alcune ore dello stesso rilascio).
-    increment_id: Mapped[int | None] = mapped_column(
-        ForeignKey("increments.id", ondelete="SET NULL"), nullable=True
-    )
     status: Mapped[str] = mapped_column(String(64), default="Kick-off")
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
@@ -80,7 +83,7 @@ class Project(Base):
     forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="ForecastSimulation.id"
     )
-    increment: Mapped["Increment | None"] = relationship(back_populates="projects")
+    progetti: Mapped[list["Increment"]] = relationship(back_populates="project", order_by="Increment.code")
 
 
 class Phase(Base):

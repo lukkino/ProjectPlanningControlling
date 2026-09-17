@@ -6,10 +6,6 @@ import type { Project } from '../api/types'
 
 type Props = {
   project?: Project
-  // Precompila il progetto collegato quando il modale viene aperto dalla
-  // pagina di dettaglio di un progetto ("+ Nuovo increment in questo
-  // progetto"), ignorato se si sta modificando un increment esistente.
-  defaultIncrementId?: number
   onClose: () => void
 }
 
@@ -22,10 +18,9 @@ const emptyForm = {
   code_freeze_date: '',
   planned_finish_date: '',
   jira_jql: '',
-  increment_id: null as number | null,
 }
 
-export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props) {
+export function ProjectFormModal({ project, onClose }: Props) {
   const [form, setForm] = useState(() =>
     project
       ? {
@@ -37,9 +32,8 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
           code_freeze_date: project.code_freeze_date ?? '',
           planned_finish_date: project.planned_finish_date ?? '',
           jira_jql: project.jira_jql ?? '',
-          increment_id: project.increment_id,
         }
-      : { ...emptyForm, increment_id: defaultIncrementId ?? null },
+      : emptyForm,
   )
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -59,10 +53,6 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project', saved.id] })
-      if (saved.increment_id) queryClient.invalidateQueries({ queryKey: ['increment', saved.increment_id] })
-      if (project?.increment_id && project.increment_id !== saved.increment_id) {
-        queryClient.invalidateQueries({ queryKey: ['increment', project.increment_id] })
-      }
       onClose()
       if (!project) navigate(`/projects/${saved.id}`)
     },
