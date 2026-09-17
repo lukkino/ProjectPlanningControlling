@@ -105,6 +105,9 @@ class BacklogItem(Base):
     # Campo standard Jira "Components" (nomi separati da virgola): colonna F
     # del Release Report generato.
     components: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Campo custom Jira "Developer Effort" (solo sulle Story): colonna "Ore
+    # stimate" del Backlog.
+    dev_effort_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     labels: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -69,6 +69,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   actual_finish: 90,
   duration: 70,
   logged_hours: 75,
+  dev_effort_hours: 90,
   notes: 160,
 }
 const HANDLE_COLUMN_WIDTH = 30
@@ -321,6 +322,14 @@ export function BacklogPage() {
           onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
         />
       ),
+    },
+    {
+      key: 'dev_effort_hours',
+      label: 'Ore stimate',
+      className: 'text-right',
+      // Sincronizzato da Jira (campo "Developer Effort", solo sulle Story):
+      // non editabile qui, verrebbe comunque sovrascritto al prossimo sync.
+      render: (item) => item.dev_effort_hours ?? <span className="muted">—</span>,
     },
     {
       key: 'notes',

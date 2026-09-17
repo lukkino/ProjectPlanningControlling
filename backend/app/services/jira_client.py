@@ -47,6 +47,7 @@ class JiraIssue:
         change_description: str | None = None,
         problem_cause: str | None = None,
         components: str | None = None,
+        dev_effort_hours: float | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -71,6 +72,9 @@ class JiraIssue:
         # Report generato.
         self.problem_cause = problem_cause
         self.components = components
+        # Campo custom Jira "Developer Effort" (customfield_10146, solo
+        # sulle Story): colonna "Ore stimate" del Backlog.
+        self.dev_effort_hours = dev_effort_hours
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -244,6 +248,9 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
     CHANGE_DESCRIPTION_FIELD = "customfield_10130"
     # customfield_10129 = "Problem Cause", usato nel Release Report generato.
     PROBLEM_CAUSE_FIELD = "customfield_10129"
+    # customfield_10146 = "Developer Effort" (solo Story), colonna "Ore
+    # stimate" del Backlog.
+    DEV_EFFORT_FIELD = "customfield_10146"
     fields = [
         "summary",
         "issuetype",
@@ -256,6 +263,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
         "components",
         CHANGE_DESCRIPTION_FIELD,
         PROBLEM_CAUSE_FIELD,
+        DEV_EFFORT_FIELD,
     ]
 
     issues: list[JiraIssue] = []
@@ -302,6 +310,7 @@ def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
                             change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
                             problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
                             components=components,
+                            dev_effort_hours=f.get(DEV_EFFORT_FIELD),
                         )
                     )
 
