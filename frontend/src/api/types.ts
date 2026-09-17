@@ -133,7 +133,6 @@ export type IncrementProjectMetrics = {
   backlog_done: number
   budget_hours_total: number
   logged_hours_total: number
-  budget_lines: BudgetLine[]
 }
 
 export type IncrementDetail = Increment & {

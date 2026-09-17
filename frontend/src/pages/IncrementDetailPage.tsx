@@ -162,7 +162,6 @@ export function IncrementDetailPage() {
                   <th>Descrizione</th>
                   <th>Inizio</th>
                   <th>Fine</th>
-                  <th>Budget per ruolo</th>
                   <th>Budget ore</th>
                   <th>Ore usate</th>
                   <th>PBI Done</th>
@@ -183,11 +182,6 @@ export function IncrementDetailPage() {
                     </td>
                     <td>{formatIsoDate(row.project.start_date) ?? <span className="muted">-</span>}</td>
                     <td>{formatIsoDate(row.project.planned_finish_date) ?? <span className="muted">-</span>}</td>
-                    <td style={{ whiteSpace: 'normal', minWidth: 180 }}>
-                      {row.budget_lines.length === 0 && <span className="muted">-</span>}
-                      {row.budget_lines.length > 0 &&
-                        row.budget_lines.map((l) => `${l.role_name}: ${l.budget_hours}h`).join(' · ')}
-                    </td>
                     <td>{row.budget_hours_total.toFixed(0)}</td>
                     <td>{row.logged_hours_total.toFixed(0)}</td>
                     <td>
@@ -208,10 +202,6 @@ export function IncrementDetailPage() {
             </table>
           </div>
         )}
-        <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
-          Il budget per ruolo si modifica dalla pagina del singolo increment (Dashboard → Budget ore per ruolo), dove
-          puoi anche aggiungerne di nuovi.
-        </p>
       </div>
 
       <div className="card">

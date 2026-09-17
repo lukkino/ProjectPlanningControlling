@@ -115,7 +115,6 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
                 backlog_done=m.backlog_done,
                 budget_hours_total=m.budget_hours_total,
                 logged_hours_total=m.logged_hours_total,
-                budget_lines=list(project.budget_lines),
             )
             for project, m in zip(projects, per_project)
         ],

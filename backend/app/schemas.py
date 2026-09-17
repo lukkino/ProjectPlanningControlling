@@ -293,7 +293,6 @@ class IncrementProjectMetrics(BaseModel):
     backlog_done: int
     budget_hours_total: float
     logged_hours_total: float
-    budget_lines: list[BudgetLine] = []
 
 
 class IncrementDetail(Increment):
