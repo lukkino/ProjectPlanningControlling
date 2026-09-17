@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
@@ -6,9 +6,9 @@ import type { Project } from '../api/types'
 
 type Props = {
   project?: Project
-  // Precompila l'increment quando il modale viene aperto dalla pagina di
-  // dettaglio di un Increment ("+ Nuovo progetto in questo increment"),
-  // ignorato se si sta modificando un progetto esistente.
+  // Precompila il progetto collegato quando il modale viene aperto dalla
+  // pagina di dettaglio di un progetto ("+ Nuovo increment in questo
+  // progetto"), ignorato se si sta modificando un increment esistente.
   defaultIncrementId?: number
   onClose: () => void
 }
@@ -47,7 +47,6 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
   )
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const { data: increments } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
 
   const save = useMutation({
     mutationFn: () => {
@@ -87,30 +86,15 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
     // proprio sull'overlay (click "fuori" genuino).
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
-        <h3>{project ? 'Modifica progetto' : 'Nuovo progetto'}</h3>
+        <h3>{project ? 'Modifica increment' : 'Nuovo increment'}</h3>
 
         <div className="form-row">
-          <label>Codice progetto</label>
-          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTBSYS-03-003" />
+          <label>Codice increment</label>
+          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTIH-PT13" />
         </div>
         <div className="form-row">
           <label>Nome</label>
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
-        </div>
-        <div className="form-row">
-          <label>Increment (rilascio)</label>
-          <select
-            value={form.increment_id ?? ''}
-            onChange={(e) => set('increment_id', e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">Nessuno</option>
-            {increments?.map((inc) => (
-              <option key={inc.id} value={inc.id}>
-                {inc.code}
-                {inc.name ? ` · ${inc.name}` : ''}
-              </option>
-            ))}
-          </select>
         </div>
         <div className="form-row">
           <label>Scope</label>
@@ -157,7 +141,7 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
           </div>
         </div>
         <div className="form-row">
-          <label>JQL Jira (issue del backlog di questo progetto)</label>
+          <label>JQL Jira (issue del backlog di questo increment)</label>
           <textarea
             rows={2}
             value={form.jira_jql}

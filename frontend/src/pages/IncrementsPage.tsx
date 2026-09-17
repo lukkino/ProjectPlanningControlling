@@ -13,18 +13,18 @@ export function IncrementsPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Increment</h1>
-          <div className="sub">Rilasci: contenuto e data, indipendentemente da quanti progetti li compongono.</div>
+          <h1>Progetti</h1>
+          <div className="sub">Rilasci: codice, data e contenuto, indipendentemente da quanti increment li compongono.</div>
         </div>
         <button className="btn btn-primary" onClick={() => setShowNew(true)}>
-          + Nuovo increment
+          + Nuovo progetto
         </button>
       </div>
 
       {isLoading && <p className="muted">Caricamento...</p>}
 
       {increments?.length === 0 && (
-        <div className="card empty-state">Nessun increment ancora. Creane uno per raggruppare i progetti di un rilascio.</div>
+        <div className="card empty-state">Nessun progetto ancora. Creane uno per raggruppare gli increment di un rilascio.</div>
       )}
 
       {increments && increments.length > 0 && (
@@ -33,7 +33,7 @@ export function IncrementsPage() {
             <thead>
               <tr>
                 <th>Codice</th>
-                <th>Nome</th>
+                <th>Descrizione</th>
                 <th>Data di rilascio</th>
               </tr>
             </thead>
@@ -43,7 +43,7 @@ export function IncrementsPage() {
                   <td>
                     <Link to={`/increments/${inc.id}`}>{inc.code}</Link>
                   </td>
-                  <td>{inc.name ?? <span className="muted">-</span>}</td>
+                  <td>{inc.notes ?? <span className="muted">-</span>}</td>
                   <td>{formatIsoDate(inc.release_date) ?? <span className="muted">-</span>}</td>
                 </tr>
               ))}

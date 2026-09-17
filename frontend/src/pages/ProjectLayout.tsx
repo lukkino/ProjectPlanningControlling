@@ -30,7 +30,7 @@ export function ProjectLayout() {
   if (isLoading || !project) return <p className="muted">Caricamento...</p>
 
   const handleDelete = () => {
-    if (confirm(`Eliminare il progetto "${project.code}"? L'operazione non è reversibile.`)) {
+    if (confirm(`Eliminare l'increment "${project.code}"? L'operazione non è reversibile.`)) {
       remove.mutate()
     }
   }
@@ -74,6 +74,9 @@ export function ProjectLayout() {
         </NavLink>
         <NavLink to={`/projects/${id}/documents`} className={({ isActive }) => (isActive ? 'active' : '')}>
           Documents
+        </NavLink>
+        <NavLink to={`/projects/${id}/progetti`} className={({ isActive }) => (isActive ? 'active' : '')}>
+          Progetti
         </NavLink>
       </div>
 

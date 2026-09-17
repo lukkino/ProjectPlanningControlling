@@ -11,7 +11,6 @@ type Props = {
 
 const emptyForm = {
   code: '',
-  name: '',
   release_date: '',
   notes: '',
 }
@@ -21,7 +20,6 @@ export function IncrementFormModal({ increment, onClose }: Props) {
     increment
       ? {
           code: increment.code,
-          name: increment.name ?? '',
           release_date: increment.release_date ?? '',
           notes: increment.notes ?? '',
         }
@@ -34,7 +32,6 @@ export function IncrementFormModal({ increment, onClose }: Props) {
     mutationFn: () => {
       const payload = {
         ...form,
-        name: form.name || null,
         release_date: form.release_date || null,
         notes: form.notes || null,
       }
@@ -54,22 +51,18 @@ export function IncrementFormModal({ increment, onClose }: Props) {
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
-        <h3>{increment ? 'Modifica increment' : 'Nuovo increment'}</h3>
+        <h3>{increment ? 'Modifica progetto' : 'Nuovo progetto'}</h3>
 
         <div className="form-row">
-          <label>Codice increment</label>
+          <label>Codice progetto</label>
           <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTBSYS-03-004" />
-        </div>
-        <div className="form-row">
-          <label>Nome (opzionale)</label>
-          <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Dicembre 2025" />
         </div>
         <div className="form-row">
           <label>Data di rilascio</label>
           <input type="date" value={form.release_date} onChange={(e) => set('release_date', e.target.value)} />
         </div>
         <div className="form-row">
-          <label>Note</label>
+          <label>Descrizione</label>
           <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
         </div>
 

@@ -40,8 +40,8 @@ export function IncrementDetailPage() {
     },
   })
 
-  // Collega/scollega un progetto GIA' ESISTENTE a questo increment: e' solo
-  // un update del campo increment_id sul progetto, nessun nuovo progetto
+  // Collega/scollega un increment GIA' ESISTENTE a questo progetto: e' solo
+  // un update del campo increment_id sull'increment, nessun nuovo increment
   // viene creato. Usato sia dal picker sotto sia dal bottone "Scollega".
   const setProjectIncrement = useMutation({
     mutationFn: ({ projectId, incrementId: newIncrementId }: { projectId: number; incrementId: number | null }) =>
@@ -67,7 +67,7 @@ export function IncrementDetailPage() {
   const handleDelete = () => {
     if (
       confirm(
-        `Eliminare l'increment "${increment.code}"? I progetti collegati non vengono cancellati, restano solo scollegati.`,
+        `Eliminare il progetto "${increment.code}"? Gli increment collegati non vengono cancellati, restano solo scollegati.`,
       )
     ) {
       remove.mutate()
@@ -85,8 +85,8 @@ export function IncrementDetailPage() {
         <div>
           <h1>{increment.code}</h1>
           <div className="sub">
-            {increment.name && `${increment.name} · `}
             Rilascio: {formatIsoDate(increment.release_date) ?? 'data non definita'}
+            {increment.notes && ` · ${increment.notes}`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -99,14 +99,8 @@ export function IncrementDetailPage() {
         </div>
       </div>
 
-      {increment.notes && (
-        <div className="card">
-          <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{increment.notes}</p>
-        </div>
-      )}
-
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Totale increment</h3>
+        <h3 style={{ marginTop: 0 }}>Totale progetto</h3>
         <div className="stat-chips">
           <div className="stat-chip blue">
             <span className="value">
@@ -120,30 +114,30 @@ export function IncrementDetailPage() {
           </div>
           <div className="stat-chip green">
             <span className="value">{increment.budget_hours_total.toFixed(0)}</span>
-            <span className="label">Budget ore (somma progetti)</span>
+            <span className="label">Budget ore (somma increment)</span>
           </div>
           <div className="stat-chip orange">
             <span className="value">{increment.logged_hours_total.toFixed(0)}</span>
-            <span className="label">Ore usate (somma progetti)</span>
+            <span className="label">Ore usate (somma increment)</span>
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Totale calcolato sommando i progetti collegati qui sotto: la rendicontazione ore/spese resta sul singolo
-          progetto.
+          Totale calcolato sommando gli increment collegati qui sotto: la rendicontazione ore/spese resta sul
+          singolo increment.
         </p>
       </div>
 
       <div className="card">
         <div className="page-header" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Progetti collegati</h3>
+          <h3 style={{ margin: 0 }}>Increment collegati</h3>
           <button className="btn" onClick={() => setShowNewProject(true)}>
-            + Nuovo progetto in questo increment
+            + Nuovo increment in questo progetto
           </button>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
           <select value={pickedProjectId} onChange={(e) => setPickedProjectId(e.target.value)} style={{ flex: 1 }}>
-            <option value="">Collega un progetto già creato...</option>
+            <option value="">Collega un increment già creato...</option>
             {attachableProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.code} · {p.name}
@@ -157,14 +151,14 @@ export function IncrementDetailPage() {
         </div>
 
         {increment.by_project.length === 0 && (
-          <p className="muted">Nessun progetto collegato ancora: scegline uno esistente qui sopra.</p>
+          <p className="muted">Nessun increment collegato ancora: scegline uno esistente qui sopra.</p>
         )}
         {increment.by_project.length > 0 && (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Progetto</th>
+                  <th>Increment</th>
                   <th>Descrizione</th>
                   <th>Inizio</th>
                   <th>Fine</th>
@@ -215,21 +209,21 @@ export function IncrementDetailPage() {
           </div>
         )}
         <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
-          Il budget per ruolo si modifica dalla pagina del singolo progetto (Dashboard → Budget ore per ruolo), dove
+          Il budget per ruolo si modifica dalla pagina del singolo increment (Dashboard → Budget ore per ruolo), dove
           puoi anche aggiungerne di nuovi.
         </p>
       </div>
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Contenuto (backlog aggregato)</h3>
-        {content.length === 0 && <p className="muted">Nessun item nel backlog dei progetti collegati.</p>}
+        {content.length === 0 && <p className="muted">Nessun item nel backlog degli increment collegati.</p>}
         {content.length > 0 && (
           <div className="table-wrap table-wrap--scroll">
             <table>
               <thead>
                 <tr>
                   <th>Jira</th>
-                  <th>Progetto</th>
+                  <th>Increment</th>
                   <th>Tipo</th>
                   <th>Sommario</th>
                   <th>Stato</th>

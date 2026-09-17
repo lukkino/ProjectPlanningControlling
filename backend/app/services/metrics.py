@@ -94,7 +94,6 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     return schemas.IncrementDetail(
         id=increment.id,
         code=increment.code,
-        name=increment.name,
         release_date=increment.release_date,
         notes=increment.notes,
         created_at=increment.created_at,

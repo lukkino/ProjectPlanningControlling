@@ -12,16 +12,16 @@ export function Sidebar() {
     <aside className="sidebar">
       <h1>Project Controlling</h1>
       <button className="btn btn-primary" onClick={() => setShowNewProject(true)}>
-        + Nuovo progetto
+        + Nuovo increment
       </button>
       <NavLink to="/projects-dashboard" className={({ isActive }) => `btn${isActive ? ' active' : ''}`} style={{ marginTop: 8, textAlign: 'center' }}>
-        📊 Dashboard progetti
+        📊 Dashboard increment
       </NavLink>
       <NavLink to="/increments" className={({ isActive }) => `btn${isActive ? ' active' : ''}`} style={{ textAlign: 'center' }}>
-        🚀 Projects
+        🚀 Progetti
       </NavLink>
       <nav className="project-list">
-        {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun progetto ancora.</p>}
+        {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun increment ancora.</p>}
         {projects?.map((p) => (
           <NavLink key={p.id} to={`/projects/${p.id}`} className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="code">{p.code}</span>

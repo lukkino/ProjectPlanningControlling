@@ -261,7 +261,6 @@ class ProjectDetail(ProjectListItem):
 
 class IncrementBase(BaseModel):
     code: str
-    name: str | None = None
     release_date: dt.date | None = None
     notes: str | None = None
 
@@ -272,7 +271,6 @@ class IncrementCreate(IncrementBase):
 
 class IncrementUpdate(BaseModel):
     code: str | None = None
-    name: str | None = None
     release_date: dt.date | None = None
     notes: str | None = None
 

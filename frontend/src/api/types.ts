@@ -120,7 +120,6 @@ export type ProjectDetail = Project & {
 export type Increment = {
   id: number
   code: string
-  name: string | null
   release_date: string | null
   notes: string | null
   created_at: string

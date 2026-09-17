@@ -6,6 +6,7 @@ import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
 import { IncrementDetailPage } from './pages/IncrementDetailPage'
 import { IncrementsPage } from './pages/IncrementsPage'
+import { ProjectIncrementLinkPage } from './pages/ProjectIncrementLinkPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="forecasting" element={<ForecastingPage />} />
             <Route path="documents" element={<DocumentsPage />} />
+            <Route path="progetti" element={<ProjectIncrementLinkPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

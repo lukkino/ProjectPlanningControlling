@@ -20,7 +20,6 @@ class Increment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
-    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
