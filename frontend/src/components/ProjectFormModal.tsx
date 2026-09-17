@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
@@ -6,6 +6,10 @@ import type { Project } from '../api/types'
 
 type Props = {
   project?: Project
+  // Precompila l'increment quando il modale viene aperto dalla pagina di
+  // dettaglio di un Increment ("+ Nuovo progetto in questo increment"),
+  // ignorato se si sta modificando un progetto esistente.
+  defaultIncrementId?: number
   onClose: () => void
 }
 
@@ -20,9 +24,10 @@ const emptyForm = {
   estimated_budget_hours: 0,
   estimated_budget_material: 0,
   jira_jql: '',
+  increment_id: null as number | null,
 }
 
-export function ProjectFormModal({ project, onClose }: Props) {
+export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props) {
   const [form, setForm] = useState(() =>
     project
       ? {
@@ -36,11 +41,13 @@ export function ProjectFormModal({ project, onClose }: Props) {
           estimated_budget_hours: project.estimated_budget_hours,
           estimated_budget_material: project.estimated_budget_material,
           jira_jql: project.jira_jql ?? '',
+          increment_id: project.increment_id,
         }
-      : emptyForm,
+      : { ...emptyForm, increment_id: defaultIncrementId ?? null },
   )
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { data: increments } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
 
   const save = useMutation({
     mutationFn: () => {
@@ -57,6 +64,10 @@ export function ProjectFormModal({ project, onClose }: Props) {
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project', saved.id] })
+      if (saved.increment_id) queryClient.invalidateQueries({ queryKey: ['increment', saved.increment_id] })
+      if (project?.increment_id && project.increment_id !== saved.increment_id) {
+        queryClient.invalidateQueries({ queryKey: ['increment', project.increment_id] })
+      }
       onClose()
       if (!project) navigate(`/projects/${saved.id}`)
     },
@@ -85,6 +96,21 @@ export function ProjectFormModal({ project, onClose }: Props) {
         <div className="form-row">
           <label>Nome</label>
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
+        </div>
+        <div className="form-row">
+          <label>Increment (rilascio)</label>
+          <select
+            value={form.increment_id ?? ''}
+            onChange={(e) => set('increment_id', e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Nessuno</option>
+            {increments?.map((inc) => (
+              <option key={inc.id} value={inc.id}>
+                {inc.code}
+                {inc.name ? ` · ${inc.name}` : ''}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="form-row">
           <label>Scope</label>

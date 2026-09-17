@@ -75,3 +75,48 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         phases=list(project.phases),
         budget_lines=list(project.budget_lines),
     )
+
+
+def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:
+    """Somma i dashboard metrics dei Project collegati: l'Increment non ha
+    mai un budget/ore proprio, e' sempre un totale derivato (vedi
+    models.Increment). La rendicontazione resta per-progetto in by_project."""
+    projects = list(increment.projects)
+    per_project = [compute_dashboard_metrics(p) for p in projects]
+
+    backlog_total = sum(m.backlog_total for m in per_project)
+    backlog_in_scope = sum(m.backlog_in_scope for m in per_project)
+    backlog_done = sum(m.backlog_done for m in per_project)
+    budget_hours_total = sum(m.budget_hours_total for m in per_project)
+    logged_hours_total = sum(m.logged_hours_total for m in per_project)
+    dev_logged_hours_total = sum(m.dev_logged_hours_total for m in per_project)
+
+    return schemas.IncrementDetail(
+        id=increment.id,
+        code=increment.code,
+        name=increment.name,
+        release_date=increment.release_date,
+        notes=increment.notes,
+        created_at=increment.created_at,
+        updated_at=increment.updated_at,
+        projects=projects,
+        backlog_total=backlog_total,
+        backlog_in_scope=backlog_in_scope,
+        backlog_done=backlog_done,
+        percent_complete=(backlog_done / backlog_in_scope) if backlog_in_scope else 0.0,
+        budget_hours_total=budget_hours_total,
+        logged_hours_total=logged_hours_total,
+        dev_logged_hours_total=dev_logged_hours_total,
+        percent_budget_used=(logged_hours_total / budget_hours_total) if budget_hours_total else 0.0,
+        by_project=[
+            schemas.IncrementProjectMetrics(
+                project=project,
+                backlog_total=m.backlog_total,
+                backlog_in_scope=m.backlog_in_scope,
+                backlog_done=m.backlog_done,
+                budget_hours_total=m.budget_hours_total,
+                logged_hours_total=m.logged_hours_total,
+            )
+            for project, m in zip(projects, per_project)
+        ],
+    )

@@ -4,6 +4,8 @@ import type {
   DashboardMetrics,
   DocumentRevisionMeta,
   ForecastSimulation,
+  Increment,
+  IncrementDetail,
   Phase,
   PprDeliverable,
   PprDocumentMeta,
@@ -79,6 +81,13 @@ export const api = {
     create: (data: Partial<Project>) => post<ProjectDetail>('/projects', data),
     update: (id: number, data: Partial<Project>) => put<ProjectDetail>(`/projects/${id}`, data),
     remove: (id: number) => del(`/projects/${id}`),
+  },
+  increments: {
+    list: () => request<Increment[]>('/increments'),
+    get: (id: number) => request<IncrementDetail>(`/increments/${id}`),
+    create: (data: Partial<Increment>) => post<Increment>('/increments', data),
+    update: (id: number, data: Partial<Increment>) => put<Increment>(`/increments/${id}`, data),
+    remove: (id: number) => del(`/increments/${id}`),
   },
   phases: {
     list: (projectId: number) => request<Phase[]>(`/projects/${projectId}/phases`),

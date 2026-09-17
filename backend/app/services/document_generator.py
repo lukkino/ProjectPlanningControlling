@@ -143,9 +143,12 @@ def build_document_id(project: models.Project, version: int) -> str:
 
 
 def _increment_code(project: models.Project) -> str:
-    """Codice incremento (es. "PTBSYS-03-003") estratto dal nome del
-    progetto, per il titolo della Cover del Release Report. Ricade sul nome
-    per intero se non trovato."""
+    """Codice incremento (es. "PTBSYS-03-003") per il titolo della Cover del
+    Release Report: se il progetto e' collegato a un Increment esplicito usa
+    quello, altrimenti ricade sull'estrazione via regex dal nome del
+    progetto (comportamento storico, per i progetti non ancora migrati)."""
+    if project.increment is not None:
+        return project.increment.code
     match = INCREMENT_RE.search(project.name or "")
     return match.group(0) if match else (project.name or "")
 

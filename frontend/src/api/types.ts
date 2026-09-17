@@ -107,6 +107,7 @@ export type Project = {
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
+  increment_id: number | null
   created_at: string
   updated_at: string
 }
@@ -114,6 +115,38 @@ export type Project = {
 export type ProjectDetail = Project & {
   phases: Phase[]
   budget_lines: BudgetLine[]
+}
+
+export type Increment = {
+  id: number
+  code: string
+  name: string | null
+  release_date: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type IncrementProjectMetrics = {
+  project: Project
+  backlog_total: number
+  backlog_in_scope: number
+  backlog_done: number
+  budget_hours_total: number
+  logged_hours_total: number
+}
+
+export type IncrementDetail = Increment & {
+  projects: Project[]
+  backlog_total: number
+  backlog_in_scope: number
+  backlog_done: number
+  percent_complete: number
+  budget_hours_total: number
+  logged_hours_total: number
+  dev_logged_hours_total: number
+  percent_budget_used: number
+  by_project: IncrementProjectMetrics[]
 }
 
 export type DocumentRevisionMeta = {

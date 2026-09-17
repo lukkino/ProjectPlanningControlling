@@ -17,6 +17,9 @@ export function Sidebar() {
       <NavLink to="/projects-dashboard" className={({ isActive }) => `btn${isActive ? ' active' : ''}`} style={{ marginTop: 8, textAlign: 'center' }}>
         📊 Dashboard progetti
       </NavLink>
+      <NavLink to="/increments" className={({ isActive }) => `btn${isActive ? ' active' : ''}`} style={{ textAlign: 'center' }}>
+        🚀 Increment
+      </NavLink>
       <nav className="project-list">
         {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun progetto ancora.</p>}
         {projects?.map((p) => (

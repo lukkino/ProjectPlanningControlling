@@ -4,6 +4,8 @@ import { BacklogPage } from './pages/BacklogPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
+import { IncrementDetailPage } from './pages/IncrementDetailPage'
+import { IncrementsPage } from './pages/IncrementsPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
@@ -22,6 +24,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
+          <Route path="/increments" element={<IncrementsPage />} />
+          <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="backlog" element={<BacklogPage />} />

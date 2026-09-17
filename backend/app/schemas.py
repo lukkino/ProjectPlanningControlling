@@ -221,6 +221,7 @@ class ProjectBase(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    increment_id: int | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -241,6 +242,7 @@ class ProjectUpdate(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    increment_id: int | None = None
 
 
 class ProjectListItem(ProjectBase):
@@ -253,6 +255,59 @@ class ProjectListItem(ProjectBase):
 class ProjectDetail(ProjectListItem):
     phases: list[Phase] = []
     budget_lines: list[BudgetLine] = []
+
+
+# ---------- Increment ----------
+
+class IncrementBase(BaseModel):
+    code: str
+    name: str | None = None
+    release_date: dt.date | None = None
+    notes: str | None = None
+
+
+class IncrementCreate(IncrementBase):
+    pass
+
+
+class IncrementUpdate(BaseModel):
+    code: str | None = None
+    name: str | None = None
+    release_date: dt.date | None = None
+    notes: str | None = None
+
+
+class Increment(IncrementBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class IncrementProjectMetrics(BaseModel):
+    """Ore/budget del singolo progetto collegato a un Increment: e' la
+    vista di rendicontazione, sempre disponibile accanto al totale
+    aggregato (che e' solo una somma, mai la fonte di verita')."""
+
+    project: ProjectListItem
+    backlog_total: int
+    backlog_in_scope: int
+    backlog_done: int
+    budget_hours_total: float
+    logged_hours_total: float
+
+
+class IncrementDetail(Increment):
+    projects: list[ProjectListItem] = []
+    backlog_total: int
+    backlog_in_scope: int
+    backlog_done: int
+    percent_complete: float
+    budget_hours_total: float
+    logged_hours_total: float
+    dev_logged_hours_total: float
+    percent_budget_used: float
+    by_project: list[IncrementProjectMetrics] = []
 
 
 # ---------- Documents ----------

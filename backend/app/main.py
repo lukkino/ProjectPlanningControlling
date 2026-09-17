@@ -2,13 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models
-from app.database import Base, engine
-from app.routers import backlog, dashboard, documents, forecasting, projects, snapshots
+from app.database import Base, engine, run_lightweight_migrations
+from app.routers import backlog, dashboard, documents, forecasting, increments, projects, snapshots
 
 # MVP: create tables directly from the models on startup instead of a
 # migration tool (Alembic can be introduced later if the schema needs to
 # evolve without dropping data).
 Base.metadata.create_all(bind=engine)
+run_lightweight_migrations()
 
 app = FastAPI(title="Project Planning & Controlling API")
 
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(projects.router)
+app.include_router(increments.router)
 app.include_router(backlog.router)
 app.include_router(snapshots.router)
 app.include_router(dashboard.router)
