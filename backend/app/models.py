@@ -11,21 +11,27 @@ def _utcnow() -> dt.datetime:
 
 
 class Increment(Base):
-    """Un rilascio (es. "PTBSYS-03-004", dicembre): raggruppa uno o piu'
-    Project. Contiene solo cosa esce e quando - budget/ore non sono mai
-    inseriti qui, sempre calcolati sommando i Project collegati, che restano
-    l'unita' di rendicontazione (ore/spese) verso cui sincronizzare Jira."""
+    """Un progetto (es. "PTIH-PT13"), con budget (ore per ruolo + materiali)
+    e durata: puo' raggruppare uno o piu' Project quando le ore vanno
+    rendicontate su Project diversi per lo stesso progetto (es. un Project
+    "principale" + un Project di maintenance)."""
 
     __tablename__ = "increments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
-    release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    estimated_budget_hours: Mapped[float] = mapped_column(Float, default=0)
+    estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="increment", order_by="Project.code")
+    budget_lines: Mapped[list["IncrementBudgetLine"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetLine.order"
+    )
 
 
 class Project(Base):
@@ -54,8 +60,6 @@ class Project(Base):
     # solo i PBI Done da quella data in poi quando si crea una nuova
     # simulazione.
     dev_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    estimated_budget_hours: Mapped[float] = mapped_column(Float, default=0)
-    estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
     jira_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Link al Change Order (sezione Documents), globale per il progetto, con
     # testo alternativo opzionale da mostrare al posto dell'URL.
@@ -71,7 +75,6 @@ class Project(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     phases: Mapped[list["Phase"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Phase.order")
-    budget_lines: Mapped[list["BudgetLine"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BudgetLine.order")
     backlog_items: Mapped[list["BacklogItem"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BacklogItem.priority_order")
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Snapshot.snapshot_date")
     forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
@@ -94,16 +97,16 @@ class Phase(Base):
     project: Mapped["Project"] = relationship(back_populates="phases")
 
 
-class BudgetLine(Base):
-    __tablename__ = "budget_lines"
+class IncrementBudgetLine(Base):
+    __tablename__ = "increment_budget_lines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
     role_name: Mapped[str] = mapped_column(String(128))
     budget_hours: Mapped[float] = mapped_column(Float, default=0)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
-    project: Mapped["Project"] = relationship(back_populates="budget_lines")
+    increment: Mapped["Increment"] = relationship(back_populates="budget_lines")
 
 
 class BacklogItem(Base):

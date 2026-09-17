@@ -21,8 +21,6 @@ const emptyForm = {
   start_date: '',
   code_freeze_date: '',
   planned_finish_date: '',
-  estimated_budget_hours: 0,
-  estimated_budget_material: 0,
   jira_jql: '',
   increment_id: null as number | null,
 }
@@ -38,8 +36,6 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
           start_date: project.start_date ?? '',
           code_freeze_date: project.code_freeze_date ?? '',
           planned_finish_date: project.planned_finish_date ?? '',
-          estimated_budget_hours: project.estimated_budget_hours,
-          estimated_budget_material: project.estimated_budget_material,
           jira_jql: project.jira_jql ?? '',
           increment_id: project.increment_id,
         }
@@ -78,19 +74,18 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
   return (
     // onMouseDown (non onClick) con controllo target===currentTarget: un
     // trascinamento per selezionare testo che parte dentro il modale e
-    // termina fuori (es. selezionare il numero in "Budget ore stimate")
-    // farebbe altrimenti scattare la chiusura, perche' il click viene
-    // attribuito all'antenato comune (l'overlay) tra dove parte il drag e
-    // dove finisce. Il mousedown invece e' valutato subito, sull'elemento
-    // sotto il cursore in quel momento: chiude solo se il press e' partito
-    // proprio sull'overlay (click "fuori" genuino).
+    // termina fuori farebbe altrimenti scattare la chiusura, perche' il
+    // click viene attribuito all'antenato comune (l'overlay) tra dove parte
+    // il drag e dove finisce. Il mousedown invece e' valutato subito,
+    // sull'elemento sotto il cursore in quel momento: chiude solo se il
+    // press e' partito proprio sull'overlay (click "fuori" genuino).
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
         <h3>{project ? 'Modifica increment' : 'Nuovo increment'}</h3>
 
         <div className="form-row">
           <label>Codice increment</label>
-          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTIH-PT13" />
+          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTBSYS-03-003" />
         </div>
         <div className="form-row">
           <label>Nome</label>
@@ -119,24 +114,6 @@ export function ProjectFormModal({ project, defaultIncrementId, onClose }: Props
               type="date"
               value={form.planned_finish_date}
               onChange={(e) => set('planned_finish_date', e.target.value)}
-            />
-          </div>
-        </div>
-        <div className="grid-2">
-          <div className="form-row">
-            <label>Budget ore stimate</label>
-            <input
-              type="number"
-              value={form.estimated_budget_hours}
-              onChange={(e) => set('estimated_budget_hours', Number(e.target.value))}
-            />
-          </div>
-          <div className="form-row">
-            <label>Budget materiali (€)</label>
-            <input
-              type="number"
-              value={form.estimated_budget_material}
-              onChange={(e) => set('estimated_budget_material', Number(e.target.value))}
             />
           </div>
         </div>

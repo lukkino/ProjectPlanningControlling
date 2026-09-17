@@ -1,33 +1,38 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
-import type { BudgetLine } from '../api/types'
+import type { IncrementBudgetLine } from '../api/types'
 
-type Props = { projectId: number }
+type Props = { incrementId: number }
 
-export function BudgetLinesCard({ projectId }: Props) {
+export function IncrementBudgetLinesCard({ incrementId }: Props) {
   const queryClient = useQueryClient()
   const { data: lines } = useQuery({
-    queryKey: ['budget-lines', projectId],
-    queryFn: () => api.budgetLines.list(projectId),
+    queryKey: ['increment-budget-lines', incrementId],
+    queryFn: () => api.incrementBudgetLines.list(incrementId),
   })
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['budget-lines', projectId] })
-    queryClient.invalidateQueries({ queryKey: ['dashboard', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['increment-budget-lines', incrementId] })
+    queryClient.invalidateQueries({ queryKey: ['increment', incrementId] })
   }
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<BudgetLine> }) => api.budgetLines.update(id, data),
+    mutationFn: ({ id, data }: { id: number; data: Partial<IncrementBudgetLine> }) =>
+      api.incrementBudgetLines.update(id, data),
     onSuccess: invalidate,
   })
   const addLine = useMutation({
     mutationFn: () =>
-      api.budgetLines.create(projectId, { role_name: 'Nuovo ruolo', budget_hours: 0, order: (lines?.length ?? 0) + 1 }),
+      api.incrementBudgetLines.create(incrementId, {
+        role_name: 'Nuovo ruolo',
+        budget_hours: 0,
+        order: (lines?.length ?? 0) + 1,
+      }),
     onSuccess: invalidate,
   })
   const removeLine = useMutation({
-    mutationFn: (id: number) => api.budgetLines.remove(id),
+    mutationFn: (id: number) => api.incrementBudgetLines.remove(id),
     onSuccess: invalidate,
   })
 

@@ -6,7 +6,7 @@ import { formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Tab "Progetti" di un increment: mostra/gestisce a quale progetto (entità
-// con codice tipo PTBSYS-03-004, rilascio) questo increment è collegato -
+// con codice tipo PTIH-PT13, budget e durata) questo increment è collegato -
 // il lato opposto del picker già presente nella pagina di dettaglio del
 // progetto stesso. Un increment appartiene al massimo a un progetto.
 export function ProjectIncrementLinkPage() {
@@ -71,7 +71,8 @@ export function ProjectIncrementLinkPage() {
               <tr>
                 <th>Codice</th>
                 <th>Descrizione</th>
-                <th>Data di rilascio</th>
+                <th>Inizio</th>
+                <th>Fine</th>
                 <th>Altri increment nello stesso progetto</th>
                 <th></th>
               </tr>
@@ -82,7 +83,8 @@ export function ProjectIncrementLinkPage() {
                   <Link to={`/increments/${linked.id}`}>{linked.code}</Link>
                 </td>
                 <td style={{ whiteSpace: 'normal', minWidth: 200 }}>{linked.notes ?? <span className="muted">-</span>}</td>
-                <td>{formatIsoDate(linked.release_date) ?? <span className="muted">-</span>}</td>
+                <td>{formatIsoDate(linked.start_date) ?? <span className="muted">-</span>}</td>
+                <td>{formatIsoDate(linked.end_date) ?? <span className="muted">-</span>}</td>
                 <td>
                   {siblings.length === 0 && <span className="muted">-</span>}
                   {siblings.length > 0 && siblings.map((s) => s.code).join(', ')}

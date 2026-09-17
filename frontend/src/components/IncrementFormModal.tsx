@@ -11,8 +11,11 @@ type Props = {
 
 const emptyForm = {
   code: '',
-  release_date: '',
+  start_date: '',
+  end_date: '',
   notes: '',
+  estimated_budget_hours: 0,
+  estimated_budget_material: 0,
 }
 
 export function IncrementFormModal({ increment, onClose }: Props) {
@@ -20,8 +23,11 @@ export function IncrementFormModal({ increment, onClose }: Props) {
     increment
       ? {
           code: increment.code,
-          release_date: increment.release_date ?? '',
+          start_date: increment.start_date ?? '',
+          end_date: increment.end_date ?? '',
           notes: increment.notes ?? '',
+          estimated_budget_hours: increment.estimated_budget_hours,
+          estimated_budget_material: increment.estimated_budget_material,
         }
       : emptyForm,
   )
@@ -32,7 +38,8 @@ export function IncrementFormModal({ increment, onClose }: Props) {
     mutationFn: () => {
       const payload = {
         ...form,
-        release_date: form.release_date || null,
+        start_date: form.start_date || null,
+        end_date: form.end_date || null,
         notes: form.notes || null,
       }
       return increment ? api.increments.update(increment.id, payload) : api.increments.create(payload)
@@ -55,15 +62,39 @@ export function IncrementFormModal({ increment, onClose }: Props) {
 
         <div className="form-row">
           <label>Codice progetto</label>
-          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTBSYS-03-004" />
-        </div>
-        <div className="form-row">
-          <label>Data di rilascio</label>
-          <input type="date" value={form.release_date} onChange={(e) => set('release_date', e.target.value)} />
+          <input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="PTIH-PT13" />
         </div>
         <div className="form-row">
           <label>Descrizione</label>
           <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
+        </div>
+        <div className="grid-2">
+          <div className="form-row">
+            <label>Data inizio</label>
+            <input type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
+          </div>
+          <div className="form-row">
+            <label>Data fine</label>
+            <input type="date" value={form.end_date} onChange={(e) => set('end_date', e.target.value)} />
+          </div>
+        </div>
+        <div className="grid-2">
+          <div className="form-row">
+            <label>Budget ore stimate</label>
+            <input
+              type="number"
+              value={form.estimated_budget_hours}
+              onChange={(e) => set('estimated_budget_hours', Number(e.target.value))}
+            />
+          </div>
+          <div className="form-row">
+            <label>Budget materiali (€)</label>
+            <input
+              type="number"
+              value={form.estimated_budget_material}
+              onChange={(e) => set('estimated_budget_material', Number(e.target.value))}
+            />
+          </div>
         </div>
 
         {save.isError && <div className="error-banner">{(save.error as Error).message}</div>}

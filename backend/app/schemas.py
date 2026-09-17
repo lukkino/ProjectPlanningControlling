@@ -31,28 +31,28 @@ class Phase(PhaseBase):
     project_id: int
 
 
-# ---------- BudgetLine ----------
+# ---------- IncrementBudgetLine ----------
 
-class BudgetLineBase(BaseModel):
+class IncrementBudgetLineBase(BaseModel):
     role_name: str
     budget_hours: float = 0
     order: int = 0
 
 
-class BudgetLineCreate(BudgetLineBase):
+class IncrementBudgetLineCreate(IncrementBudgetLineBase):
     pass
 
 
-class BudgetLineUpdate(BaseModel):
+class IncrementBudgetLineUpdate(BaseModel):
     role_name: str | None = None
     budget_hours: float | None = None
     order: int | None = None
 
 
-class BudgetLine(BudgetLineBase):
+class IncrementBudgetLine(IncrementBudgetLineBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    project_id: int
+    increment_id: int
 
 
 # ---------- BacklogItem ----------
@@ -216,8 +216,6 @@ class ProjectBase(BaseModel):
     code_freeze_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
-    estimated_budget_hours: float = 0
-    estimated_budget_material: float = 0
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
@@ -237,8 +235,6 @@ class ProjectUpdate(BaseModel):
     code_freeze_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
-    estimated_budget_hours: float | None = None
-    estimated_budget_material: float | None = None
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
@@ -254,15 +250,17 @@ class ProjectListItem(ProjectBase):
 
 class ProjectDetail(ProjectListItem):
     phases: list[Phase] = []
-    budget_lines: list[BudgetLine] = []
 
 
 # ---------- Increment ----------
 
 class IncrementBase(BaseModel):
     code: str
-    release_date: dt.date | None = None
     notes: str | None = None
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    estimated_budget_hours: float = 0
+    estimated_budget_material: float = 0
 
 
 class IncrementCreate(IncrementBase):
@@ -271,8 +269,11 @@ class IncrementCreate(IncrementBase):
 
 class IncrementUpdate(BaseModel):
     code: str | None = None
-    release_date: dt.date | None = None
     notes: str | None = None
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    estimated_budget_hours: float | None = None
+    estimated_budget_material: float | None = None
 
 
 class Increment(IncrementBase):
@@ -283,15 +284,14 @@ class Increment(IncrementBase):
 
 
 class IncrementProjectMetrics(BaseModel):
-    """Ore/budget del singolo progetto collegato a un Increment: e' la
-    vista di rendicontazione, sempre disponibile accanto al totale
-    aggregato (che e' solo una somma, mai la fonte di verita')."""
+    """Ore/PBI del singolo increment collegato a un progetto: e' la vista
+    di rendicontazione, sempre disponibile accanto al totale aggregato (che
+    e' solo una somma, mai la fonte di verita')."""
 
     project: ProjectListItem
     backlog_total: int
     backlog_in_scope: int
     backlog_done: int
-    budget_hours_total: float
     logged_hours_total: float
 
 
@@ -305,6 +305,7 @@ class IncrementDetail(Increment):
     logged_hours_total: float
     dev_logged_hours_total: float
     percent_budget_used: float
+    budget_lines: list[IncrementBudgetLine] = []
     by_project: list[IncrementProjectMetrics] = []
 
 
@@ -341,14 +342,11 @@ class DashboardMetrics(BaseModel):
     backlog_in_scope: int
     backlog_done: int
     percent_complete: float
-    budget_hours_total: float
     logged_hours_total: float
     dev_logged_hours_total: float
-    percent_budget_used: float
     percent_time_elapsed: float | None
     spi: float | None
     completion_source: str
     logged_hours_source: str
     last_snapshot_date: dt.date | None
     phases: list[Phase]
-    budget_lines: list[BudgetLine]

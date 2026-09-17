@@ -14,7 +14,7 @@ export function IncrementsPage() {
       <div className="page-header">
         <div>
           <h1>Progetti</h1>
-          <div className="sub">Rilasci: codice, data e contenuto, indipendentemente da quanti increment li compongono.</div>
+          <div className="sub">Codice, descrizione, durata e budget (ore per ruolo + materiali), indipendentemente da quanti increment li compongono.</div>
         </div>
         <button className="btn btn-primary" onClick={() => setShowNew(true)}>
           + Nuovo progetto
@@ -34,7 +34,8 @@ export function IncrementsPage() {
               <tr>
                 <th>Codice</th>
                 <th>Descrizione</th>
-                <th>Data di rilascio</th>
+                <th>Inizio</th>
+                <th>Fine</th>
               </tr>
             </thead>
             <tbody>
@@ -44,7 +45,8 @@ export function IncrementsPage() {
                     <Link to={`/increments/${inc.id}`}>{inc.code}</Link>
                   </td>
                   <td>{inc.notes ?? <span className="muted">-</span>}</td>
-                  <td>{formatIsoDate(inc.release_date) ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(inc.start_date) ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(inc.end_date) ?? <span className="muted">-</span>}</td>
                 </tr>
               ))}
             </tbody>

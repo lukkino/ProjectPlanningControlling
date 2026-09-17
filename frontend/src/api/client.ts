@@ -1,10 +1,10 @@
 import type {
   BacklogItem,
-  BudgetLine,
   DashboardMetrics,
   DocumentRevisionMeta,
   ForecastSimulation,
   Increment,
+  IncrementBudgetLine,
   IncrementDetail,
   Phase,
   PprDeliverable,
@@ -95,12 +95,13 @@ export const api = {
     update: (id: number, data: Partial<Phase>) => put<Phase>(`/projects/phases/${id}`, data),
     remove: (id: number) => del(`/projects/phases/${id}`),
   },
-  budgetLines: {
-    list: (projectId: number) => request<BudgetLine[]>(`/projects/${projectId}/budget-lines`),
-    create: (projectId: number, data: Partial<BudgetLine>) =>
-      post<BudgetLine>(`/projects/${projectId}/budget-lines`, data),
-    update: (id: number, data: Partial<BudgetLine>) => put<BudgetLine>(`/projects/budget-lines/${id}`, data),
-    remove: (id: number) => del(`/projects/budget-lines/${id}`),
+  incrementBudgetLines: {
+    list: (incrementId: number) => request<IncrementBudgetLine[]>(`/increments/${incrementId}/budget-lines`),
+    create: (incrementId: number, data: Partial<IncrementBudgetLine>) =>
+      post<IncrementBudgetLine>(`/increments/${incrementId}/budget-lines`, data),
+    update: (id: number, data: Partial<IncrementBudgetLine>) =>
+      put<IncrementBudgetLine>(`/increments/budget-lines/${id}`, data),
+    remove: (id: number) => del(`/increments/budget-lines/${id}`),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

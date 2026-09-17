@@ -28,12 +28,30 @@ def run_lightweight_migrations() -> None:
     applicate qui a mano, una tantum e in modo idempotente, per non perdere
     i dati gia' presenti in data/app.db."""
     inspector = inspect(engine)
-    if "projects" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "projects" not in table_names:
         return  # prima esecuzione: create_all la crea gia' con la colonna
-    columns = {col["name"] for col in inspector.get_columns("projects")}
-    if "increment_id" not in columns:
+
+    project_columns = {col["name"] for col in inspector.get_columns("projects")}
+    if "increment_id" not in project_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE projects ADD COLUMN increment_id INTEGER REFERENCES increments(id)"))
+
+    if "increments" not in table_names:
+        return  # prima esecuzione: create_all la crea gia' con le colonne nuove
+
+    increment_columns = {col["name"] for col in inspector.get_columns("increments")}
+    if "start_date" not in increment_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE increments ADD COLUMN start_date DATE"))
+            conn.execute(text("ALTER TABLE increments ADD COLUMN end_date DATE"))
+            conn.execute(text("ALTER TABLE increments ADD COLUMN estimated_budget_hours FLOAT DEFAULT 0"))
+            conn.execute(text("ALTER TABLE increments ADD COLUMN estimated_budget_material FLOAT DEFAULT 0"))
+            # release_date (rimosso dal modello, ora sostituito da
+            # start_date/end_date) potrebbe gia' avere un valore inserito a
+            # mano: lo si riporta su end_date per non perderlo.
+            if "release_date" in increment_columns:
+                conn.execute(text("UPDATE increments SET end_date = release_date WHERE release_date IS NOT NULL"))
 
 
 def get_db():

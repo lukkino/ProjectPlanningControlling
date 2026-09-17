@@ -25,8 +25,6 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
     percent_complete = (backlog_done / backlog_in_scope) if backlog_in_scope else 0.0
 
-    budget_hours_total = sum(b.budget_hours for b in project.budget_lines) or project.estimated_budget_hours
-
     # "Ore usate" riflette lo sforzo reale sul progetto: preferiamo le ore
     # effettive dello snapshot (actual_hours) alle ore loggate, perche' queste
     # ultime possono essere solo un sottoinsieme rendicontato su Jira.
@@ -39,8 +37,6 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         logged_hours_source = "snapshot"
     else:
         logged_hours_total = sum(i.logged_hours or 0 for i in items)
-
-    percent_budget_used = (logged_hours_total / budget_hours_total) if budget_hours_total else 0.0
 
     # Ore da Time Tracking Jira sui singoli item di backlog: e' un dato di
     # sola Development (il tempo che gli sviluppatori loggano sulle issue),
@@ -63,39 +59,41 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         backlog_in_scope=backlog_in_scope,
         backlog_done=backlog_done,
         percent_complete=percent_complete,
-        budget_hours_total=budget_hours_total,
         logged_hours_total=logged_hours_total,
         dev_logged_hours_total=dev_logged_hours_total,
-        percent_budget_used=percent_budget_used,
         percent_time_elapsed=percent_time_elapsed,
         spi=spi,
         completion_source=completion_source,
         logged_hours_source=logged_hours_source,
         last_snapshot_date=last_snapshot_date,
         phases=list(project.phases),
-        budget_lines=list(project.budget_lines),
     )
 
 
 def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:
-    """Somma i dashboard metrics dei Project collegati: l'Increment non ha
-    mai un budget/ore proprio, e' sempre un totale derivato (vedi
-    models.Increment). La rendicontazione resta per-progetto in by_project."""
+    """Il budget (ore totali/per ruolo + materiali) e' sempre proprio
+    dell'Increment (vedi models.Increment), mai derivato: qui viene solo
+    confrontato con le ore effettivamente loggate, sommate dai Project
+    collegati. La rendicontazione ore resta per-progetto in by_project."""
     projects = list(increment.projects)
     per_project = [compute_dashboard_metrics(p) for p in projects]
 
     backlog_total = sum(m.backlog_total for m in per_project)
     backlog_in_scope = sum(m.backlog_in_scope for m in per_project)
     backlog_done = sum(m.backlog_done for m in per_project)
-    budget_hours_total = sum(m.budget_hours_total for m in per_project)
     logged_hours_total = sum(m.logged_hours_total for m in per_project)
     dev_logged_hours_total = sum(m.dev_logged_hours_total for m in per_project)
+
+    budget_hours_total = sum(b.budget_hours for b in increment.budget_lines) or increment.estimated_budget_hours
 
     return schemas.IncrementDetail(
         id=increment.id,
         code=increment.code,
-        release_date=increment.release_date,
         notes=increment.notes,
+        start_date=increment.start_date,
+        end_date=increment.end_date,
+        estimated_budget_hours=increment.estimated_budget_hours,
+        estimated_budget_material=increment.estimated_budget_material,
         created_at=increment.created_at,
         updated_at=increment.updated_at,
         projects=projects,
@@ -107,13 +105,13 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         logged_hours_total=logged_hours_total,
         dev_logged_hours_total=dev_logged_hours_total,
         percent_budget_used=(logged_hours_total / budget_hours_total) if budget_hours_total else 0.0,
+        budget_lines=list(increment.budget_lines),
         by_project=[
             schemas.IncrementProjectMetrics(
                 project=project,
                 backlog_total=m.backlog_total,
                 backlog_in_scope=m.backlog_in_scope,
                 backlog_done=m.backlog_done,
-                budget_hours_total=m.budget_hours_total,
                 logged_hours_total=m.logged_hours_total,
             )
             for project, m in zip(projects, per_project)

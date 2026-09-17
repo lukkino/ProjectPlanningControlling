@@ -1,10 +1,10 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { IncrementBudgetLinesCard } from '../components/IncrementBudgetLinesCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { ProjectFormModal } from '../components/ProjectFormModal'
-import { StatusBadge } from '../components/StatusBadge'
 import { formatIsoDate } from '../lib/dates'
 
 export function IncrementDetailPage() {
@@ -24,13 +24,6 @@ export function IncrementDetailPage() {
 
   const { data: allProjects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
   const { data: allIncrements } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
-
-  const backlogQueries = useQueries({
-    queries: (increment?.projects ?? []).map((p) => ({
-      queryKey: ['backlog', p.id],
-      queryFn: () => api.backlog.list(p.id),
-    })),
-  })
 
   const remove = useMutation({
     mutationFn: () => api.increments.remove(id),
@@ -74,18 +67,13 @@ export function IncrementDetailPage() {
     }
   }
 
-  const content = increment.projects.flatMap((project, idx) => {
-    const items = backlogQueries[idx]?.data ?? []
-    return items.map((item) => ({ project, item }))
-  })
-
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>{increment.code}</h1>
           <div className="sub">
-            Rilascio: {formatIsoDate(increment.release_date) ?? 'data non definita'}
+            {formatIsoDate(increment.start_date) ?? 'inizio n.d.'} → {formatIsoDate(increment.end_date) ?? 'fine n.d.'}
             {increment.notes && ` · ${increment.notes}`}
           </div>
         </div>
@@ -114,18 +102,24 @@ export function IncrementDetailPage() {
           </div>
           <div className="stat-chip green">
             <span className="value">{increment.budget_hours_total.toFixed(0)}</span>
-            <span className="label">Budget ore (somma increment)</span>
+            <span className="label">Budget ore</span>
           </div>
           <div className="stat-chip orange">
             <span className="value">{increment.logged_hours_total.toFixed(0)}</span>
             <span className="label">Ore usate (somma increment)</span>
           </div>
+          <div className="stat-chip blue">
+            <span className="value">{increment.estimated_budget_material.toFixed(0)} €</span>
+            <span className="label">Budget materiali</span>
+          </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Totale calcolato sommando gli increment collegati qui sotto: la rendicontazione ore/spese resta sul
-          singolo increment.
+          Il budget (ore e materiali) è proprio di questo progetto; le ore usate sono invece la somma di quanto
+          rendicontato sugli increment collegati qui sotto.
         </p>
       </div>
+
+      <IncrementBudgetLinesCard incrementId={increment.id} />
 
       <div className="card">
         <div className="page-header" style={{ marginBottom: 12 }}>
@@ -162,7 +156,6 @@ export function IncrementDetailPage() {
                   <th>Descrizione</th>
                   <th>Inizio</th>
                   <th>Fine</th>
-                  <th>Budget ore</th>
                   <th>Ore usate</th>
                   <th>PBI Done</th>
                   <th></th>
@@ -182,7 +175,6 @@ export function IncrementDetailPage() {
                     </td>
                     <td>{formatIsoDate(row.project.start_date) ?? <span className="muted">-</span>}</td>
                     <td>{formatIsoDate(row.project.planned_finish_date) ?? <span className="muted">-</span>}</td>
-                    <td>{row.budget_hours_total.toFixed(0)}</td>
                     <td>{row.logged_hours_total.toFixed(0)}</td>
                     <td>
                       {row.backlog_done}/{row.backlog_in_scope}
@@ -195,39 +187,6 @@ export function IncrementDetailPage() {
                       >
                         Scollega
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Contenuto (backlog aggregato)</h3>
-        {content.length === 0 && <p className="muted">Nessun item nel backlog degli increment collegati.</p>}
-        {content.length > 0 && (
-          <div className="table-wrap table-wrap--scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Jira</th>
-                  <th>Increment</th>
-                  <th>Tipo</th>
-                  <th>Sommario</th>
-                  <th>Stato</th>
-                </tr>
-              </thead>
-              <tbody>
-                {content.map(({ project, item }) => (
-                  <tr key={item.id}>
-                    <td>{item.jira_key}</td>
-                    <td>{project.code}</td>
-                    <td>{item.issue_type ?? '-'}</td>
-                    <td style={{ whiteSpace: 'normal' }}>{item.summary ?? '-'}</td>
-                    <td>
-                      <StatusBadge status={item.status} />
                     </td>
                   </tr>
                 ))}

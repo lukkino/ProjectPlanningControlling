@@ -8,9 +8,9 @@ export type Phase = {
   notes: string | null
 }
 
-export type BudgetLine = {
+export type IncrementBudgetLine = {
   id: number
-  project_id: number
+  increment_id: number
   role_name: string
   budget_hours: number
   order: number
@@ -102,8 +102,6 @@ export type Project = {
   code_freeze_date: string | null
   planned_finish_date: string | null
   dev_start_date: string | null
-  estimated_budget_hours: number
-  estimated_budget_material: number
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
@@ -114,14 +112,16 @@ export type Project = {
 
 export type ProjectDetail = Project & {
   phases: Phase[]
-  budget_lines: BudgetLine[]
 }
 
 export type Increment = {
   id: number
   code: string
-  release_date: string | null
   notes: string | null
+  start_date: string | null
+  end_date: string | null
+  estimated_budget_hours: number
+  estimated_budget_material: number
   created_at: string
   updated_at: string
 }
@@ -131,7 +131,6 @@ export type IncrementProjectMetrics = {
   backlog_total: number
   backlog_in_scope: number
   backlog_done: number
-  budget_hours_total: number
   logged_hours_total: number
 }
 
@@ -145,6 +144,7 @@ export type IncrementDetail = Increment & {
   logged_hours_total: number
   dev_logged_hours_total: number
   percent_budget_used: number
+  budget_lines: IncrementBudgetLine[]
   by_project: IncrementProjectMetrics[]
 }
 
@@ -170,15 +170,12 @@ export type DashboardMetrics = {
   backlog_in_scope: number
   backlog_done: number
   percent_complete: number
-  budget_hours_total: number
   logged_hours_total: number
   dev_logged_hours_total: number
-  percent_budget_used: number
   percent_time_elapsed: number | null
   spi: number | null
   completion_source: 'backlog' | 'snapshot'
   logged_hours_source: 'backlog' | 'snapshot'
   last_snapshot_date: string | null
   phases: Phase[]
-  budget_lines: BudgetLine[]
 }
