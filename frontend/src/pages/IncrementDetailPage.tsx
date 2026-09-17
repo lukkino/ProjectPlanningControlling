@@ -12,6 +12,7 @@ export function IncrementDetailPage() {
   const id = Number(incrementId)
   const [showEdit, setShowEdit] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
+  const [pickedProjectId, setPickedProjectId] = useState('')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -20,6 +21,9 @@ export function IncrementDetailPage() {
     queryFn: () => api.increments.get(id),
     enabled: !Number.isNaN(id),
   })
+
+  const { data: allProjects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
+  const { data: allIncrements } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
 
   const backlogQueries = useQueries({
     queries: (increment?.projects ?? []).map((p) => ({
@@ -36,7 +40,29 @@ export function IncrementDetailPage() {
     },
   })
 
+  // Collega/scollega un progetto GIA' ESISTENTE a questo increment: e' solo
+  // un update del campo increment_id sul progetto, nessun nuovo progetto
+  // viene creato. Usato sia dal picker sotto sia dal bottone "Scollega".
+  const setProjectIncrement = useMutation({
+    mutationFn: ({ projectId, incrementId: newIncrementId }: { projectId: number; incrementId: number | null }) =>
+      api.projects.update(projectId, { increment_id: newIncrementId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['increment', id] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+
   if (isLoading || !increment) return <p className="muted">Caricamento...</p>
+
+  const linkedIds = new Set(increment.projects.map((p) => p.id))
+  const incrementCodeById = new Map((allIncrements ?? []).map((inc) => [inc.id, inc.code]))
+  const attachableProjects = (allProjects ?? []).filter((p) => !linkedIds.has(p.id))
+
+  const handleAttach = () => {
+    if (!pickedProjectId) return
+    setProjectIncrement.mutate({ projectId: Number(pickedProjectId), incrementId: increment.id })
+    setPickedProjectId('')
+  }
 
   const handleDelete = () => {
     if (
@@ -114,11 +140,24 @@ export function IncrementDetailPage() {
             + Nuovo progetto in questo increment
           </button>
         </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+          <select value={pickedProjectId} onChange={(e) => setPickedProjectId(e.target.value)} style={{ flex: 1 }}>
+            <option value="">Collega un progetto già creato...</option>
+            {attachableProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.code} · {p.name}
+                {p.increment_id ? ` (già in ${incrementCodeById.get(p.increment_id) ?? '?'})` : ''}
+              </option>
+            ))}
+          </select>
+          <button className="btn" disabled={!pickedProjectId || setProjectIncrement.isPending} onClick={handleAttach}>
+            Collega
+          </button>
+        </div>
+
         {increment.by_project.length === 0 && (
-          <p className="muted">
-            Nessun progetto collegato. Crea un progetto qui sopra, oppure collega un progetto esistente modificandolo
-            e scegliendo questo increment.
-          </p>
+          <p className="muted">Nessun progetto collegato ancora: scegline uno esistente qui sopra.</p>
         )}
         {increment.by_project.length > 0 && (
           <div className="table-wrap">
@@ -129,6 +168,7 @@ export function IncrementDetailPage() {
                   <th>PBI Done</th>
                   <th>Budget ore</th>
                   <th>Ore usate</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -144,6 +184,15 @@ export function IncrementDetailPage() {
                     </td>
                     <td>{row.budget_hours_total.toFixed(0)}</td>
                     <td>{row.logged_hours_total.toFixed(0)}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        disabled={setProjectIncrement.isPending}
+                        onClick={() => setProjectIncrement.mutate({ projectId: row.project.id, incrementId: null })}
+                      >
+                        Scollega
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
