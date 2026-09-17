@@ -165,9 +165,13 @@ export function IncrementDetailPage() {
               <thead>
                 <tr>
                   <th>Progetto</th>
-                  <th>PBI Done</th>
+                  <th>Descrizione</th>
+                  <th>Inizio</th>
+                  <th>Fine</th>
+                  <th>Budget per ruolo</th>
                   <th>Budget ore</th>
                   <th>Ore usate</th>
+                  <th>PBI Done</th>
                   <th></th>
                 </tr>
               </thead>
@@ -175,15 +179,26 @@ export function IncrementDetailPage() {
                 {increment.by_project.map((row) => (
                   <tr key={row.project.id}>
                     <td>
-                      <Link to={`/projects/${row.project.id}`}>
-                        {row.project.code} · {row.project.name}
-                      </Link>
+                      <Link to={`/projects/${row.project.id}`}>{row.project.code}</Link>
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {row.project.name}
+                      </div>
                     </td>
-                    <td>
-                      {row.backlog_done}/{row.backlog_in_scope}
+                    <td style={{ whiteSpace: 'normal', minWidth: 200 }}>
+                      {row.project.scope ?? <span className="muted">-</span>}
+                    </td>
+                    <td>{formatIsoDate(row.project.start_date) ?? <span className="muted">-</span>}</td>
+                    <td>{formatIsoDate(row.project.planned_finish_date) ?? <span className="muted">-</span>}</td>
+                    <td style={{ whiteSpace: 'normal', minWidth: 180 }}>
+                      {row.budget_lines.length === 0 && <span className="muted">-</span>}
+                      {row.budget_lines.length > 0 &&
+                        row.budget_lines.map((l) => `${l.role_name}: ${l.budget_hours}h`).join(' · ')}
                     </td>
                     <td>{row.budget_hours_total.toFixed(0)}</td>
                     <td>{row.logged_hours_total.toFixed(0)}</td>
+                    <td>
+                      {row.backlog_done}/{row.backlog_in_scope}
+                    </td>
                     <td>
                       <button
                         className="btn"
@@ -199,6 +214,10 @@ export function IncrementDetailPage() {
             </table>
           </div>
         )}
+        <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+          Il budget per ruolo si modifica dalla pagina del singolo progetto (Dashboard → Budget ore per ruolo), dove
+          puoi anche aggiungerne di nuovi.
+        </p>
       </div>
 
       <div className="card">
