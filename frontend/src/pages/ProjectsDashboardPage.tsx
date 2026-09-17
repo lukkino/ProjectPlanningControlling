@@ -29,7 +29,7 @@ type Milestone = { label: string; epoch: number }
 function buildMilestones(project: Project, phases: Phase[]): Milestone[] {
   const milestones: Milestone[] = []
   const startEpoch = dateStrToEpochDays(project.start_date)
-  if (startEpoch !== null) milestones.push({ label: 'Inizio progetto', epoch: startEpoch })
+  if (startEpoch !== null) milestones.push({ label: 'Inizio increment', epoch: startEpoch })
 
   for (const phase of [...phases].sort((a, b) => a.order - b.order)) {
     let epoch = dateStrToEpochDays(phase.planned_date) ?? dateStrToEpochDays(phase.actual_date)
@@ -115,9 +115,9 @@ export function ProjectsDashboardPage() {
   if (allEpochs.length === 0) {
     return (
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Dashboard progetti</h3>
+        <h3 style={{ marginTop: 0 }}>Dashboard increment</h3>
         <p className="muted">
-          Nessuna data disponibile (data inizio progetto o date fasi) su nessun progetto: non c'e' ancora niente da
+          Nessuna data disponibile (data inizio increment o date fasi) su nessun increment: non c'e' ancora niente da
           mostrare nel Gantt.
         </p>
       </div>
@@ -150,9 +150,9 @@ export function ProjectsDashboardPage() {
   return (
     <div>
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Dashboard progetti</h3>
+        <h3 style={{ marginTop: 0 }}>Dashboard increment</h3>
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
-          Panoramica di tutti i progetti: ogni barra va dalla data di inizio progetto alla fase di deployment/rilascio,
+          Panoramica di tutti gli increment: ogni barra va dalla data di inizio increment alla fase di deployment/rilascio,
           passando per le fasi intermedie (sempre almeno Kick-off, Planning, Execution, Deployment, Release to
           Market), per individuare sovrapposizioni e date di rilascio vicine. Passa il mouse su un segmento per
           vedere la fase e le date esatte. La linea rossa tratteggiata indica la data odierna.

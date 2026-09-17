@@ -35,7 +35,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
 
   const error = update.error ?? addPhase.error ?? removePhase.error
 
-  // Fase corrente: quella il cui nome corrisponde allo Stato progetto scelto
+  // Fase corrente: quella il cui nome corrisponde allo Stato increment scelto
   // in Dashboard (il menu li' e' popolato proprio dai nomi di queste fasi).
   const currentPhaseIndex = (phases ?? []).findIndex((p) => p.name === currentStatus)
 
@@ -49,7 +49,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
 
   return (
     <div className="card">
-      <h3>Fasi progetto</h3>
+      <h3>Fasi increment</h3>
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
       <div className="grid-3-2">
         <div className="table-wrap">

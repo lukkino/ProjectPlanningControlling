@@ -326,7 +326,7 @@ export function DocumentsPage() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Genera documenti</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Compila Cover e foglio dati dei template Excel ufficiali con i dati di questo progetto.
+          Compila Cover e foglio dati dei template Excel ufficiali con i dati di questo increment.
         </p>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <DocumentDownloadButton

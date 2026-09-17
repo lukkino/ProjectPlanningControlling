@@ -51,7 +51,7 @@ export function SnapshotsPage() {
     <div className="card">
       <h3>Storico avanzamento</h3>
       <p className="muted">
-        Registra periodicamente una fotografia dello stato del progetto per tracciarne l'andamento nel tempo (mostrato
+        Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
         nel grafico della Dashboard).
       </p>
       <div className="table-wrap">

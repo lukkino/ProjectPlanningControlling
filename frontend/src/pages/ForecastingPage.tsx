@@ -111,7 +111,7 @@ export function ForecastingPage() {
         <div>
           <h3 style={{ margin: 0 }}>Forecasting</h3>
           <span className="sub muted">
-            Simulazioni periodiche di throughput usate per proiettare la data di completamento del progetto.
+            Simulazioni periodiche di throughput usate per proiettare la data di completamento dell'increment.
           </span>
         </div>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>

@@ -512,7 +512,7 @@ export function BacklogPage() {
             {project.jira_jql ? (
               <span className="muted">JQL: {project.jira_jql}</span>
             ) : (
-              <span className="muted">Nessuna JQL configurata — modificala nella scheda progetto per abilitare la sync.</span>
+              <span className="muted">Nessuna JQL configurata — modificala nella scheda increment per abilitare la sync.</span>
             )}
           </span>
         </div>

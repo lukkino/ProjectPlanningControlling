@@ -90,7 +90,7 @@ export function DashboardPage() {
     <div>
       <div className="card">
         <div className="page-header" style={{ marginBottom: 0 }}>
-          <h3 style={{ margin: 0 }}>Stato progetto</h3>
+          <h3 style={{ margin: 0 }}>Stato increment</h3>
           <select
             value={project.status}
             onChange={(e) => updateStatus.mutate(e.target.value)}
@@ -164,7 +164,7 @@ export function DashboardPage() {
         <h3>Ore Usate nel Tempo</h3>
         {hoursChartData.length === 0 ? (
           <p className="muted">
-            Servono la data di inizio progetto e la data di code freeze (scheda progetto) per tracciare le ore nel
+            Servono la data di inizio increment e la data di code freeze (scheda increment) per tracciare le ore nel
             tempo.
           </p>
         ) : (
