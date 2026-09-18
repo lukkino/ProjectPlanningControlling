@@ -12,7 +12,6 @@ export type IncrementBudgetLine = {
   id: number
   increment_id: number
   category_name: string
-  budget_value: number
   is_hours: boolean
   order: number
 }
@@ -20,6 +19,7 @@ export type IncrementBudgetLine = {
 export type IncrementSnapshotValue = {
   id: number
   budget_line_id: number
+  budget_value: number
   actual_value: number
 }
 

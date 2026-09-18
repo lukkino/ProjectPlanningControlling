@@ -104,17 +104,16 @@ class Phase(Base):
 
 
 class IncrementBudgetLine(Base):
-    """Una voce di budget del progetto (es. "Hours", "Prototype",
-    "Travels"): solo il target di budget, mai un valore inserito nel tempo -
-    quello vive nell'Andamento (vedi IncrementSnapshotValue), una voce per
-    ogni IncrementSnapshot di questo Increment."""
+    """Una voce del progetto (es. "Hours", "Prototype", "Travels"): solo il
+    nome e l'unita' (is_hours), niente valori - Budget e Actual vivono
+    entrambi per snapshot (vedi IncrementSnapshotValue), perche' anche il
+    budget puo' cambiare nel tempo (raramente, per una revisione budget)."""
 
     __tablename__ = "increment_budget_lines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
     category_name: Mapped[str] = mapped_column(String(128))
-    budget_value: Mapped[float] = mapped_column(Float, default=0)
     # Distingue le voci in ore (sommate in "Budget ore"/"Ore usate" del
     # Totale progetto) da quelle in altra unita', tipicamente euro (sommate
     # in "Budget materiali"): puramente per i totali aggregati, l'utente
@@ -126,8 +125,8 @@ class IncrementBudgetLine(Base):
 
 
 class IncrementSnapshot(Base):
-    """Andamento del progetto: una fotografia periodica dei valori Actual
-    (cumulativi ad oggi, non del solo periodo) per ogni voce di budget -
+    """Storico progetto: una fotografia periodica di Budget e Actual
+    (entrambi cumulativi ad oggi, non del solo periodo) per ogni voce -
     stesso concetto dello Snapshot dell'Increment, applicato alle voci di
     budget invece che a PBI/ore Jira."""
 
@@ -150,6 +149,9 @@ class IncrementSnapshotValue(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     snapshot_id: Mapped[int] = mapped_column(ForeignKey("increment_snapshots.id", ondelete="CASCADE"))
     budget_line_id: Mapped[int] = mapped_column(ForeignKey("increment_budget_lines.id", ondelete="CASCADE"))
+    # Di solito costante da uno snapshot all'altro (un nuovo snapshot riparte
+    # dal valore del precedente): editabile per le rare revisioni di budget.
+    budget_value: Mapped[float] = mapped_column(Float, default=0)
     actual_value: Mapped[float] = mapped_column(Float, default=0)
 
     snapshot: Mapped["IncrementSnapshot"] = relationship(back_populates="values")

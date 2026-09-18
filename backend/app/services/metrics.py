@@ -71,30 +71,38 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
 
 def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:
-    """Il budget (per voce, vedi IncrementBudgetLine) e' sempre proprio di
-    questo progetto, mai derivato. Backlog (PBI, % completamento) invece non
-    e' suo: e' preso pari pari dal Project (rilascio) collegato, se
-    assegnato - un progetto non ha un backlog Jira proprio.
+    """Budget e Actual vivono entrambi nello Storico progetto (l'ultimo
+    IncrementSnapshot, vedi models.py), mai sulla voce stessa - una
+    revisione budget puo' cambiarli nel tempo come l'Actual. Backlog (PBI,
+    % completamento) invece non e' suo: e' preso pari pari dal Project
+    (rilascio) collegato, se assegnato - un progetto non ha un backlog Jira
+    proprio.
 
-    Le ore usate invece si dividono tra i progetti collegati allo stesso
-    Project quando sono piu' di uno (es. principale + maintenance): Jira non
-    sa quale progetto rendicontare, quindi si preferisce la somma dei valori
-    Actual dell'ultimo Andamento (IncrementSnapshot) sulle voci is_hours;
-    solo se l'Andamento e' ancora vuoto si ricade sul totale Jira del
-    Project collegato (comportamento corretto quando il progetto e' l'unico
-    collegato a quel Project)."""
+    Le ore usate si dividono tra i progetti collegati allo stesso Project
+    quando sono piu' di uno (es. principale + maintenance): Jira non sa
+    quale progetto rendicontare, quindi si preferisce la somma dei valori
+    Actual dell'ultimo snapshot sulle voci is_hours; solo se lo Storico e'
+    ancora vuoto si ricade sul totale Jira del Project collegato
+    (comportamento corretto quando il progetto e' l'unico collegato a quel
+    Project)."""
     project_metrics = compute_dashboard_metrics(increment.project) if increment.project else None
 
     hours_lines = [b for b in increment.budget_lines if b.is_hours]
     material_lines = [b for b in increment.budget_lines if not b.is_hours]
-    budget_hours_total = sum(b.budget_value for b in hours_lines) or increment.estimated_budget_hours
-    budget_material_total = sum(b.budget_value for b in material_lines) or increment.estimated_budget_material
 
     # increment.snapshots e' ordinato per snapshot_date crescente (vedi
     # models.py), quindi l'ultimo elemento e' la fotografia piu' recente.
     latest_snapshot = increment.snapshots[-1] if increment.snapshots else None
-    latest_value_by_line = {v.budget_line_id: v.actual_value for v in latest_snapshot.values} if latest_snapshot else {}
-    actual_hours_total = sum(latest_value_by_line.get(b.id, 0) for b in hours_lines)
+    latest_by_line = {v.budget_line_id: v for v in latest_snapshot.values} if latest_snapshot else {}
+
+    budget_hours_total = sum(
+        latest_by_line[b.id].budget_value for b in hours_lines if b.id in latest_by_line
+    ) or increment.estimated_budget_hours
+    budget_material_total = sum(
+        latest_by_line[b.id].budget_value for b in material_lines if b.id in latest_by_line
+    ) or increment.estimated_budget_material
+
+    actual_hours_total = sum(latest_by_line[b.id].actual_value for b in hours_lines if b.id in latest_by_line)
     logged_hours_total = actual_hours_total if latest_snapshot else (
         project_metrics.logged_hours_total if project_metrics else 0.0
     )

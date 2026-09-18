@@ -35,7 +35,6 @@ class Phase(PhaseBase):
 
 class IncrementBudgetLineBase(BaseModel):
     category_name: str
-    budget_value: float = 0
     is_hours: bool = False
     order: int = 0
 
@@ -46,7 +45,6 @@ class IncrementBudgetLineCreate(IncrementBudgetLineBase):
 
 class IncrementBudgetLineUpdate(BaseModel):
     category_name: str | None = None
-    budget_value: float | None = None
     is_hours: bool | None = None
     order: int | None = None
 
@@ -57,17 +55,19 @@ class IncrementBudgetLine(IncrementBudgetLineBase):
     increment_id: int
 
 
-# ---------- IncrementSnapshot (Andamento del progetto) ----------
+# ---------- IncrementSnapshot (Storico progetto) ----------
 
 class IncrementSnapshotValue(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     budget_line_id: int
+    budget_value: float
     actual_value: float
 
 
 class IncrementSnapshotValueUpdate(BaseModel):
-    actual_value: float
+    budget_value: float | None = None
+    actual_value: float | None = None
 
 
 class IncrementSnapshotBase(BaseModel):

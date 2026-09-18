@@ -142,6 +142,29 @@ def run_lightweight_migrations() -> None:
                 if increments_to_migrate:
                     conn.execute(text("UPDATE increment_budget_lines SET actual_hours = 0"))
 
+    if "increment_snapshot_values" in table_names:
+        value_columns = {col["name"] for col in inspector.get_columns("increment_snapshot_values")}
+        if "budget_value" not in value_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_snapshot_values ADD COLUMN budget_value FLOAT DEFAULT 0"))
+                # Il budget era finora un valore unico per voce (valido per
+                # tutta la vita del progetto): diventa anch'esso per
+                # snapshot (una revisione budget puo' cambiarlo nel tempo),
+                # quindi si riporta su OGNI snapshot esistente il valore
+                # attuale della voce, cosi' non sparisce.
+                if "increment_budget_lines" in table_names:
+                    budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
+                    if "budget_value" in budget_line_columns:
+                        conn.execute(
+                            text(
+                                "UPDATE increment_snapshot_values "
+                                "SET budget_value = ("
+                                "SELECT budget_value FROM increment_budget_lines "
+                                "WHERE increment_budget_lines.id = increment_snapshot_values.budget_line_id"
+                                ")"
+                            )
+                        )
+
 
 def get_db():
     db: Session = SessionLocal()

@@ -114,8 +114,8 @@ export const api = {
     remove: (id: number) => del(`/increments/snapshots/${id}`),
   },
   incrementSnapshotValues: {
-    update: (id: number, actualValue: number) =>
-      put<IncrementSnapshotValue>(`/increments/snapshot-values/${id}`, { actual_value: actualValue }),
+    update: (id: number, data: Partial<IncrementSnapshotValue>) =>
+      put<IncrementSnapshotValue>(`/increments/snapshot-values/${id}`, data),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

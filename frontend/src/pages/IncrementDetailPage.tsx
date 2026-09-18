@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { IncrementAndamentoCard } from '../components/IncrementAndamentoCard'
+import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { formatIsoDate } from '../lib/dates'
 
@@ -108,7 +108,7 @@ export function IncrementDetailPage() {
         </p>
       </div>
 
-      <IncrementAndamentoCard incrementId={increment.id} />
+      <IncrementHistoryCard incrementId={increment.id} />
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Increment collegato</h3>
