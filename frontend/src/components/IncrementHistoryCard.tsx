@@ -164,13 +164,21 @@ export function IncrementHistoryCard({ incrementId }: Props) {
                     ✕
                   </button>
                 </div>
-                <table>
+                <table style={{ tableLayout: 'fixed', width: '100%' }}>
+                  <colgroup>
+                    <col style={{ width: 190 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 150 }} />
+                    <col style={{ width: 90 }} />
+                    <col style={{ width: 40 }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Area</th>
                       <th>Budget</th>
                       <th>Actual</th>
-                      <th>Diff previous snapshot</th>
+                      <th style={{ whiteSpace: 'normal' }}>Diff previous snapshot</th>
                       <th>% Used</th>
                       <th />
                     </tr>
