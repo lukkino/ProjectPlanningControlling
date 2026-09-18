@@ -13,6 +13,7 @@ export type IncrementBudgetLine = {
   increment_id: number
   role_name: string
   budget_hours: number
+  actual_hours: number
   order: number
 }
 

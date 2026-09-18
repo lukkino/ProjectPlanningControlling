@@ -107,6 +107,9 @@ class IncrementBudgetLine(Base):
     increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
     role_name: Mapped[str] = mapped_column(String(128))
     budget_hours: Mapped[float] = mapped_column(Float, default=0)
+    # Ore effettivamente lavorate per questo ruolo, inserite a mano (nessuna
+    # sorgente automatica: Jira non traccia il ruolo di chi logga le ore).
+    actual_hours: Mapped[float] = mapped_column(Float, default=0)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     increment: Mapped["Increment"] = relationship(back_populates="budget_lines")

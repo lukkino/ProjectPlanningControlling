@@ -1,9 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import type { IncrementBudgetLine } from '../api/types'
 
 type Props = { incrementId: number }
+
+// Stesso blu/arancio gia' usato altrove nell'app per confrontare due serie
+// (es. DashboardPage, Actual vs Actual logged): qui budget vs actual.
+const COLOR_BUDGET = '#2f6fed'
+const COLOR_ACTUAL = '#eb6834'
 
 export function IncrementBudgetLinesCard({ incrementId }: Props) {
   const queryClient = useQueryClient()
@@ -36,7 +41,7 @@ export function IncrementBudgetLinesCard({ incrementId }: Props) {
     onSuccess: invalidate,
   })
 
-  const chartData = (lines ?? []).map((l) => ({ name: l.role_name, ore: l.budget_hours }))
+  const chartData = (lines ?? []).map((l) => ({ name: l.role_name, budget: l.budget_hours, actual: l.actual_hours }))
   const error = update.error ?? addLine.error ?? removeLine.error
 
   return (
@@ -50,6 +55,7 @@ export function IncrementBudgetLinesCard({ incrementId }: Props) {
               <tr>
                 <th>Ruolo</th>
                 <th>Ore budget</th>
+                <th>Ore actual</th>
                 <th />
               </tr>
             </thead>
@@ -71,6 +77,13 @@ export function IncrementBudgetLinesCard({ incrementId }: Props) {
                       onBlur={(e) => update.mutate({ id: line.id, data: { budget_hours: Number(e.target.value) } })}
                     />
                   </td>
+                  <td className="editable-cell">
+                    <input
+                      type="number"
+                      defaultValue={line.actual_hours}
+                      onBlur={(e) => update.mutate({ id: line.id, data: { actual_hours: Number(e.target.value) } })}
+                    />
+                  </td>
                   <td>
                     <button className="btn btn-danger" onClick={() => removeLine.mutate(line.id)}>
                       ✕
@@ -80,7 +93,7 @@ export function IncrementBudgetLinesCard({ incrementId }: Props) {
               ))}
               {lines?.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="muted">
+                  <td colSpan={4} className="muted">
                     Nessuna riga di budget.
                   </td>
                 </tr>
@@ -95,14 +108,16 @@ export function IncrementBudgetLinesCard({ incrementId }: Props) {
         </div>
 
         {chartData.length > 0 && (
-          <div style={{ height: 200 }}>
+          <div style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} layout="vertical" margin={{ left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                 <XAxis type="number" />
                 <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Bar dataKey="ore" fill="#2f6fed" radius={[0, 4, 4, 0]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="budget" name="Budget" fill={COLOR_BUDGET} radius={[0, 4, 4, 0]} />
+                <Bar dataKey="actual" name="Actual" fill={COLOR_ACTUAL} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

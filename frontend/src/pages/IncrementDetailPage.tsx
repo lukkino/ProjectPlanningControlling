@@ -85,16 +85,6 @@ export function IncrementDetailPage() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Totale progetto</h3>
         <div className="stat-chips">
-          <div className="stat-chip blue">
-            <span className="value">
-              {increment.backlog_done}/{increment.backlog_in_scope}
-            </span>
-            <span className="label">PBI Done</span>
-          </div>
-          <div className="stat-chip violet">
-            <span className="value">{(increment.percent_complete * 100).toFixed(0)}%</span>
-            <span className="label">Completamento</span>
-          </div>
           <div className="stat-chip green">
             <span className="value">{increment.budget_hours_total.toFixed(0)}</span>
             <span className="label">Budget ore</span>
@@ -102,6 +92,10 @@ export function IncrementDetailPage() {
           <div className="stat-chip orange">
             <span className="value">{increment.logged_hours_total.toFixed(0)}</span>
             <span className="label">Ore usate</span>
+          </div>
+          <div className="stat-chip violet">
+            <span className="value">{(increment.percent_budget_used * 100).toFixed(0)}%</span>
+            <span className="label">% ore usate su budget</span>
           </div>
           <div className="stat-chip blue">
             <span className="value">{increment.estimated_budget_material.toFixed(0)} €</span>

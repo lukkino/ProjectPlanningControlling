@@ -76,6 +76,12 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN progetto_id INTEGER REFERENCES increments(id)"))
 
+    if "increment_budget_lines" in table_names:
+        budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
+        if "actual_hours" not in budget_line_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_budget_lines ADD COLUMN actual_hours FLOAT DEFAULT 0"))
+
 
 def get_db():
     db: Session = SessionLocal()

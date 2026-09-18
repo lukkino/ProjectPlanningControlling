@@ -36,6 +36,7 @@ class Phase(PhaseBase):
 class IncrementBudgetLineBase(BaseModel):
     role_name: str
     budget_hours: float = 0
+    actual_hours: float = 0
     order: int = 0
 
 
@@ -46,6 +47,7 @@ class IncrementBudgetLineCreate(IncrementBudgetLineBase):
 class IncrementBudgetLineUpdate(BaseModel):
     role_name: str | None = None
     budget_hours: float | None = None
+    actual_hours: float | None = None
     order: int | None = None
 
 
