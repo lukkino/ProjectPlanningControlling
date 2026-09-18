@@ -25,6 +25,17 @@ function formatDiff(value: number, isHours: boolean): string {
   return value > 0 ? `+${formatValue(value, isHours)}` : formatValue(value, isHours)
 }
 
+// Inverso di formatValue per le voci in €: rimuove il simbolo e i separatori
+// delle migliaia (".") e converte la virgola decimale in punto, cosi' un
+// campo di testo puo' mostrare "310.500,00 €" e restare comunque
+// modificabile. Le voci in ore restano un input numerico semplice (vedi
+// sotto), che non ne ha bisogno.
+function parseCurrencyInput(text: string): number {
+  const cleaned = text.trim().replace(/€/g, '').replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
+  const n = Number(cleaned)
+  return Number.isFinite(n) ? n : 0
+}
+
 export function IncrementHistoryCard({ incrementId }: Props) {
   const [showAll, setShowAll] = useState(false)
   const queryClient = useQueryClient()
@@ -213,22 +224,44 @@ export function IncrementHistoryCard({ incrementId }: Props) {
                             </div>
                           </td>
                           <td className="editable-cell">
-                            <input
-                              type="number"
-                              defaultValue={value?.budget_value ?? 0}
-                              onBlur={(e) =>
-                                value && updateValue.mutate({ id: value.id, data: { budget_value: Number(e.target.value) } })
-                              }
-                            />
+                            {line.is_hours ? (
+                              <input
+                                type="number"
+                                defaultValue={value?.budget_value ?? 0}
+                                onBlur={(e) =>
+                                  value && updateValue.mutate({ id: value.id, data: { budget_value: Number(e.target.value) } })
+                                }
+                              />
+                            ) : (
+                              <input
+                                key={value?.budget_value}
+                                defaultValue={formatValue(value?.budget_value ?? 0, false)}
+                                onBlur={(e) =>
+                                  value &&
+                                  updateValue.mutate({ id: value.id, data: { budget_value: parseCurrencyInput(e.target.value) } })
+                                }
+                              />
+                            )}
                           </td>
                           <td className="editable-cell">
-                            <input
-                              type="number"
-                              defaultValue={value?.actual_value ?? 0}
-                              onBlur={(e) =>
-                                value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
-                              }
-                            />
+                            {line.is_hours ? (
+                              <input
+                                type="number"
+                                defaultValue={value?.actual_value ?? 0}
+                                onBlur={(e) =>
+                                  value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
+                                }
+                              />
+                            ) : (
+                              <input
+                                key={value?.actual_value}
+                                defaultValue={formatValue(value?.actual_value ?? 0, false)}
+                                onBlur={(e) =>
+                                  value &&
+                                  updateValue.mutate({ id: value.id, data: { actual_value: parseCurrencyInput(e.target.value) } })
+                                }
+                              />
+                            )}
                           </td>
                           <td>{formatDiff(diff, line.is_hours)}</td>
                           <td
