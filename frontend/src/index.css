@@ -267,7 +267,12 @@ tbody tr:hover { background: var(--bg); }
    delle colonne sotto trasparirebbe) e l'ordine di sovrapposizione. */
 .sticky-col { position: sticky; z-index: 1; background: var(--surface); }
 tbody tr:hover .sticky-col { background: var(--bg); }
-.sticky-col-header { position: sticky; z-index: 3; background: var(--surface); }
+/* Specificita': ".backlog-table--fixed th" (elemento+classe) batterebbe il
+   solo ".sticky-col-header" (classe) e il suo z-index:2 vincerebbe sempre -
+   e' esattamente il bug per cui le colonne non congelate scorrevano sopra
+   a Jira Key/Summary invece che sotto. Qui la specificita' e' la stessa
+   (elemento+classe), ma essendo dichiarata dopo vince lei. */
+.backlog-table--fixed th.sticky-col-header { position: sticky; z-index: 3; background: var(--surface); }
 
 /* Barra di scroll orizzontale "specchio", sopra la tabella: la vera barra
    (in fondo a .table-wrap) resta comunque utilizzabile, ma quando si e' in
