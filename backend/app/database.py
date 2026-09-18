@@ -70,6 +70,12 @@ def run_lightweight_migrations() -> None:
                     )
                 )
 
+    if "backlog_items" in table_names:
+        backlog_columns = {col["name"] for col in inspector.get_columns("backlog_items")}
+        if "progetto_id" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN progetto_id INTEGER REFERENCES increments(id)"))
+
 
 def get_db():
     db: Session = SessionLocal()

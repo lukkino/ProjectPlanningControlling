@@ -76,6 +76,7 @@ class BacklogItemBase(BaseModel):
     refinement_date: str | None = None
     ta_date: str | None = None
     notes: str | None = None
+    progetto_id: int | None = None
 
 
 class BacklogItemCreate(BacklogItemBase):
@@ -100,6 +101,7 @@ class BacklogItemUpdate(BaseModel):
     refinement_date: str | None = None
     ta_date: str | None = None
     notes: str | None = None
+    progetto_id: int | None = None
 
 
 class BacklogItem(BacklogItemBase):

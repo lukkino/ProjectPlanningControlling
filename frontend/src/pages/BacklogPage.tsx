@@ -70,6 +70,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   duration: 70,
   logged_hours: 75,
   dev_effort_hours: 90,
+  progetto_id: 130,
   notes: 160,
 }
 const HANDLE_COLUMN_WIDTH = 30
@@ -330,6 +331,29 @@ export function BacklogPage() {
       // Sincronizzato da Jira (campo "Developer Effort", solo sulle Story):
       // non editabile qui, verrebbe comunque sovrascritto al prossimo sync.
       render: (item) => item.dev_effort_hours ?? <span className="muted">—</span>,
+    },
+    {
+      key: 'progetto_id',
+      label: 'Progetto',
+      className: 'editable-cell',
+      // Progetto su cui rendicontare le ore di questo item: solo tra quelli
+      // collegati a questo increment (project.progetti), scelto a mano - mai
+      // toccato dal sync.
+      render: (item) => (
+        <select
+          value={item.progetto_id ?? ''}
+          onChange={(e) =>
+            update.mutate({ id: item.id, data: { progetto_id: e.target.value ? Number(e.target.value) : null } })
+          }
+        >
+          <option value="">—</option>
+          {project.progetti.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.code}
+            </option>
+          ))}
+        </select>
+      ),
     },
     {
       key: 'notes',

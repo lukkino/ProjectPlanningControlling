@@ -180,8 +180,13 @@ class BacklogItem(Base):
     refinement_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ta_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Progetto su cui rendicontare le ore di questo item, scelto a mano tra
+    # quelli collegati al Project (Increment) di questo item: serve quando un
+    # Increment ha piu' progetti collegati e le ore vanno divise tra loro.
+    progetto_id: Mapped[int | None] = mapped_column(ForeignKey("increments.id", ondelete="SET NULL"), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="backlog_items")
+    progetto: Mapped["Increment | None"] = relationship()
 
     @property
     def status(self) -> str:

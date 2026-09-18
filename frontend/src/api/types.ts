@@ -52,6 +52,7 @@ export type BacklogItem = {
   refinement_date: string | null
   ta_date: string | null
   notes: string | null
+  progetto_id: number | null
   status: 'To Do' | 'In Progress' | 'Done'
 }
 
