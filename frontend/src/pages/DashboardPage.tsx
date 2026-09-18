@@ -110,8 +110,6 @@ export function DashboardPage() {
         </div>
       )}
 
-      <PhasesCard projectId={project.id} currentStatus={project.status} />
-
       <div className="card">
         <div className="grid-5">
           <div className="stat">
@@ -159,6 +157,8 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <PhasesCard projectId={project.id} currentStatus={project.status} />
 
       <div className="card">
         <h3>Ore Usate nel Tempo</h3>
