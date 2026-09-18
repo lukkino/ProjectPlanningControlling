@@ -165,6 +165,16 @@ def run_lightweight_migrations() -> None:
                             )
                         )
 
+    if "increment_budget_lines" in table_names:
+        # budget_value non e' piu' nel modello (vive per snapshot, vedi
+        # sopra), ma un colonna orfana con vincolo NOT NULL bloccherebbe ogni
+        # nuovo INSERT (SQLAlchemy non la valorizza piu'): a differenza delle
+        # altre colonne orfane di questa app, qui va rimossa per davvero.
+        budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
+        if "budget_value" in budget_line_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_budget_lines DROP COLUMN budget_value"))
+
 
 def get_db():
     db: Session = SessionLocal()

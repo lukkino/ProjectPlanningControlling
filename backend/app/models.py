@@ -121,6 +121,13 @@ class IncrementBudgetLine(Base):
     is_hours: Mapped[bool] = mapped_column(Boolean, default=False)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
+    # cascade lato ORM: SQLite qui non applica i vincoli di FK (niente
+    # PRAGMA foreign_keys=ON), quindi senza questa relazione cancellare una
+    # voce lascerebbe orfani i suoi valori in ogni IncrementSnapshotValue.
+    snapshot_values: Mapped[list["IncrementSnapshotValue"]] = relationship(
+        back_populates="budget_line", cascade="all, delete-orphan"
+    )
+
     increment: Mapped["Increment"] = relationship(back_populates="budget_lines")
 
 
@@ -155,7 +162,7 @@ class IncrementSnapshotValue(Base):
     actual_value: Mapped[float] = mapped_column(Float, default=0)
 
     snapshot: Mapped["IncrementSnapshot"] = relationship(back_populates="values")
-    budget_line: Mapped["IncrementBudgetLine"] = relationship()
+    budget_line: Mapped["IncrementBudgetLine"] = relationship(back_populates="snapshot_values")
 
 
 class BacklogItem(Base):
