@@ -9,6 +9,11 @@
   --success: #1a9c5c;
   --warning: #c97a12;
   --danger: #d3402f;
+  /* Accento dei Progetti (budget/durata) nella sidebar, distinto dal blu
+     --primary gia' usato per gli Increment (rilascio/backlog Jira) in
+     tutta l'app - stesso violetto di .stat-chip.violet. */
+  --progetto: #5b3fb0;
+  --progetto-dark: #47317f;
   --radius: 10px;
   font-family: 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
   color-scheme: light;
@@ -45,6 +50,23 @@ body {
   font-weight: 700;
 }
 
+.sidebar-section { display: flex; flex-direction: column; gap: 8px; }
+
+.sidebar-section-title {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin: 0 4px;
+}
+.sidebar-section-title:hover { color: var(--text); }
+
+.btn-progetto { background: var(--progetto); border-color: var(--progetto); color: white; }
+.btn-progetto:hover { background: var(--progetto-dark); color: white; }
+
 .project-list { display: flex; flex-direction: column; gap: 4px; }
 
 .project-list a {
@@ -62,6 +84,9 @@ body {
 .project-list .code { font-weight: 600; }
 .project-list .name { display: block; font-size: 12px; color: var(--text-muted); }
 .project-list a.active .name { color: #dbe6ff; }
+
+.project-list.progetti a.active { background: var(--progetto); }
+.project-list.progetti a.active .name { color: #e8ddff; }
 
 .main-content { padding: 28px 36px; max-width: 1200px; min-width: 0; }
 .main-content--wide { max-width: none; }
