@@ -72,13 +72,22 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
 def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:
     """Il budget (ore totali/per ruolo + materiali) e' sempre proprio di
-    questo progetto (vedi models.Increment), mai derivato. Backlog/ore usate
-    invece non sono suoi: sono presi pari pari dal Project (rilascio)
-    collegato, se assegnato - un progetto non ha un backlog Jira proprio."""
+    questo progetto (vedi models.Increment), mai derivato. Backlog (PBI,
+    % completamento) invece non e' suo: e' preso pari pari dal Project
+    (rilascio) collegato, se assegnato - un progetto non ha un backlog Jira
+    proprio.
+
+    Le ore usate invece si dividono tra i progetti collegati allo stesso
+    Project quando sono piu' di uno (es. principale + maintenance): Jira non
+    sa quale progetto rendicontare, quindi si preferisce la somma delle ore
+    Actual inserite a mano per ruolo; solo se nessuna e' ancora stata
+    inserita si ricade sul totale Jira del Project collegato (comportamento
+    corretto quando il progetto e' l'unico collegato a quel Project)."""
     project_metrics = compute_dashboard_metrics(increment.project) if increment.project else None
 
     budget_hours_total = sum(b.budget_hours for b in increment.budget_lines) or increment.estimated_budget_hours
-    logged_hours_total = project_metrics.logged_hours_total if project_metrics else 0.0
+    actual_hours_total = sum(b.actual_hours for b in increment.budget_lines)
+    logged_hours_total = actual_hours_total or (project_metrics.logged_hours_total if project_metrics else 0.0)
 
     return schemas.IncrementDetail(
         id=increment.id,
