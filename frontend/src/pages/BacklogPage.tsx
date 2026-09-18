@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
+import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats } from '../lib/backlogStats'
 import { formatIsoDate } from '../lib/dates'
@@ -58,8 +59,8 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   in_scope: 60,
   included_in_codefreeze: 80,
   status: 70,
-  refinement_date: 110,
-  ta_date: 110,
+  refinement_date: 130,
+  ta_date: 130,
   planned_duration_days: 70,
   dev_estimate_hours: 65,
   test_estimate_hours: 65,
@@ -230,13 +231,9 @@ export function BacklogPage() {
       label: 'Data refinement',
       className: 'editable-cell',
       render: (item) => (
-        <input
-          defaultValue={item.refinement_date ?? ''}
-          placeholder="gg/mm/aaaa o n.a."
-          onBlur={(e) => {
-            const value = e.target.value.trim() || null
-            if (value !== item.refinement_date) update.mutate({ id: item.id, data: { refinement_date: value } })
-          }}
+        <DateOrNaInput
+          value={item.refinement_date}
+          onChange={(value) => update.mutate({ id: item.id, data: { refinement_date: value } })}
         />
       ),
     },
@@ -245,13 +242,9 @@ export function BacklogPage() {
       label: 'Data TA',
       className: 'editable-cell',
       render: (item) => (
-        <input
-          defaultValue={item.ta_date ?? ''}
-          placeholder="gg/mm/aaaa o n.a."
-          onBlur={(e) => {
-            const value = e.target.value.trim() || null
-            if (value !== item.ta_date) update.mutate({ id: item.id, data: { ta_date: value } })
-          }}
+        <DateOrNaInput
+          value={item.ta_date}
+          onChange={(value) => update.mutate({ id: item.id, data: { ta_date: value } })}
         />
       ),
     },
