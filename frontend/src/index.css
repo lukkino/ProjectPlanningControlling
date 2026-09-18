@@ -259,6 +259,23 @@ tbody tr:hover { background: var(--bg); }
   line-height: 1.25;
   padding: 6px 12px 6px 4px;
 }
+/* Colonne "congelate" (drag handle, Jira Key, Summary): restano visibili
+   scorrendo la tabella orizzontalmente. Il "left" esatto di ciascuna e'
+   calcolato in JS (somma delle larghezze delle colonne congelate che la
+   precedono, che possono variare per resize) e passato come style inline;
+   qui solo cio' che e' fisso: sticky, sfondo pieno (altrimenti il testo
+   delle colonne sotto trasparirebbe) e l'ordine di sovrapposizione. */
+.sticky-col { position: sticky; z-index: 1; background: var(--surface); }
+tbody tr:hover .sticky-col { background: var(--bg); }
+.sticky-col-header { position: sticky; z-index: 3; background: var(--surface); }
+
+/* Barra di scroll orizzontale "specchio", sopra la tabella: la vera barra
+   (in fondo a .table-wrap) resta comunque utilizzabile, ma quando si e' in
+   cima a una tabella alta non e' visibile senza scorrere la pagina - questa
+   permette di scorrere a destra/sinistra senza doverci arrivare. */
+.table-scroll-mirror { overflow-x: auto; overflow-y: hidden; height: 14px; }
+.table-scroll-mirror > div { height: 1px; }
+
 .col-resize-handle {
   position: absolute;
   top: 0;

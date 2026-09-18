@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Fragment,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type RefObject,
 } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
@@ -76,6 +78,10 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
 const HANDLE_COLUMN_WIDTH = 30
 const DELETE_COLUMN_WIDTH = 36
 
+// Colonne "congelate" a sinistra durante lo scroll orizzontale, cosi' si
+// riconosce sempre a quale item si riferisce il resto della riga.
+const STICKY_COLUMN_KEYS = new Set(['jira_key', 'summary'])
+
 type Column = {
   key: string
   label: string
@@ -94,6 +100,25 @@ export function BacklogPage() {
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
   const [draggedCol, setDraggedCol] = useState<string | null>(null)
+
+  // Barra di scroll orizzontale "specchio" sopra la tabella (vedi CSS
+  // .table-scroll-mirror): tiene la stessa scrollLeft di .table-wrap, cosi'
+  // si puo' scorrere a destra/sinistra da li' senza dover raggiungere la
+  // barra vera in fondo, non sempre visibile con una tabella alta.
+  const tableWrapRef = useRef<HTMLDivElement>(null)
+  const topScrollRef = useRef<HTMLDivElement>(null)
+  // Evita il loop infinito: sincronizzare scrollLeft da A a B scatena anche
+  // l'evento onScroll di B, che altrimenti tenterebbe di risincronizzare A.
+  const syncingScrollRef = useRef(false)
+  const syncScroll = (source: RefObject<HTMLDivElement | null>, target: RefObject<HTMLDivElement | null>) => {
+    if (syncingScrollRef.current) {
+      syncingScrollRef.current = false
+      return
+    }
+    if (!source.current || !target.current) return
+    syncingScrollRef.current = true
+    target.current.scrollLeft = source.current.scrollLeft
+  }
 
   const { data: items } = useQuery({
     queryKey: ['backlog', project.id],
@@ -414,6 +439,24 @@ export function BacklogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnWidths])
 
+  // "left" di ogni colonna congelata = larghezza della maniglia + somma
+  // delle colonne congelate che la precedono nell'ordine attuale (che puo'
+  // cambiare per drag&drop delle intestazioni o resize).
+  const stickyLeftByKey: Record<string, number> = {}
+  let stickyCursor = HANDLE_COLUMN_WIDTH
+  for (const col of orderedColumns) {
+    if (!STICKY_COLUMN_KEYS.has(col.key)) continue
+    stickyLeftByKey[col.key] = stickyCursor
+    stickyCursor += columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80
+  }
+
+  // Larghezza totale della tabella (colgroup), per dimensionare lo spacer
+  // dentro la barra di scroll "specchio" sopra la tabella.
+  const tableScrollWidth =
+    HANDLE_COLUMN_WIDTH +
+    orderedColumns.reduce((sum, col) => sum + (columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80), 0) +
+    DELETE_COLUMN_WIDTH
+
   const handleResizeStart = (e: ReactMouseEvent, key: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -613,7 +656,18 @@ export function BacklogPage() {
         )}
       </div>
 
-      <div className="table-wrap table-wrap--scroll">
+      <div
+        className="table-scroll-mirror"
+        ref={topScrollRef}
+        onScroll={() => syncScroll(topScrollRef, tableWrapRef)}
+      >
+        <div style={{ width: tableScrollWidth }} />
+      </div>
+      <div
+        className="table-wrap table-wrap--scroll"
+        ref={tableWrapRef}
+        onScroll={() => syncScroll(tableWrapRef, topScrollRef)}
+      >
         <table className="backlog-table backlog-table--fixed">
           <colgroup>
             <col style={{ width: HANDLE_COLUMN_WIDTH }} />
@@ -624,7 +678,7 @@ export function BacklogPage() {
           </colgroup>
           <thead>
             <tr>
-              <th />
+              <th className="sticky-col-header" style={{ left: 0 }} />
               {orderedColumns.map((col) => (
                 <th
                   key={col.key}
@@ -637,8 +691,11 @@ export function BacklogPage() {
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => handleColumnDrop(col.key)}
                   onDragEnd={() => setDraggedCol(null)}
-                  className="draggable-col"
-                  style={draggedCol === col.key ? { opacity: 0.4 } : undefined}
+                  className={STICKY_COLUMN_KEYS.has(col.key) ? 'draggable-col sticky-col-header' : 'draggable-col'}
+                  style={{
+                    ...(draggedCol === col.key ? { opacity: 0.4 } : undefined),
+                    ...(stickyLeftByKey[col.key] !== undefined ? { left: stickyLeftByKey[col.key] } : undefined),
+                  }}
                   title="Trascina per riordinare la colonna"
                 >
                   {col.label}
@@ -671,13 +728,22 @@ export function BacklogPage() {
                     e.dataTransfer.effectAllowed = 'move'
                   }}
                   onDragEnd={() => setDraggedId(null)}
-                  className="drag-handle"
+                  className="drag-handle sticky-col"
+                  style={{ left: 0 }}
                   title="Trascina per riordinare"
                 >
                   ⠿
                 </td>
                 {orderedColumns.map((col) => (
-                  <td key={col.key} className={col.className} style={col.style}>
+                  <td
+                    key={col.key}
+                    className={STICKY_COLUMN_KEYS.has(col.key) ? `${col.className ?? ''} sticky-col`.trim() : col.className}
+                    style={
+                      stickyLeftByKey[col.key] !== undefined
+                        ? { ...col.style, left: stickyLeftByKey[col.key] }
+                        : col.style
+                    }
+                  >
                     {col.render(item)}
                   </td>
                 ))}
