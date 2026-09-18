@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment } from 'react'
+import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue } from '../api/types'
@@ -12,13 +12,27 @@ type Props = { incrementId: number }
 const COLOR_BUDGET = '#2f6fed'
 const COLOR_ACTUAL = '#eb6834'
 
+// Quante tabelle snapshot (le piu' recenti) restano visibili senza dover
+// espandere "Mostra snapshot precedenti".
+const VISIBLE_SNAPSHOTS = 2
+
+function formatValue(value: number, isHours: boolean): string {
+  if (isHours) return value.toLocaleString('it-IT')
+  return `${value.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
+
+function formatDiff(value: number, isHours: boolean): string {
+  return value > 0 ? `+${formatValue(value, isHours)}` : formatValue(value, isHours)
+}
+
 export function IncrementHistoryCard({ incrementId }: Props) {
+  const [showAll, setShowAll] = useState(false)
   const queryClient = useQueryClient()
   const { data: lines } = useQuery({
     queryKey: ['increment-budget-lines', incrementId],
     queryFn: () => api.incrementBudgetLines.list(incrementId),
   })
-  const { data: snapshots } = useQuery({
+  const { data: snapshotsAsc } = useQuery({
     queryKey: ['increment-snapshots', incrementId],
     queryFn: () => api.incrementSnapshots.list(incrementId),
   })
@@ -77,7 +91,14 @@ export function IncrementHistoryCard({ incrementId }: Props) {
     removeSnapshot.error ??
     updateValue.error
 
-  const latestSnapshot = snapshots && snapshots.length > 0 ? snapshots[snapshots.length - 1] : null
+  // snapshotsAsc e' in ordine cronologico (dal backend): qui serve anche
+  // dal piu' recente, sia per decidere quali mostrare di default sia per
+  // calcolare il diff di ognuno rispetto al precedente.
+  const snapshotsDesc = [...(snapshotsAsc ?? [])].reverse()
+  const latestSnapshot = snapshotsDesc[0] ?? null
+  const visibleSnapshots = showAll ? snapshotsDesc : snapshotsDesc.slice(0, VISIBLE_SNAPSHOTS)
+  const hiddenCount = snapshotsDesc.length - visibleSnapshots.length
+
   const latestByLine = new Map((latestSnapshot?.values ?? []).map((v) => [v.budget_line_id, v]))
   const chartData = (lines ?? []).map((l) => ({
     name: l.category_name,
@@ -99,150 +120,164 @@ export function IncrementHistoryCard({ incrementId }: Props) {
         </div>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
-        Ogni valore (Budget e Actual) è il totale cumulativo ad oggi per quella voce, non solo del periodo: un nuovo
-        snapshot riparte dai valori del precedente. Sotto ogni Actual, la differenza rispetto allo snapshot
-        precedente. Il budget di solito resta costante, ma può cambiare per una revisione budget.
+        Budget e Actual sono entrambi il totale cumulativo ad oggi per quella voce, non solo del periodo: un nuovo
+        snapshot riparte dai valori del precedente (il budget di solito resta costante, ma può cambiare per una
+        revisione budget).
       </p>
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
 
       <div className="grid-3-2">
-        <div className="table-wrap">
-          {(!snapshots || snapshots.length === 0) && (
+        <div>
+          {snapshotsDesc.length === 0 && (
             <p className="muted">Nessuno snapshot registrato ancora: creane uno con "+ Nuovo snapshot".</p>
           )}
-          {snapshots && snapshots.length > 0 && (
-            <table>
-              <thead>
-                <tr>
-                  <th rowSpan={2}>Data</th>
-                  {lines?.map((l) => (
-                    <th key={l.id} colSpan={2}>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}>
-                        <input
-                          defaultValue={l.category_name}
-                          style={{ width: 90, textTransform: 'none' }}
-                          onBlur={(e) =>
-                            e.target.value !== l.category_name &&
-                            updateLine.mutate({ id: l.id, data: { category_name: e.target.value } })
-                          }
-                        />
-                        <select
-                          value={l.is_hours ? 'hours' : 'money'}
-                          onChange={(e) => updateLine.mutate({ id: l.id, data: { is_hours: e.target.value === 'hours' } })}
-                        >
-                          <option value="hours">Ore</option>
-                          <option value="money">€</option>
-                        </select>
-                        <button className="btn btn-danger" style={{ padding: '2px 6px' }} onClick={() => removeLine.mutate(l.id)}>
-                          ✕
-                        </button>
-                      </div>
-                    </th>
-                  ))}
-                  <th rowSpan={2}>Note</th>
-                  <th rowSpan={2} />
-                </tr>
-                <tr>
-                  {lines?.map((l) => (
-                    <Fragment key={l.id}>
+
+          {visibleSnapshots.map((snap) => {
+            const idxAsc = (snapshotsAsc ?? []).findIndex((s) => s.id === snap.id)
+            const prev = idxAsc > 0 ? (snapshotsAsc ?? [])[idxAsc - 1] : null
+            const prevByLine = new Map((prev?.values ?? []).map((v) => [v.budget_line_id, v]))
+            const valueByLine = new Map(snap.values.map((v) => [v.budget_line_id, v]))
+
+            return (
+              <div key={snap.id} className="table-wrap" style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      defaultValue={snap.snapshot_date}
+                      onBlur={(e) =>
+                        e.target.value !== snap.snapshot_date &&
+                        updateSnapshot.mutate({ id: snap.id, data: { snapshot_date: e.target.value } })
+                      }
+                    />
+                    <input
+                      defaultValue={snap.note ?? ''}
+                      placeholder="Nota (opzionale)"
+                      style={{ width: 160 }}
+                      onBlur={(e) =>
+                        e.target.value !== (snap.note ?? '') &&
+                        updateSnapshot.mutate({ id: snap.id, data: { note: e.target.value || null } })
+                      }
+                    />
+                  </div>
+                  <button className="btn btn-danger" onClick={() => removeSnapshot.mutate(snap.id)}>
+                    ✕
+                  </button>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Area</th>
                       <th>Budget</th>
                       <th>Actual</th>
-                    </Fragment>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {snapshots.map((snap, idx) => {
-                  const prev = idx > 0 ? snapshots[idx - 1] : null
-                  const prevByLine = new Map((prev?.values ?? []).map((v) => [v.budget_line_id, v]))
-                  const valueByLine = new Map(snap.values.map((v) => [v.budget_line_id, v]))
-                  return (
-                    <tr key={snap.id}>
-                      <td className="editable-cell">
-                        <input
-                          type="date"
-                          defaultValue={snap.snapshot_date}
-                          onBlur={(e) =>
-                            e.target.value !== snap.snapshot_date &&
-                            updateSnapshot.mutate({ id: snap.id, data: { snapshot_date: e.target.value } })
-                          }
-                        />
-                      </td>
-                      {lines?.map((l) => {
-                        const value = valueByLine.get(l.id)
-                        const prevValue = prevByLine.get(l.id)
-                        const diff = prev && value ? value.actual_value - (prevValue?.actual_value ?? 0) : null
-                        return (
-                          <Fragment key={l.id}>
-                            <td className="editable-cell">
-                              <input
-                                type="number"
-                                defaultValue={value?.budget_value ?? 0}
-                                onBlur={(e) =>
-                                  value && updateValue.mutate({ id: value.id, data: { budget_value: Number(e.target.value) } })
-                                }
-                              />
-                            </td>
-                            <td className="editable-cell">
-                              <input
-                                type="number"
-                                defaultValue={value?.actual_value ?? 0}
-                                onBlur={(e) =>
-                                  value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
-                                }
-                              />
-                              {diff !== null && (
-                                <div className="muted" style={{ fontSize: 11 }}>
-                                  {diff > 0 ? `+${diff}` : diff}
-                                </div>
-                              )}
-                            </td>
-                          </Fragment>
-                        )
-                      })}
-                      <td className="editable-cell">
-                        <input
-                          defaultValue={snap.note ?? ''}
-                          onBlur={(e) =>
-                            e.target.value !== (snap.note ?? '') &&
-                            updateSnapshot.mutate({ id: snap.id, data: { note: e.target.value || null } })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button className="btn btn-danger" onClick={() => removeSnapshot.mutate(snap.id)}>
-                          ✕
-                        </button>
-                      </td>
+                      <th>Diff previous snapshot</th>
+                      <th>% Used</th>
+                      <th />
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {lines?.map((line) => {
+                      const value = valueByLine.get(line.id)
+                      const prevValue = prevByLine.get(line.id)
+                      const diff = (value?.actual_value ?? 0) - (prevValue?.actual_value ?? 0)
+                      const pctUsed = value && value.budget_value ? (value.actual_value / value.budget_value) * 100 : null
+                      return (
+                        <tr key={line.id}>
+                          <td style={{ whiteSpace: 'normal' }}>
+                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                              <input
+                                defaultValue={line.category_name}
+                                style={{ minWidth: 0 }}
+                                onBlur={(e) =>
+                                  e.target.value !== line.category_name &&
+                                  updateLine.mutate({ id: line.id, data: { category_name: e.target.value } })
+                                }
+                              />
+                              <select
+                                value={line.is_hours ? 'hours' : 'money'}
+                                onChange={(e) =>
+                                  updateLine.mutate({ id: line.id, data: { is_hours: e.target.value === 'hours' } })
+                                }
+                              >
+                                <option value="hours">Ore</option>
+                                <option value="money">€</option>
+                              </select>
+                            </div>
+                          </td>
+                          <td className="editable-cell">
+                            <input
+                              type="number"
+                              defaultValue={value?.budget_value ?? 0}
+                              onBlur={(e) =>
+                                value && updateValue.mutate({ id: value.id, data: { budget_value: Number(e.target.value) } })
+                              }
+                            />
+                          </td>
+                          <td className="editable-cell">
+                            <input
+                              type="number"
+                              defaultValue={value?.actual_value ?? 0}
+                              onBlur={(e) =>
+                                value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
+                              }
+                            />
+                          </td>
+                          <td>{formatDiff(diff, line.is_hours)}</td>
+                          <td
+                            style={{
+                              fontWeight: 600,
+                              color: pctUsed === null ? undefined : pctUsed > 100 ? 'var(--danger)' : 'var(--success)',
+                            }}
+                          >
+                            {pctUsed === null ? '—' : `${pctUsed.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+                          </td>
+                          <td>
+                            <button className="btn btn-danger" onClick={() => removeLine.mutate(line.id)}>
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
+
+          {hiddenCount > 0 && !showAll && (
+            <button className="btn" onClick={() => setShowAll(true)}>
+              Mostra {hiddenCount} snapshot precedenti
+            </button>
+          )}
+          {showAll && snapshotsDesc.length > VISIBLE_SNAPSHOTS && (
+            <button className="btn" onClick={() => setShowAll(false)}>
+              Nascondi snapshot precedenti
+            </button>
           )}
         </div>
 
         {chartData.length > 0 && (
-          <div style={{ height: 260 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" />
-                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="budget" name="Budget" fill={COLOR_BUDGET} radius={[0, 4, 4, 0]} />
-                <Bar dataKey="actual" name="Actual" fill={COLOR_ACTUAL} radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div>
+            <h4 style={{ margin: '0 0 8px', fontSize: 13, textAlign: 'center' }}>
+              Budget vs Actual — {formatIsoDate(latestSnapshot?.snapshot_date ?? null)}
+            </h4>
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} layout="vertical" margin={{ left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" />
+                  <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="budget" name="Budget" fill={COLOR_BUDGET} radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="actual" name="Actual" fill={COLOR_ACTUAL} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
       </div>
-      {snapshots && snapshots.length > 0 && (
-        <p className="muted" style={{ fontSize: 11, marginTop: 8, marginBottom: 0 }}>
-          Grafico aggiornato all'ultimo snapshot ({formatIsoDate(latestSnapshot?.snapshot_date ?? null)}).
-        </p>
-      )}
     </div>
   )
 }
