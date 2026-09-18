@@ -50,7 +50,6 @@ const MIN_COLUMN_WIDTH = 32
 // L'utente puo' poi trascinare il bordo destro di ogni intestazione per
 // regolarla: il valore scelto sovrascrive questo default e resta salvato.
 const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
-  priority_order: 44,
   jira_key: 90,
   summary: 220,
   parent: 110,
@@ -162,18 +161,6 @@ export function BacklogPage() {
   const dateOrNull = (v: string) => v || null
 
   const columns: Column[] = [
-    {
-      key: 'priority_order',
-      label: '#',
-      className: 'editable-cell',
-      render: (item) => (
-        <input
-          type="number"
-          defaultValue={item.priority_order}
-          onBlur={(e) => update.mutate({ id: item.id, data: { priority_order: Number(e.target.value) } })}
-        />
-      ),
-    },
     {
       key: 'jira_key',
       label: 'Jira Key',
