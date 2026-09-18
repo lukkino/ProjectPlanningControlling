@@ -151,27 +151,29 @@ export function IncrementHistoryCard({ incrementId }: Props) {
 
             return (
               <div key={snap.id} className="table-wrap" style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <input
                       type="date"
+                      style={{ flex: '0 0 auto' }}
                       defaultValue={snap.snapshot_date}
                       onBlur={(e) =>
                         e.target.value !== snap.snapshot_date &&
                         updateSnapshot.mutate({ id: snap.id, data: { snapshot_date: e.target.value } })
                       }
                     />
-                    <input
+                    <textarea
                       defaultValue={snap.note ?? ''}
-                      placeholder="Nota (opzionale)"
-                      style={{ width: 160 }}
+                      placeholder="Nota (opzionale, es. revisione budget)"
+                      rows={1}
+                      style={{ flex: 1, minWidth: 200, minHeight: 30, resize: 'both' }}
                       onBlur={(e) =>
                         e.target.value !== (snap.note ?? '') &&
                         updateSnapshot.mutate({ id: snap.id, data: { note: e.target.value || null } })
                       }
                     />
                   </div>
-                  <button className="btn btn-danger" onClick={() => removeSnapshot.mutate(snap.id)}>
+                  <button className="btn btn-danger" style={{ flex: '0 0 auto' }} onClick={() => removeSnapshot.mutate(snap.id)}>
                     ✕
                   </button>
                 </div>
