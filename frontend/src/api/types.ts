@@ -11,10 +11,24 @@ export type Phase = {
 export type IncrementBudgetLine = {
   id: number
   increment_id: number
-  role_name: string
-  budget_hours: number
-  actual_hours: number
+  category_name: string
+  budget_value: number
+  is_hours: boolean
   order: number
+}
+
+export type IncrementSnapshotValue = {
+  id: number
+  budget_line_id: number
+  actual_value: number
+}
+
+export type IncrementSnapshot = {
+  id: number
+  increment_id: number
+  snapshot_date: string
+  note: string | null
+  values: IncrementSnapshotValue[]
 }
 
 export type ImplementedByTask = {
@@ -140,10 +154,12 @@ export type IncrementDetail = Increment & {
   backlog_done: number
   percent_complete: number
   budget_hours_total: number
+  budget_material_total: number
   logged_hours_total: number
   dev_logged_hours_total: number
   percent_budget_used: number
   budget_lines: IncrementBudgetLine[]
+  snapshots: IncrementSnapshot[]
 }
 
 export type DocumentRevisionMeta = {

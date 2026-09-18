@@ -37,6 +37,9 @@ class Increment(Base):
     budget_lines: Mapped[list["IncrementBudgetLine"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetLine.order"
     )
+    snapshots: Mapped[list["IncrementSnapshot"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementSnapshot.snapshot_date"
+    )
 
 
 class Project(Base):
@@ -101,18 +104,56 @@ class Phase(Base):
 
 
 class IncrementBudgetLine(Base):
+    """Una voce di budget del progetto (es. "Hours", "Prototype",
+    "Travels"): solo il target di budget, mai un valore inserito nel tempo -
+    quello vive nell'Andamento (vedi IncrementSnapshotValue), una voce per
+    ogni IncrementSnapshot di questo Increment."""
+
     __tablename__ = "increment_budget_lines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
-    role_name: Mapped[str] = mapped_column(String(128))
-    budget_hours: Mapped[float] = mapped_column(Float, default=0)
-    # Ore effettivamente lavorate per questo ruolo, inserite a mano (nessuna
-    # sorgente automatica: Jira non traccia il ruolo di chi logga le ore).
-    actual_hours: Mapped[float] = mapped_column(Float, default=0)
+    category_name: Mapped[str] = mapped_column(String(128))
+    budget_value: Mapped[float] = mapped_column(Float, default=0)
+    # Distingue le voci in ore (sommate in "Budget ore"/"Ore usate" del
+    # Totale progetto) da quelle in altra unita', tipicamente euro (sommate
+    # in "Budget materiali"): puramente per i totali aggregati, l'utente
+    # sceglie liberamente per ogni voce che aggiunge.
+    is_hours: Mapped[bool] = mapped_column(Boolean, default=False)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     increment: Mapped["Increment"] = relationship(back_populates="budget_lines")
+
+
+class IncrementSnapshot(Base):
+    """Andamento del progetto: una fotografia periodica dei valori Actual
+    (cumulativi ad oggi, non del solo periodo) per ogni voce di budget -
+    stesso concetto dello Snapshot dell'Increment, applicato alle voci di
+    budget invece che a PBI/ore Jira."""
+
+    __tablename__ = "increment_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    snapshot_date: Mapped[dt.date] = mapped_column(Date)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    increment: Mapped["Increment"] = relationship(back_populates="snapshots")
+    values: Mapped[list["IncrementSnapshotValue"]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+
+
+class IncrementSnapshotValue(Base):
+    __tablename__ = "increment_snapshot_values"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("increment_snapshots.id", ondelete="CASCADE"))
+    budget_line_id: Mapped[int] = mapped_column(ForeignKey("increment_budget_lines.id", ondelete="CASCADE"))
+    actual_value: Mapped[float] = mapped_column(Float, default=0)
+
+    snapshot: Mapped["IncrementSnapshot"] = relationship(back_populates="values")
+    budget_line: Mapped["IncrementBudgetLine"] = relationship()
 
 
 class BacklogItem(Base):

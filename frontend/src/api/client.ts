@@ -6,6 +6,8 @@ import type {
   Increment,
   IncrementBudgetLine,
   IncrementDetail,
+  IncrementSnapshot,
+  IncrementSnapshotValue,
   Phase,
   PprDeliverable,
   PprDocumentMeta,
@@ -102,6 +104,18 @@ export const api = {
     update: (id: number, data: Partial<IncrementBudgetLine>) =>
       put<IncrementBudgetLine>(`/increments/budget-lines/${id}`, data),
     remove: (id: number) => del(`/increments/budget-lines/${id}`),
+  },
+  incrementSnapshots: {
+    list: (incrementId: number) => request<IncrementSnapshot[]>(`/increments/${incrementId}/snapshots`),
+    create: (incrementId: number, data: { snapshot_date: string; note?: string | null }) =>
+      post<IncrementSnapshot>(`/increments/${incrementId}/snapshots`, data),
+    update: (id: number, data: Partial<IncrementSnapshot>) =>
+      put<IncrementSnapshot>(`/increments/snapshots/${id}`, data),
+    remove: (id: number) => del(`/increments/snapshots/${id}`),
+  },
+  incrementSnapshotValues: {
+    update: (id: number, actualValue: number) =>
+      put<IncrementSnapshotValue>(`/increments/snapshot-values/${id}`, { actual_value: actualValue }),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

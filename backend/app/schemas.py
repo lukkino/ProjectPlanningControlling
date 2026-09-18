@@ -34,9 +34,9 @@ class Phase(PhaseBase):
 # ---------- IncrementBudgetLine ----------
 
 class IncrementBudgetLineBase(BaseModel):
-    role_name: str
-    budget_hours: float = 0
-    actual_hours: float = 0
+    category_name: str
+    budget_value: float = 0
+    is_hours: bool = False
     order: int = 0
 
 
@@ -45,9 +45,9 @@ class IncrementBudgetLineCreate(IncrementBudgetLineBase):
 
 
 class IncrementBudgetLineUpdate(BaseModel):
-    role_name: str | None = None
-    budget_hours: float | None = None
-    actual_hours: float | None = None
+    category_name: str | None = None
+    budget_value: float | None = None
+    is_hours: bool | None = None
     order: int | None = None
 
 
@@ -55,6 +55,40 @@ class IncrementBudgetLine(IncrementBudgetLineBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     increment_id: int
+
+
+# ---------- IncrementSnapshot (Andamento del progetto) ----------
+
+class IncrementSnapshotValue(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    budget_line_id: int
+    actual_value: float
+
+
+class IncrementSnapshotValueUpdate(BaseModel):
+    actual_value: float
+
+
+class IncrementSnapshotBase(BaseModel):
+    snapshot_date: dt.date
+    note: str | None = None
+
+
+class IncrementSnapshotCreate(IncrementSnapshotBase):
+    pass
+
+
+class IncrementSnapshotUpdate(BaseModel):
+    snapshot_date: dt.date | None = None
+    note: str | None = None
+
+
+class IncrementSnapshot(IncrementSnapshotBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    increment_id: int
+    values: list[IncrementSnapshotValue] = []
 
 
 # ---------- BacklogItem ----------
@@ -291,10 +325,12 @@ class ProjectDetail(ProjectListItem):
 
 
 class IncrementDetail(Increment):
-    """Il budget (ore totali/per ruolo + materiali) e' sempre proprio di
-    questo progetto, mai derivato. Le ore usate/il backlog invece sono presi
-    pari pari dal Project (rilascio) collegato, se assegnato: il progetto
-    non ha un proprio backlog Jira."""
+    """budget_hours_total/logged_hours_total sommano solo le voci di budget
+    con is_hours=True (l'Andamento puo' contenere anche voci non-ore, es.
+    "Travels"); budget_material_total somma le altre. Le ore usate vengono
+    dall'ultimo IncrementSnapshot, o dal Project (rilascio) collegato se
+    l'Andamento e' ancora vuoto - il progetto non ha un proprio backlog
+    Jira, quindi backlog/% completamento restano presi pari pari da li'."""
 
     project: ProjectListItem | None = None
     backlog_total: int = 0
@@ -302,10 +338,12 @@ class IncrementDetail(Increment):
     backlog_done: int = 0
     percent_complete: float = 0.0
     budget_hours_total: float
+    budget_material_total: float
     logged_hours_total: float = 0.0
     dev_logged_hours_total: float = 0.0
     percent_budget_used: float = 0.0
     budget_lines: list[IncrementBudgetLine] = []
+    snapshots: list[IncrementSnapshot] = []
 
 
 # ---------- Documents ----------

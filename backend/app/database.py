@@ -1,3 +1,4 @@
+import datetime as dt
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
@@ -81,6 +82,65 @@ def run_lightweight_migrations() -> None:
         if "actual_hours" not in budget_line_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE increment_budget_lines ADD COLUMN actual_hours FLOAT DEFAULT 0"))
+
+        # "Andamento": role_name/budget_hours diventano nomi generici
+        # (category_name/budget_value), perche' ora le voci non sono piu'
+        # solo ruoli/ore (es. "Prototype", "Travels" - vedi
+        # models.IncrementBudgetLine). L'Actual per voce si sposta dentro
+        # gli snapshot (vedi sotto): qui resta solo il target di budget.
+        budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
+        if "role_name" in budget_line_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_budget_lines RENAME COLUMN role_name TO category_name"))
+                conn.execute(text("ALTER TABLE increment_budget_lines RENAME COLUMN budget_hours TO budget_value"))
+                conn.execute(text("ALTER TABLE increment_budget_lines ADD COLUMN is_hours BOOLEAN DEFAULT 0"))
+                # Le 4 voci originali (Project Management/Development/
+                # Testing/System Testing) erano tutte ore: preserva il loro
+                # significato nei totali aggregati esistenti.
+                conn.execute(text("UPDATE increment_budget_lines SET is_hours = 1"))
+
+        # Le "Ore Actual" gia' inserite a mano per voce (funzionalita' ormai
+        # sostituita dall'Andamento) vanno preservate migrandole in UNO
+        # snapshot iniziale per progetto, prima che la colonna diventi
+        # orfana. Idempotente: azzera actual_hours dopo averle migrate, cosi'
+        # non vengono ricreate ad ogni riavvio.
+        budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
+        if "actual_hours" in budget_line_columns:
+            with engine.begin() as conn:
+                # Solo gli Increment con ALMENO una voce diversa da zero
+                # ricevono uno snapshot migrato, ma con un valore per OGNI
+                # voce di quell'Increment (anche quelle a zero): la tabella
+                # dell'Andamento e' sempre un rettangolo pieno, mai con
+                # celle mancanti.
+                increments_to_migrate = {
+                    row[0]
+                    for row in conn.execute(
+                        text("SELECT DISTINCT increment_id FROM increment_budget_lines WHERE actual_hours != 0")
+                    ).fetchall()
+                }
+                for increment_id in increments_to_migrate:
+                    result = conn.execute(
+                        text(
+                            "INSERT INTO increment_snapshots (increment_id, snapshot_date, note) "
+                            "VALUES (:inc, :date, :note)"
+                        ),
+                        {"inc": increment_id, "date": dt.date.today().isoformat(), "note": "Migrato da \"Ore Actual\""},
+                    )
+                    snapshot_id = result.lastrowid
+                    all_lines = conn.execute(
+                        text("SELECT id, actual_hours FROM increment_budget_lines WHERE increment_id = :inc"),
+                        {"inc": increment_id},
+                    ).fetchall()
+                    for line_id, actual in all_lines:
+                        conn.execute(
+                            text(
+                                "INSERT INTO increment_snapshot_values (snapshot_id, budget_line_id, actual_value) "
+                                "VALUES (:snap, :line, :val)"
+                            ),
+                            {"snap": snapshot_id, "line": line_id, "val": actual or 0},
+                        )
+                if increments_to_migrate:
+                    conn.execute(text("UPDATE increment_budget_lines SET actual_hours = 0"))
 
 
 def get_db():

@@ -7,10 +7,17 @@ from app.services.metrics import compute_increment_metrics
 
 router = APIRouter(prefix="/api/increments", tags=["increments"])
 
-# Voci di default del budget ore per ruolo di un nuovo progetto, create
+# Voci di default dell'Andamento di un nuovo progetto, create
 # automaticamente alla creazione (come STANDARD_PHASE_NAMES per i Project):
 # restano comunque modificabili/rinominabili/eliminabili come le altre.
-DEFAULT_BUDGET_ROLES = ["Project management", "Development", "Testing", "System Testing"]
+# Solo "Hours" e' in ore (is_hours=True): le altre sono voci di spesa.
+DEFAULT_BUDGET_CATEGORIES = [
+    ("Hours", True),
+    ("Prototype", False),
+    ("Preserie", False),
+    ("Consultancies", False),
+    ("Travels", False),
+]
 
 
 def _get_increment_or_404(db: Session, increment_id: int) -> models.Increment:
@@ -23,8 +30,22 @@ def _get_increment_or_404(db: Session, increment_id: int) -> models.Increment:
 def _get_budget_line_or_404(db: Session, line_id: int) -> models.IncrementBudgetLine:
     line = db.get(models.IncrementBudgetLine, line_id)
     if line is None:
-        raise HTTPException(status_code=404, detail="Riga di budget non trovata")
+        raise HTTPException(status_code=404, detail="Voce di budget non trovata")
     return line
+
+
+def _get_snapshot_or_404(db: Session, snapshot_id: int) -> models.IncrementSnapshot:
+    snapshot = db.get(models.IncrementSnapshot, snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot non trovato")
+    return snapshot
+
+
+def _get_snapshot_value_or_404(db: Session, value_id: int) -> models.IncrementSnapshotValue:
+    value = db.get(models.IncrementSnapshotValue, value_id)
+    if value is None:
+        raise HTTPException(status_code=404, detail="Valore snapshot non trovato")
+    return value
 
 
 @router.get("", response_model=list[schemas.Increment])
@@ -36,9 +57,13 @@ def list_increments(db: Session = Depends(get_db)):
 def create_increment(payload: schemas.IncrementCreate, db: Session = Depends(get_db)):
     increment = models.Increment(**payload.model_dump())
     db.add(increment)
-    db.flush()  # assegna increment.id, serve per le righe di budget sotto
-    for order, role_name in enumerate(DEFAULT_BUDGET_ROLES, start=1):
-        db.add(models.IncrementBudgetLine(increment_id=increment.id, role_name=role_name, order=order))
+    db.flush()  # assegna increment.id, serve per le voci di budget sotto
+    for order, (category_name, is_hours) in enumerate(DEFAULT_BUDGET_CATEGORIES, start=1):
+        db.add(
+            models.IncrementBudgetLine(
+                increment_id=increment.id, category_name=category_name, is_hours=is_hours, order=order
+            )
+        )
     db.commit()
     db.refresh(increment)
     return increment
@@ -67,7 +92,7 @@ def delete_increment(increment_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-# ---------- Budget lines ----------
+# ---------- Budget lines (voci dell'Andamento) ----------
 
 @router.get("/{increment_id}/budget-lines", response_model=list[schemas.IncrementBudgetLine])
 def list_budget_lines(increment_id: int, db: Session = Depends(get_db)):
@@ -82,9 +107,15 @@ def list_budget_lines(increment_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{increment_id}/budget-lines", response_model=schemas.IncrementBudgetLine, status_code=201)
 def create_budget_line(increment_id: int, payload: schemas.IncrementBudgetLineCreate, db: Session = Depends(get_db)):
-    _get_increment_or_404(db, increment_id)
+    increment = _get_increment_or_404(db, increment_id)
     line = models.IncrementBudgetLine(increment_id=increment_id, **payload.model_dump())
     db.add(line)
+    db.flush()
+    # Ogni snapshot esistente riceve un valore (0) per la nuova voce, cosi'
+    # la tabella dell'Andamento resta un rettangolo pieno senza cielle
+    # mancanti per gli snapshot presi prima di questa voce.
+    for snapshot in increment.snapshots:
+        db.add(models.IncrementSnapshotValue(snapshot_id=snapshot.id, budget_line_id=line.id, actual_value=0))
     db.commit()
     db.refresh(line)
     return line
@@ -105,3 +136,72 @@ def delete_budget_line(line_id: int, db: Session = Depends(get_db)):
     line = _get_budget_line_or_404(db, line_id)
     db.delete(line)
     db.commit()
+
+
+# ---------- Andamento (snapshot periodici sulle voci di budget) ----------
+
+@router.get("/{increment_id}/snapshots", response_model=list[schemas.IncrementSnapshot])
+def list_snapshots(increment_id: int, db: Session = Depends(get_db)):
+    _get_increment_or_404(db, increment_id)
+    return (
+        db.query(models.IncrementSnapshot)
+        .filter(models.IncrementSnapshot.increment_id == increment_id)
+        .order_by(models.IncrementSnapshot.snapshot_date)
+        .all()
+    )
+
+
+@router.post("/{increment_id}/snapshots", response_model=schemas.IncrementSnapshot, status_code=201)
+def create_snapshot(increment_id: int, payload: schemas.IncrementSnapshotCreate, db: Session = Depends(get_db)):
+    increment = _get_increment_or_404(db, increment_id)
+    snapshot = models.IncrementSnapshot(increment_id=increment_id, **payload.model_dump())
+    db.add(snapshot)
+    db.flush()
+
+    # I valori Actual sono cumulativi: ogni nuova voce riparte dal valore
+    # dell'ultimo snapshot esistente (0 se e' il primo, o per una voce
+    # aggiunta dopo di esso), cosi' si modificano solo i numeri cambiati
+    # invece di doverli reinserire tutti da zero.
+    previous = (
+        db.query(models.IncrementSnapshot)
+        .filter(models.IncrementSnapshot.increment_id == increment_id, models.IncrementSnapshot.id != snapshot.id)
+        .order_by(models.IncrementSnapshot.snapshot_date.desc())
+        .first()
+    )
+    previous_by_line = {v.budget_line_id: v.actual_value for v in previous.values} if previous else {}
+    for line in increment.budget_lines:
+        db.add(
+            models.IncrementSnapshotValue(
+                snapshot_id=snapshot.id, budget_line_id=line.id, actual_value=previous_by_line.get(line.id, 0)
+            )
+        )
+
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+@router.put("/snapshots/{snapshot_id}", response_model=schemas.IncrementSnapshot)
+def update_snapshot(snapshot_id: int, payload: schemas.IncrementSnapshotUpdate, db: Session = Depends(get_db)):
+    snapshot = _get_snapshot_or_404(db, snapshot_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(snapshot, field, value)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+@router.delete("/snapshots/{snapshot_id}", status_code=204)
+def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+    snapshot = _get_snapshot_or_404(db, snapshot_id)
+    db.delete(snapshot)
+    db.commit()
+
+
+@router.put("/snapshot-values/{value_id}", response_model=schemas.IncrementSnapshotValue)
+def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValueUpdate, db: Session = Depends(get_db)):
+    value = _get_snapshot_value_or_404(db, value_id)
+    value.actual_value = payload.actual_value
+    db.commit()
+    db.refresh(value)
+    return value

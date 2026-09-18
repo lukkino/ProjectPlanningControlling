@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { IncrementBudgetLinesCard } from '../components/IncrementBudgetLinesCard'
+import { IncrementAndamentoCard } from '../components/IncrementAndamentoCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { formatIsoDate } from '../lib/dates'
 
@@ -98,17 +98,17 @@ export function IncrementDetailPage() {
             <span className="label">% ore usate su budget</span>
           </div>
           <div className="stat-chip blue">
-            <span className="value">{increment.estimated_budget_material.toFixed(0)} €</span>
+            <span className="value">{increment.budget_material_total.toFixed(0)} €</span>
             <span className="label">Budget materiali</span>
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Budget (ore e materiali) e ore usate sono proprio di questo progetto: le ore usate sono quelle
-          dell'increment collegato qui sotto (non una somma - un progetto è collegato al massimo a un increment).
+          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nell'Andamento sotto): le ore usate
+          vengono dall'ultimo snapshot, o dall'increment collegato se l'Andamento è ancora vuoto.
         </p>
       </div>
 
-      <IncrementBudgetLinesCard incrementId={increment.id} />
+      <IncrementAndamentoCard incrementId={increment.id} />
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Increment collegato</h3>
