@@ -16,7 +16,12 @@ const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents', '/projects
 
 export default function App() {
   const location = useLocation()
-  const isWide = WIDE_PAGE_SUFFIXES.some((suffix) => location.pathname.endsWith(suffix))
+  const isWide =
+    WIDE_PAGE_SUFFIXES.some((suffix) => location.pathname.endsWith(suffix)) ||
+    // Pagina di dettaglio di un progetto (non la lista /increments): la
+    // tabella dello Storico progetto ha bisogno di spazio per non dover
+    // scorrere.
+    /^\/increments\/\d+$/.test(location.pathname)
 
   return (
     <div className="app-shell">
