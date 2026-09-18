@@ -156,8 +156,10 @@ export type IncrementDetail = Increment & {
   budget_hours_total: number
   budget_material_total: number
   logged_hours_total: number
+  actual_material_total: number
   dev_logged_hours_total: number
   percent_budget_used: number
+  percent_material_used: number
   budget_lines: IncrementBudgetLine[]
   snapshots: IncrementSnapshot[]
 }

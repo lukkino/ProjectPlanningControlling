@@ -98,8 +98,15 @@ export function IncrementDetailPage() {
             <span className="label">% ore usate su budget</span>
           </div>
           <div className="stat-chip blue">
-            <span className="value">{increment.budget_material_total.toFixed(0)} €</span>
+            <span className="value">{increment.budget_material_total.toLocaleString('it-IT')} €</span>
             <span className="label">Budget materiali</span>
+          </div>
+          <div className="stat-chip violet">
+            <span className="value">{(increment.percent_material_used * 100).toFixed(0)}%</span>
+            <span className="label">% materiali usati</span>
+            <span className="muted" style={{ fontSize: 11 }}>
+              {increment.actual_material_total.toLocaleString('it-IT')} € / {increment.budget_material_total.toLocaleString('it-IT')} €
+            </span>
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>

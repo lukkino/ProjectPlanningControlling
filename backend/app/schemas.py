@@ -340,8 +340,10 @@ class IncrementDetail(Increment):
     budget_hours_total: float
     budget_material_total: float
     logged_hours_total: float = 0.0
+    actual_material_total: float = 0.0
     dev_logged_hours_total: float = 0.0
     percent_budget_used: float = 0.0
+    percent_material_used: float = 0.0
     budget_lines: list[IncrementBudgetLine] = []
     snapshots: list[IncrementSnapshot] = []
 

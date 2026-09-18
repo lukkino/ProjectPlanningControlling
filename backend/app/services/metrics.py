@@ -107,6 +107,8 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         project_metrics.logged_hours_total if project_metrics else 0.0
     )
 
+    actual_material_total = sum(latest_by_line[b.id].actual_value for b in material_lines if b.id in latest_by_line)
+
     return schemas.IncrementDetail(
         id=increment.id,
         code=increment.code,
@@ -126,8 +128,10 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         budget_hours_total=budget_hours_total,
         budget_material_total=budget_material_total,
         logged_hours_total=logged_hours_total,
+        actual_material_total=actual_material_total,
         dev_logged_hours_total=project_metrics.dev_logged_hours_total if project_metrics else 0.0,
         percent_budget_used=(logged_hours_total / budget_hours_total) if budget_hours_total else 0.0,
+        percent_material_used=(actual_material_total / budget_material_total) if budget_material_total else 0.0,
         budget_lines=list(increment.budget_lines),
         snapshots=list(increment.snapshots),
     )
