@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
+import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats } from '../lib/backlogStats'
@@ -33,6 +34,41 @@ function workingDaysBetween(startStr: string | null, endStr: string | null): num
     cursor.setDate(cursor.getDate() + 1)
   }
   return count
+}
+
+function toIsoLocal(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+// Inverso di workingDaysBetween: data di fine tale che ci siano esattamente
+// "days" giorni lavorativi da startStr a fine, estremi inclusi (es. days=1 ->
+// fine=inizio). Usata per calcolare "Fine pian." da "Start pian." + "Sizing
+// (gg)". Restituisce null se manca la data di inizio o i giorni non sono un
+// numero positivo.
+function addWorkingDays(startStr: string | null, days: number | null): string | null {
+  if (!startStr || days == null || days <= 0) return null
+  const cursor = new Date(`${startStr}T00:00:00`)
+  let remaining = days - 1
+  while (remaining > 0) {
+    cursor.setDate(cursor.getDate() + 1)
+    const day = cursor.getDay() // 0 = domenica, 6 = sabato
+    if (day !== 0 && day !== 6) remaining--
+  }
+  return toIsoLocal(cursor)
+}
+
+// Primo giorno lavorativo successivo a startStr - usato per far ripartire la
+// pianificazione a cascata dell'item successivo subito dopo la Fine pian. di
+// quello precedente.
+function nextWorkingDay(startStr: string): string {
+  const cursor = new Date(`${startStr}T00:00:00`)
+  do {
+    cursor.setDate(cursor.getDate() + 1)
+  } while (cursor.getDay() === 0 || cursor.getDay() === 6)
+  return toIsoLocal(cursor)
 }
 
 // Ordinamento esplicito (facoltativo) per stato, dall'alto verso il basso:
@@ -96,6 +132,7 @@ export function BacklogPage() {
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [sortByStatus, setSortByStatus] = useState(false)
+  const [view, setView] = useState<'table' | 'gantt'>('table')
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
@@ -155,6 +192,40 @@ export function BacklogPage() {
   })
   const sync = useMutation({
     mutationFn: () => api.backlog.sync(project.id),
+    onSuccess: invalidate,
+  })
+
+  // Pianificazione a cascata: partendo dall'item con priorita' piu' alta
+  // (che deve gia' avere Start pian./Fine pian. impostati, es. col calcolo
+  // automatico da Sizing visto sopra), ogni item successivo riparte dal
+  // primo giorno lavorativo dopo la Fine pian. di quello precedente, e la
+  // propria Fine pian. si calcola dal suo Sizing (gg). Si ferma al primo
+  // item senza Sizing: da li' in poi non c'e' piu' una Fine pian. su cui
+  // basare l'item successivo (quell'item resta comunque con un warning in
+  // colonna, vedi render di 'expected_finish'). Gli item non "In Scope" sono
+  // esclusi del tutto dalla catena (non contano ne' come ancora ne' come
+  // anelli): non fanno parte del piano.
+  const cascadeSchedule = useMutation({
+    mutationFn: async () => {
+      const sorted = [...(items ?? [])].filter((i) => i.in_scope).sort((a, b) => a.priority_order - b.priority_order)
+      const anchor = sorted[0]
+      if (!anchor || !anchor.planned_start || !anchor.expected_finish) {
+        throw new Error(
+          `Imposta prima Start pian. e Fine pian. per l'item in cima alla lista${anchor ? ` (${anchor.jira_key})` : ''}.`,
+        )
+      }
+      let prevFinish = anchor.expected_finish
+      for (const item of sorted.slice(1)) {
+        const planned_start = nextWorkingDay(prevFinish)
+        if (!item.planned_duration_days) {
+          await api.backlog.update(item.id, { planned_start })
+          break
+        }
+        const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)!
+        await api.backlog.update(item.id, { planned_start, expected_finish })
+        prevFinish = expected_finish
+      }
+    },
     onSuccess: invalidate,
   })
 
@@ -252,11 +323,21 @@ export function BacklogPage() {
       key: 'planned_duration_days',
       label: 'Sizing (gg)',
       className: 'editable-cell',
+      // Cambiando il sizing con uno Start pian. gia' presente, ricalcola
+      // anche la Fine pian. (stessa formula usata sulla colonna Start pian.),
+      // cosi' le due date restano coerenti con il nuovo sizing.
       render: (item) => (
         <input
           type="number"
           defaultValue={item.planned_duration_days ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { planned_duration_days: num(e.target.value) } })}
+          onBlur={(e) => {
+            const planned_duration_days = num(e.target.value)
+            const expected_finish = addWorkingDays(item.planned_start, planned_duration_days)
+            update.mutate({
+              id: item.id,
+              data: expected_finish ? { planned_duration_days, expected_finish } : { planned_duration_days },
+            })
+          }}
         />
       ),
     },
@@ -267,11 +348,21 @@ export function BacklogPage() {
       key: 'planned_start',
       label: 'Start pian.',
       className: 'editable-cell',
+      // La Fine pian. si ricalcola da Start pian. + Sizing (gg), in giorni
+      // lavorativi (vedi addWorkingDays) - se il sizing non e' ancora
+      // impostato, la Fine pian. resta invariata.
       render: (item) => (
         <input
           type="date"
           defaultValue={item.planned_start ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { planned_start: dateOrNull(e.target.value) } })}
+          onBlur={(e) => {
+            const planned_start = dateOrNull(e.target.value)
+            const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
+            update.mutate({
+              id: item.id,
+              data: expected_finish ? { planned_start, expected_finish } : { planned_start },
+            })
+          }}
         />
       ),
     },
@@ -279,12 +370,26 @@ export function BacklogPage() {
       key: 'expected_finish',
       label: 'Fine pian.',
       className: 'editable-cell',
+      // key sul valore: campo non controllato, serve a rimontarlo quando il
+      // valore cambia da fuori (calcolo automatico da Start pian./Sizing),
+      // altrimenti l'input non rifletterebbe il nuovo valore in cache.
       render: (item) => (
-        <input
-          type="date"
-          defaultValue={item.expected_finish ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            key={item.expected_finish ?? ''}
+            type="date"
+            defaultValue={item.expected_finish ?? ''}
+            onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
+          />
+          {item.planned_start && !item.planned_duration_days && (
+            <span
+              title="Sizing (gg) mancante: la Fine pian. non può essere calcolata automaticamente (da Start pian. o dalla pianificazione a cascata) — inseriscila a mano o compila il Sizing."
+              style={{ cursor: 'help' }}
+            >
+              ⚠️
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -563,10 +668,38 @@ export function BacklogPage() {
             )}
           </span>
         </div>
-        <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
-          {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+            <button
+              className="btn"
+              style={{ border: 'none', borderRadius: 0, ...(view === 'table' ? { background: 'var(--primary)', color: 'white' } : undefined) }}
+              onClick={() => setView('table')}
+            >
+              📋 Tabella
+            </button>
+            <button
+              className="btn"
+              style={{ border: 'none', borderRadius: 0, ...(view === 'gantt' ? { background: 'var(--primary)', color: 'white' } : undefined) }}
+              onClick={() => setView('gantt')}
+            >
+              📊 Gantt
+            </button>
+          </div>
+          <button
+            className="btn"
+            title="Ricalcola Start pian./Fine pian. di tutti gli item successivi al primo, in cascata dal suo Sizing (gg)"
+            onClick={() => cascadeSchedule.mutate()}
+            disabled={cascadeSchedule.isPending}
+          >
+            {cascadeSchedule.isPending ? 'Calcolo...' : '📐 Pianificazione a cascata'}
+          </button>
+          <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
+            {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
+          </button>
+        </div>
       </div>
+
+      {cascadeSchedule.isError && <div className="error-banner">{(cascadeSchedule.error as Error).message}</div>}
 
       <div className="stat-chips">
         <div className="stat-chip blue">
@@ -636,6 +769,15 @@ export function BacklogPage() {
         )}
       </div>
 
+      {view === 'gantt' && (
+        <BacklogGanttChart
+          items={displayItems}
+          jiraBrowseUrl={project.jira_jql ? 'https://inpeco.atlassian.net/browse/' : null}
+        />
+      )}
+
+      {view === 'table' && (
+      <>
       <div
         className="table-scroll-mirror"
         ref={topScrollRef}
@@ -750,6 +892,8 @@ export function BacklogPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <input

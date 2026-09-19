@@ -44,9 +44,12 @@ body {
   gap: 16px;
 }
 
+.sidebar-brand { display: flex; align-items: center; gap: 8px; margin: 0 4px; }
+.sidebar-brand img { border-radius: 6px; flex-shrink: 0; }
+
 .sidebar h1 {
   font-size: 16px;
-  margin: 0 4px;
+  margin: 0;
   font-weight: 700;
 }
 
@@ -280,6 +283,39 @@ tbody tr:hover .sticky-col { background: var(--bg); }
    permette di scorrere a destra/sinistra senza doverci arrivare. */
 .table-scroll-mirror { overflow-x: auto; overflow-y: hidden; height: 14px; }
 .table-scroll-mirror > div { height: 1px; }
+
+/* Vista Gantt del Backlog (alternativa alla tabella, vedi BacklogGanttChart):
+   colonna ID a larghezza fissa e timeline scrollabile in orizzontale sono
+   due colonne fianco a fianco DENTRO lo stesso contenitore con lo scroll
+   verticale unico (.gantt-outer) - cosi' scorrono in verticale insieme
+   senza bisogno di sincronizzarle via JS, e la colonna ID resta visibile
+   scorrendo in orizzontale semplicemente perche' e' fuori dall'area che
+   scrolla in orizzontale (niente position:sticky, che dentro un flex item
+   puo' comportarsi in modo incoerente tra browser). */
+.gantt-outer {
+  display: flex;
+  align-items: flex-start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 65vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.gantt-labels-col { flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); }
+.gantt-label-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+.gantt-label-row:first-child { border-top: none; }
+.gantt-label-row:hover { background: var(--bg); }
+.gantt-timeline-col { position: relative; overflow-x: auto; flex: 1; min-width: 0; }
+.gantt-timeline-row { position: relative; border-top: 1px solid var(--border); }
+.gantt-timeline-row:first-child { border-top: none; }
+.gantt-timeline-row:hover { background: var(--bg); }
 
 .col-resize-handle {
   position: absolute;

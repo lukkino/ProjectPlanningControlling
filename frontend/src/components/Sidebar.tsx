@@ -13,7 +13,10 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <h1>Project Controlling</h1>
+      <div className="sidebar-brand">
+        <img src="/favicon.svg" alt="" width={28} height={28} />
+        <h1>Project Controlling</h1>
+      </div>
 
       <div className="sidebar-section">
         <Link to="/increments" className="sidebar-section-title">
