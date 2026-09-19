@@ -47,7 +47,14 @@ export function Sidebar() {
           {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun increment ancora.</p>}
           {projects?.map((p) => (
             <NavLink key={p.id} to={`/projects/${p.id}`} className={({ isActive }) => (isActive ? 'active' : '')}>
-              <span className="code">{p.code}</span>
+              <span className="code">
+                {p.code}
+                {p.is_current && (
+                  <span style={{ opacity: 0.7 }} title="Increment in corso">
+                    {' '}●
+                  </span>
+                )}
+              </span>
               <span className="name">{p.name}</span>
             </NavLink>
           ))}

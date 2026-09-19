@@ -121,6 +121,7 @@ export type Project = {
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
+  is_current: boolean
   created_at: string
   updated_at: string
 }

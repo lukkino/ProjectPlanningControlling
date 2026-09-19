@@ -45,7 +45,8 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 @router.put("/{project_id}", response_model=schemas.ProjectDetail)
 def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
         setattr(project, field, value)
     db.commit()
     db.refresh(project)

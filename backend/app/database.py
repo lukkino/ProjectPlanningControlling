@@ -175,6 +175,24 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE increment_budget_lines DROP COLUMN budget_value"))
 
+    if "projects" in table_names:
+        project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "is_current" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN is_current BOOLEAN DEFAULT 0"))
+
+        # estimated_budget_hours/estimated_budget_material sono relitti di
+        # uno schema precedente allo split Project/Increment (il budget vive
+        # solo su Increment ora, vedi models.py): con vincolo NOT NULL e
+        # nessun default, bloccavano ogni nuovo INSERT perche' SQLAlchemy non
+        # li valorizza piu'. increment_id e' un relitto del verso sbagliato
+        # della relazione Project<->Increment (corretto in Increment.project_id).
+        project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        for orphan_column in ("estimated_budget_hours", "estimated_budget_material", "increment_id"):
+            if orphan_column in project_columns:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE projects DROP COLUMN {orphan_column}"))
+
 
 def get_db():
     db: Session = SessionLocal()

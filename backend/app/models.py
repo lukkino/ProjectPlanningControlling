@@ -77,6 +77,10 @@ class Project(Base):
     # finche' il progetto non ha mai generato un Release Report da qui.
     rr_last_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rr_last_revision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Segna un increment come "in corso" - possono essercene piu' di uno
+    # contemporaneamente (es. per capire su quale backlog basare
+    # l'ordinamento della colonna Next della Kanban Jira).
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

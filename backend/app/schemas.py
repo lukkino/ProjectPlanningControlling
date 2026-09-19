@@ -257,6 +257,7 @@ class ProjectBase(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    is_current: bool = False
 
 
 class ProjectCreate(ProjectBase):
@@ -275,6 +276,7 @@ class ProjectUpdate(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    is_current: bool | None = None
 
 
 class ProjectListItem(ProjectBase):

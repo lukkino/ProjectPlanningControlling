@@ -27,6 +27,16 @@ export function ProjectLayout() {
     },
   })
 
+  // Possono esserci piu' increment "in corso" contemporaneamente: marcarne
+  // uno non tocca gli altri.
+  const setCurrent = useMutation({
+    mutationFn: (isCurrent: boolean) => api.projects.update(id, { is_current: isCurrent }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', id] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+
   if (isLoading || !project) return <p className="muted">Caricamento...</p>
 
   const handleDelete = () => {
@@ -42,8 +52,13 @@ export function ProjectLayout() {
           <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
             Increment
           </div>
-          <h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {project.code} · {project.name}
+            {project.is_current && (
+              <span className="badge current" style={{ fontSize: 11, fontWeight: 600 }}>
+                ● In corso
+              </span>
+            )}
           </h1>
           <div className="sub">
             Stato: {project.status}
@@ -53,6 +68,14 @@ export function ProjectLayout() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn"
+            onClick={() => setCurrent.mutate(!project.is_current)}
+            disabled={setCurrent.isPending}
+            title={project.is_current ? 'Smarca come increment in corso' : 'Segna come increment in corso'}
+          >
+            {project.is_current ? '★ In corso' : '☆ Segna come in corso'}
+          </button>
           <button className="btn" onClick={() => setShowEdit(true)}>
             Modifica
           </button>
