@@ -326,4 +326,9 @@ class AppSettings(Base):
     jira_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Jira Cloud non espone la scadenza di un token esistente via API: va
+    # inserita a mano (e' visibile solo su id.atlassian.com alla creazione),
+    # solo per mostrare un avviso in Configurazione - non blocca nulla da
+    # sola quando passa, lo stato vero lo dice test_connection.
+    jira_api_token_expires_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

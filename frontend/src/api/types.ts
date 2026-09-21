@@ -202,6 +202,8 @@ export type AppSettings = {
   jira_email: string | null
   jira_api_token_set: boolean
   jira_api_token_preview: string | null
+  // Jira non la espone via API: inserita a mano, solo per l'avviso in UI.
+  jira_api_token_expires_at: string | null
 }
 
 export type AppSettingsUpdate = {
@@ -209,4 +211,10 @@ export type AppSettingsUpdate = {
   jira_email?: string | null
   // Vuoto/omesso = lascia invariato il token esistente lato backend.
   jira_api_token?: string
+  jira_api_token_expires_at?: string | null
+}
+
+export type TestConnectionResult = {
+  ok: boolean
+  message: string
 }

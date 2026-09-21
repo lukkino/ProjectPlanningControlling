@@ -232,6 +232,26 @@ def _fetch_task_details(client: httpx.Client, base_url: str, keys: list[str]) ->
     return details
 
 
+def test_connection(base_url: str, email: str, api_token: str) -> str:
+    """Verifica le credenziali con una chiamata leggera a Jira (GET
+    /rest/api/3/myself, l'account autenticato) invece di lanciare una sync
+    intera. Ritorna il nome visualizzato dell'account su successo, solleva
+    JiraClientError con un messaggio presentabile in UI altrimenti."""
+    if not (base_url and email and api_token):
+        raise JiraClientError("Compila Jira base URL, email e API token prima di testare la connessione")
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=15.0) as client:
+            response = client.get(f"{base_url.rstrip('/')}/rest/api/3/myself")
+            if response.status_code == 401:
+                raise JiraClientError("Credenziali non valide: email o API token errati (o il token è scaduto)")
+            response.raise_for_status()
+            data = response.json()
+            return data.get("displayName") or data.get("emailAddress") or email
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+
 def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[JiraIssue]:
     if not (base_url and email and api_token):
         raise JiraClientError(

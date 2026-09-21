@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.services.jira_client import JiraClientError, test_connection
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -32,6 +33,7 @@ def _to_public(row: models.AppSettings) -> schemas.AppSettingsPublic:
         jira_email=row.jira_email,
         jira_api_token_set=bool(token),
         jira_api_token_preview=preview,
+        jira_api_token_expires_at=row.jira_api_token_expires_at,
     )
 
 
@@ -52,6 +54,24 @@ def update_settings_row(payload: schemas.AppSettingsUpdate, db: Session = Depend
     # schemas.AppSettingsUpdate).
     if data.get("jira_api_token"):
         row.jira_api_token = data["jira_api_token"]
+    if "jira_api_token_expires_at" in data:
+        row.jira_api_token_expires_at = data["jira_api_token_expires_at"]
     db.commit()
     db.refresh(row)
     return _to_public(row)
+
+
+@router.post("/test", response_model=schemas.TestConnectionResult)
+def test_settings_connection(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
+    """Verifica le credenziali SENZA salvarle: usa i valori passati (es. dal
+    form non ancora confermato) e ricade su quelli gia' salvati per i campi
+    omessi, cosi' si puo' testare un nuovo token prima di premere Salva."""
+    row = _get_or_create(db)
+    base_url = payload.jira_base_url if payload.jira_base_url is not None else row.jira_base_url
+    email = payload.jira_email if payload.jira_email is not None else row.jira_email
+    api_token = payload.jira_api_token or row.jira_api_token
+    try:
+        display_name = test_connection(base_url or "", email or "", api_token or "")
+    except JiraClientError as exc:
+        return schemas.TestConnectionResult(ok=False, message=str(exc))
+    return schemas.TestConnectionResult(ok=True, message=f"Connessione riuscita — autenticato come {display_name}")

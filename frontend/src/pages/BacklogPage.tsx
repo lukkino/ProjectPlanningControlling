@@ -60,6 +60,15 @@ function addWorkingDays(startStr: string | null, days: number | null): string | 
   return toIsoLocal(cursor)
 }
 
+// "2026-09-19T09:11:34.301529" -> "19/09/2026, 09:11". null se manca o non è
+// una data valida (es. un item mai sincronizzato).
+function formatDateTime(value: string | null): string | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+}
+
 // Primo giorno lavorativo successivo a startStr - usato per far ripartire la
 // pianificazione a cascata dell'item successivo subito dopo la Fine pian. di
 // quello precedente.
@@ -579,6 +588,14 @@ export function BacklogPage() {
 
   const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
 
+  // Ultima sync Jira di QUESTO progetto: il piu' recente last_synced_at tra
+  // tutti i suoi item (la sync valorizza lo stesso timestamp su ognuno,
+  // creato o aggiornato, vedi routers/backlog.py::sync_backlog_from_jira).
+  const lastSyncedAt = (items ?? []).reduce<string | null>((latest, item) => {
+    if (!item.last_synced_at) return latest
+    return !latest || item.last_synced_at > latest ? item.last_synced_at : latest
+  }, null)
+
   // PBI che rientrano nell'ultima previsione di Forecasting: i primi N item
   // non-Done (In Progress/To Do), in scope e inclusi nel codefreeze,
   // nell'ordine attuale della tabella, dove N = "85% #PBI Completed by
@@ -666,6 +683,10 @@ export function BacklogPage() {
             ) : (
               <span className="muted">Nessuna JQL configurata — modificala nella scheda increment per abilitare la sync.</span>
             )}
+            {' · '}
+            <span className="muted">
+              Ultima sync: {lastSyncedAt ? formatDateTime(lastSyncedAt) : 'mai sincronizzato'}
+            </span>
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

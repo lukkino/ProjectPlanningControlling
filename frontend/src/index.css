@@ -42,6 +42,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* Senza altezza/scroll propri, essendo un item di grid la sidebar si
+     stira quanto il contenuto principale (spesso molto piu' lungo di
+     100vh): il link Configurazione, spinto in fondo con margin-top:auto
+     sotto, finiva fuori schermo. Con altezza fissa alla viewport e scroll
+     interno resta sempre raggiungibile in basso. */
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
 }
 
 .sidebar-brand { display: flex; align-items: center; gap: 8px; margin: 0 4px; }

@@ -404,6 +404,9 @@ class AppSettingsPublic(BaseModel):
     jira_email: str | None = None
     jira_api_token_set: bool = False
     jira_api_token_preview: str | None = None
+    # Inserita a mano (Jira non la espone via API, vedi models.AppSettings):
+    # solo per l'avviso di scadenza in UI.
+    jira_api_token_expires_at: dt.date | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -413,3 +416,9 @@ class AppSettingsUpdate(BaseModel):
     # in UI e' sempre vuoto, non mostra mai il valore vero): va valorizzato
     # solo per impostarne uno nuovo.
     jira_api_token: str | None = None
+    jira_api_token_expires_at: dt.date | None = None
+
+
+class TestConnectionResult(BaseModel):
+    ok: bool
+    message: str

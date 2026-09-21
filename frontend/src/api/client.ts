@@ -17,6 +17,7 @@ import type {
   ProjectDetail,
   Snapshot,
   SyncResult,
+  TestConnectionResult,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -177,5 +178,6 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('/settings'),
     update: (data: AppSettingsUpdate) => put<AppSettings>('/settings', data),
+    test: (data: AppSettingsUpdate) => post<TestConnectionResult>('/settings/test', data),
   },
 }
