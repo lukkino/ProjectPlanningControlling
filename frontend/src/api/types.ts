@@ -196,3 +196,17 @@ export type DashboardMetrics = {
   last_snapshot_date: string | null
   phases: Phase[]
 }
+
+export type AppSettings = {
+  jira_base_url: string | null
+  jira_email: string | null
+  jira_api_token_set: boolean
+  jira_api_token_preview: string | null
+}
+
+export type AppSettingsUpdate = {
+  jira_base_url?: string | null
+  jira_email?: string | null
+  // Vuoto/omesso = lascia invariato il token esistente lato backend.
+  jira_api_token?: string
+}

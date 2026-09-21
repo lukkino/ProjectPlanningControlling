@@ -1,18 +1,20 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BacklogPage } from './pages/BacklogPage'
+import { ConfigurationPage } from './pages/ConfigurationPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
 import { IncrementDetailPage } from './pages/IncrementDetailPage'
 import { IncrementsPage } from './pages/IncrementsPage'
+import { OverviewDashboardPage } from './pages/OverviewDashboardPage'
 import { ProjectIncrementLinkPage } from './pages/ProjectIncrementLinkPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents', '/projects-dashboard']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents', '/projects-dashboard', '/dashboard']
 
 export default function App() {
   const location = useLocation()
@@ -29,6 +31,8 @@ export default function App() {
       <main className={isWide ? 'main-content main-content--wide' : 'main-content'}>
         <Routes>
           <Route path="/" element={<WelcomePage />} />
+          <Route path="/dashboard" element={<OverviewDashboardPage />} />
+          <Route path="/settings" element={<ConfigurationPage />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/increments" element={<IncrementsPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />

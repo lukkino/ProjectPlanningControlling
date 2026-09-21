@@ -6,8 +6,6 @@ import datetime as dt
 
 import httpx
 
-from app.config import Settings
-
 SEARCH_PATH = "/rest/api/3/search/jql"
 CHANGELOG_PATH = "/rest/api/3/issue/{key}/changelog"
 
@@ -234,15 +232,15 @@ def _fetch_task_details(client: httpx.Client, base_url: str, keys: list[str]) ->
     return details
 
 
-def search_issues(settings: Settings, jql: str) -> list[JiraIssue]:
-    if not settings.jira_configured:
+def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[JiraIssue]:
+    if not (base_url and email and api_token):
         raise JiraClientError(
-            "Integrazione Jira non configurata: compila JIRA_BASE_URL, JIRA_EMAIL "
-            "e JIRA_API_TOKEN nel file backend/.env"
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
         )
 
-    base_url = settings.jira_base_url.rstrip("/")
-    auth = (settings.jira_email, settings.jira_api_token)
+    base_url = base_url.rstrip("/")
+    auth = (email, api_token)
     # customfield_10130 = "Change Description", usato per i Bug al posto
     # della description standard nei documenti generati.
     CHANGE_DESCRIPTION_FIELD = "customfield_10130"

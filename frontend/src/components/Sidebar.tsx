@@ -18,6 +18,10 @@ export function Sidebar() {
         <h1>Project Controlling</h1>
       </div>
 
+      <NavLink to="/dashboard" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
+        📊 Dashboard
+      </NavLink>
+
       <div className="sidebar-section">
         <Link to="/increments" className="sidebar-section-title">
           Progetti
@@ -60,6 +64,14 @@ export function Sidebar() {
           ))}
         </nav>
       </div>
+
+      <NavLink
+        to="/settings"
+        className={({ isActive }) => `sidebar-settings-link${isActive ? ' active' : ''}`}
+        style={{ marginTop: 'auto' }}
+      >
+        ⚙️ Configurazione
+      </NavLink>
 
       {showNewProgetto && <IncrementFormModal onClose={() => setShowNewProgetto(false)} />}
       {showNewIncrement && <ProjectFormModal onClose={() => setShowNewIncrement(false)} />}

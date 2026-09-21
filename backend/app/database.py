@@ -193,6 +193,27 @@ def run_lightweight_migrations() -> None:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE projects DROP COLUMN {orphan_column}"))
 
+    if "app_settings" in table_names:
+        with engine.begin() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM app_settings")).scalar()
+            if not count:
+                # Prima esecuzione dopo l'introduzione della sezione
+                # Configurazione: semina la riga con gli eventuali valori
+                # gia' in .env, cosi' chi ha gia' Jira funzionante non perde
+                # la configurazione al primo avvio (vedi models.AppSettings).
+                conn.execute(
+                    text(
+                        "INSERT INTO app_settings (id, jira_base_url, jira_email, jira_api_token, updated_at) "
+                        "VALUES (1, :base_url, :email, :token, :now)"
+                    ),
+                    {
+                        "base_url": settings.jira_base_url or None,
+                        "email": settings.jira_email or None,
+                        "token": settings.jira_api_token or None,
+                        "now": dt.datetime.utcnow().isoformat(sep=" "),
+                    },
+                )
+
 
 def get_db():
     db: Session = SessionLocal()

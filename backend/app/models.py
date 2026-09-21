@@ -311,3 +311,19 @@ class Snapshot(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="snapshots")
+
+
+class AppSettings(Base):
+    """Riga singola (id=1) con le credenziali Jira, modificabili dalla
+    sezione Configurazione senza toccare backend/.env ne' riavviare il
+    server - a differenza di app.config.Settings (env-only), qui il valore
+    e' letto ad ogni richiesta. Seminata al primo avvio con gli eventuali
+    valori gia' in .env (vedi run_lightweight_migrations)."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jira_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jira_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jira_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

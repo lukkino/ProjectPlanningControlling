@@ -391,3 +391,25 @@ class DashboardMetrics(BaseModel):
     logged_hours_source: str
     last_snapshot_date: dt.date | None
     phases: list[Phase]
+
+
+# ---------- Configurazione ----------
+
+class AppSettingsPublic(BaseModel):
+    """Il token vero non viene mai restituito al frontend: solo se e'
+    impostato e un'anteprima mascherata, per confermare quale sia senza
+    esporlo (es. dopo averlo incollato per errore in un posto sbagliato)."""
+
+    jira_base_url: str | None = None
+    jira_email: str | None = None
+    jira_api_token_set: bool = False
+    jira_api_token_preview: str | None = None
+
+
+class AppSettingsUpdate(BaseModel):
+    jira_base_url: str | None = None
+    jira_email: str | None = None
+    # None o stringa vuota = lascia invariato il token esistente (il campo
+    # in UI e' sempre vuoto, non mostra mai il valore vero): va valorizzato
+    # solo per impostarne uno nuovo.
+    jira_api_token: str | None = None

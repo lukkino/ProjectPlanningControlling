@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.config import get_settings
 from app.database import get_db
+from app.routers.settings import SETTINGS_ROW_ID
 from app.services.jira_client import JiraClientError, search_issues
 
 router = APIRouter(tags=["backlog"])
@@ -70,9 +70,14 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
     if not project.jira_jql:
         raise HTTPException(status_code=400, detail="Il progetto non ha una JQL configurata")
 
-    settings = get_settings()
+    jira_settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
     try:
-        issues = search_issues(settings, project.jira_jql)
+        issues = search_issues(
+            (jira_settings.jira_base_url if jira_settings else None) or "",
+            (jira_settings.jira_email if jira_settings else None) or "",
+            (jira_settings.jira_api_token if jira_settings else None) or "",
+            project.jira_jql,
+        )
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

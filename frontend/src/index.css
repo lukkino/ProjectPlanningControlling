@@ -53,6 +53,35 @@ body {
   font-weight: 700;
 }
 
+.sidebar-dashboard-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.sidebar-dashboard-btn:hover { background: var(--bg); }
+.sidebar-dashboard-btn.active { background: var(--text); border-color: var(--text); color: white; }
+
+.sidebar-settings-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+.sidebar-settings-link:hover { background: var(--bg); color: var(--text); }
+.sidebar-settings-link.active { background: var(--bg); color: var(--text); font-weight: 600; }
+
 .sidebar-section { display: flex; flex-direction: column; gap: 8px; }
 
 .sidebar-section-title {

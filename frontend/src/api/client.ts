@@ -1,4 +1,6 @@
 import type {
+  AppSettings,
+  AppSettingsUpdate,
   BacklogItem,
   DashboardMetrics,
   DocumentRevisionMeta,
@@ -171,5 +173,9 @@ export const api = {
         revision_text: revisionText,
         deliverables: JSON.stringify(deliverables),
       }),
+  },
+  settings: {
+    get: () => request<AppSettings>('/settings'),
+    update: (data: AppSettingsUpdate) => put<AppSettings>('/settings', data),
   },
 }
