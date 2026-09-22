@@ -25,7 +25,7 @@ export function ConfigurationPage() {
   // nuovi invece di restare fermo su un vecchio stato locale.
   return (
     <ConfigurationForm
-      key={`${settings.jira_base_url}|${settings.jira_email}|${settings.jira_api_token_expires_at}|${settings.jira_project_key}`}
+      key={`${settings.jira_base_url}|${settings.jira_email}|${settings.jira_api_token_expires_at}|${settings.jira_project_key}|${settings.cycle_time_base_jql}`}
       settings={settings}
     />
   )
@@ -40,6 +40,7 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
   const [token, setToken] = useState('')
   const [expiresAt, setExpiresAt] = useState(settings.jira_api_token_expires_at ?? '')
   const [projectKey, setProjectKey] = useState(settings.jira_project_key ?? '')
+  const [cycleTimeJql, setCycleTimeJql] = useState(settings.cycle_time_base_jql ?? '')
 
   const save = useMutation({
     mutationFn: () =>
@@ -49,6 +50,7 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
         jira_api_token: token || undefined,
         jira_api_token_expires_at: expiresAt || null,
         jira_project_key: projectKey || null,
+        cycle_time_base_jql: cycleTimeJql || null,
       }),
     onSuccess: (saved) => {
       queryClient.setQueryData(['app-settings'], saved)
@@ -123,6 +125,19 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
           <span className="muted" style={{ fontSize: 12 }}>
             Usata per le metriche calcolate sull'intero progetto Jira (es. il grafico "Metriche" nella Dashboard
             generale), a differenza della JQL per-increment del Backlog.
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Cycle Time JQL (base)</span>
+          <input
+            value={cycleTimeJql}
+            onChange={(e) => setCycleTimeJql(e.target.value)}
+            placeholder='project in (PTBSYS) AND issuetype in (Activity, Bug, Story) AND labels not in (...)'
+          />
+          <span className="muted" style={{ fontSize: 12 }}>
+            PBI da includere nel grafico Cycle Time della Dashboard generale, senza filtro di status/finestra
+            temporale: il backend aggiunge automaticamente <code>AND status CHANGED TO Done AFTER -365d</code>.
           </span>
         </label>
 

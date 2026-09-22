@@ -1,10 +1,11 @@
 import datetime as dt
+import math
 
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.routers.settings import SETTINGS_ROW_ID
-from app.services.jira_client import JiraClientError, count_issues, count_issues_by_type
+from app.services.jira_client import JiraClientError, count_issues, count_issues_by_type, fetch_cycle_times
 
 # Custom field Jira "Source Type" (dropdown): distingue i Bug segnalati da
 # cliente (Complaint) da quelli trovati internamente. Il suffisso [Dropdown]
@@ -191,4 +192,65 @@ def compute_overview_metrics(db: Session) -> schemas.OverviewMetrics:
         done_last_12_months=[schemas.PbiDoneCount(issue_type=t, count=c) for t, c in counts.items()],
         done_last_12_months_total=sum(counts.values()),
         bug_complaint_count=bug_complaint_count,
+    )
+
+
+def _percentile(sorted_values: list[float], p: float) -> float | None:
+    """Percentile con interpolazione lineare tra i due punti piu' vicini
+    (stesso metodo di default di numpy.percentile), per non aggiungere
+    numpy come dipendenza solo per questo."""
+    if not sorted_values:
+        return None
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    k = (len(sorted_values) - 1) * (p / 100)
+    f, c = math.floor(k), math.ceil(k)
+    if f == c:
+        return sorted_values[int(k)]
+    return sorted_values[f] * (c - k) + sorted_values[c] * (k - f)
+
+
+def compute_cycle_time_metrics(db: Session) -> schemas.CycleTimeMetrics:
+    """Scatterplot Cycle Time della Dashboard generale: un punto per PBI (la
+    JQL "base" configurata in Configurazione + finestra ultimi 12 mesi),
+    asse Y il cycle time in giorni (actual_finish - actual_start, entrambi
+    ricavati dal changelog Jira), con le linee di percentile 50/85/95."""
+    settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    base_jql = (settings.cycle_time_base_jql if settings else None) or ""
+    if not base_jql.strip():
+        return schemas.CycleTimeMetrics(
+            points=[], error="JQL base del Cycle Time non configurata (sezione Configurazione)."
+        )
+
+    jql = f"{base_jql} AND status CHANGED TO Done AFTER -365d"
+
+    try:
+        issues = fetch_cycle_times(
+            (settings.jira_base_url if settings else None) or "",
+            (settings.jira_email if settings else None) or "",
+            (settings.jira_api_token if settings else None) or "",
+            jql,
+        )
+    except JiraClientError as exc:
+        return schemas.CycleTimeMetrics(points=[], error=str(exc))
+
+    points = [
+        schemas.CycleTimePoint(
+            key=issue.key,
+            issue_type=issue.issue_type,
+            finish_date=issue.actual_finish,
+            cycle_time_days=(issue.actual_finish - issue.actual_start).days,
+        )
+        for issue in issues
+        if issue.actual_start is not None and issue.actual_finish is not None
+        and issue.actual_finish >= issue.actual_start
+    ]
+    points.sort(key=lambda p: p.finish_date)
+
+    durations = sorted(p.cycle_time_days for p in points)
+    return schemas.CycleTimeMetrics(
+        points=points,
+        p50=_percentile(durations, 50),
+        p85=_percentile(durations, 85),
+        p95=_percentile(durations, 95),
     )

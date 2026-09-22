@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
-from app.services.metrics import compute_dashboard_metrics, compute_overview_metrics
+from app.services.metrics import compute_cycle_time_metrics, compute_dashboard_metrics, compute_overview_metrics
 
 router = APIRouter(tags=["dashboard"])
 
@@ -19,3 +19,8 @@ def get_dashboard(project_id: int, db: Session = Depends(get_db)):
 @router.get("/api/dashboard/overview", response_model=schemas.OverviewMetrics)
 def get_overview_dashboard(db: Session = Depends(get_db)):
     return compute_overview_metrics(db)
+
+
+@router.get("/api/dashboard/cycle-time", response_model=schemas.CycleTimeMetrics)
+def get_cycle_time_dashboard(db: Session = Depends(get_db)):
+    return compute_cycle_time_metrics(db)

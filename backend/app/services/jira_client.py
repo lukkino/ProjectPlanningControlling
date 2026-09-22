@@ -302,6 +302,59 @@ def count_issues(base_url: str, email: str, api_token: str, jql: str) -> int:
     return sum(count_issues_by_type(base_url, email, api_token, jql).values())
 
 
+class CycleTimeIssue:
+    def __init__(self, key: str, issue_type: str, actual_start: dt.date | None, actual_finish: dt.date | None):
+        self.key = key
+        self.issue_type = issue_type
+        self.actual_start = actual_start
+        self.actual_finish = actual_finish
+
+
+def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> list[CycleTimeIssue]:
+    """Come search_issues, ma solo issuetype + le date effettive dal
+    changelog (niente description/task collegati/campi custom): usata dal
+    grafico Cycle Time della Dashboard generale, dove serve solo la coppia
+    (actual_start, actual_finish) per PBI."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+
+    base_url = base_url.rstrip("/")
+    results: list[CycleTimeIssue] = []
+    next_page_token: str | None = None
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype"]}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in .env")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+
+                for raw in data.get("issues", []):
+                    key = raw.get("key", "")
+                    issue_type = ((raw.get("fields") or {}).get("issuetype") or {}).get("name", "")
+                    actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
+                    results.append(CycleTimeIssue(key, issue_type, actual_start, actual_finish))
+
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+    return results
+
+
 def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[JiraIssue]:
     if not (base_url and email and api_token):
         raise JiraClientError(

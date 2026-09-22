@@ -210,6 +210,21 @@ export type OverviewMetrics = {
   error: string | null
 }
 
+export type CycleTimePoint = {
+  key: string
+  issue_type: string
+  finish_date: string
+  cycle_time_days: number
+}
+
+export type CycleTimeMetrics = {
+  points: CycleTimePoint[]
+  p50: number | null
+  p85: number | null
+  p95: number | null
+  error: string | null
+}
+
 export type AppSettings = {
   jira_base_url: string | null
   jira_email: string | null
@@ -221,6 +236,9 @@ export type AppSettings = {
   // livello di intero progetto (es. il grafico "Metriche" della Dashboard
   // generale) invece che di singolo increment.
   jira_project_key: string | null
+  // JQL base (senza status/finestra temporale, aggiunti dal backend) per il
+  // grafico Cycle Time della Dashboard generale.
+  cycle_time_base_jql: string | null
 }
 
 export type AppSettingsUpdate = {
@@ -230,6 +248,7 @@ export type AppSettingsUpdate = {
   jira_api_token?: string
   jira_api_token_expires_at?: string | null
   jira_project_key?: string | null
+  cycle_time_base_jql?: string | null
 }
 
 export type TestConnectionResult = {

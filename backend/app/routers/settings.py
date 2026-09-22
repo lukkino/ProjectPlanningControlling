@@ -35,6 +35,7 @@ def _to_public(row: models.AppSettings) -> schemas.AppSettingsPublic:
         jira_api_token_preview=preview,
         jira_api_token_expires_at=row.jira_api_token_expires_at,
         jira_project_key=row.jira_project_key,
+        cycle_time_base_jql=row.cycle_time_base_jql,
     )
 
 
@@ -59,6 +60,8 @@ def update_settings_row(payload: schemas.AppSettingsUpdate, db: Session = Depend
         row.jira_api_token_expires_at = data["jira_api_token_expires_at"]
     if "jira_project_key" in data:
         row.jira_project_key = data["jira_project_key"]
+    if "cycle_time_base_jql" in data:
+        row.cycle_time_base_jql = data["cycle_time_base_jql"]
     db.commit()
     db.refresh(row)
     return _to_public(row)

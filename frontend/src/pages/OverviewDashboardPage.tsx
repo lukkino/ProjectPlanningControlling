@@ -1,9 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import {
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ReferenceLine,
+  Scatter,
+  ScatterChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { api } from '../api/client'
-import type { Project } from '../api/types'
-import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
+import type { CycleTimePoint, Project } from '../api/types'
+import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 
 const ROW_LABEL_WIDTH = 160
 const BAR_HEIGHT = 30
@@ -138,6 +151,124 @@ function MetricsCard() {
   )
 }
 
+type ScatterPoint = CycleTimePoint & { x: number; y: number }
+
+function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { payload: ScatterPoint }[] }) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>
+        {p.key} ({p.issue_type})
+      </div>
+      <div>Completato: {formatIsoDate(p.finish_date)}</div>
+      <div>Cycle time: {p.cycle_time_days} giorni</div>
+    </div>
+  )
+}
+
+// Scatterplot Cycle Time: un punto per PBI (JQL configurabile in
+// Configurazione + ultimi 12 mesi), asse X la data di completamento, asse Y
+// il cycle time in giorni, con le linee di percentile 50/85/95.
+function CycleTimeCard() {
+  const { data } = useQuery({ queryKey: ['dashboard', 'cycle-time'], queryFn: api.dashboard.cycleTime })
+
+  if (!data) {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Cycle Time</h3>
+        <p className="muted">Caricamento...</p>
+      </div>
+    )
+  }
+
+  const pointsByType: Record<string, ScatterPoint[]> = {}
+  const xs: number[] = []
+  for (const p of data.points) {
+    const x = dateStrToEpochDays(p.finish_date)
+    if (x === null) continue
+    xs.push(x)
+    ;(pointsByType[p.issue_type] ??= []).push({ ...p, x, y: p.cycle_time_days })
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Cycle Time</h3>
+      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+        Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
+        Le linee tratteggiate sono il 50°, 85° e 95° percentile.
+      </p>
+
+      {data.error ? (
+        <p className="muted">{data.error}</p>
+      ) : data.points.length === 0 ? (
+        <p className="muted">Nessun PBI completato negli ultimi 12 mesi con i dati necessari.</p>
+      ) : (
+        <>
+          <div style={{ height: 340 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  type="number"
+                  dataKey="x"
+                  domain={[Math.min(...xs), Math.max(...xs)]}
+                  tickFormatter={formatEpochDaysAsDate}
+                  tick={{ fontSize: 12 }}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  tick={{ fontSize: 12 }}
+                  label={{ value: 'Giorni', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+                />
+                <Tooltip content={<CycleTimeTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                {data.p50 != null && (
+                  <ReferenceLine
+                    y={data.p50}
+                    stroke="var(--text-muted)"
+                    strokeDasharray="4 4"
+                    label={{ value: `P50: ${data.p50.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--text-muted)' }}
+                  />
+                )}
+                {data.p85 != null && (
+                  <ReferenceLine
+                    y={data.p85}
+                    stroke="var(--warning)"
+                    strokeDasharray="4 4"
+                    label={{ value: `P85: ${data.p85.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--warning)' }}
+                  />
+                )}
+                {data.p95 != null && (
+                  <ReferenceLine
+                    y={data.p95}
+                    stroke="var(--danger)"
+                    strokeDasharray="4 4"
+                    label={{ value: `P95: ${data.p95.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--danger)' }}
+                  />
+                )}
+                {Object.entries(pointsByType).map(([type, points]) => (
+                  <Scatter key={type} name={type} data={points} fill={PBI_TYPE_COLORS[type] ?? COLOR_INACTIVE} />
+                ))}
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
 
@@ -162,6 +293,7 @@ export function OverviewDashboardPage() {
         </div>
 
         <MetricsCard />
+        <CycleTimeCard />
       </div>
     )
   }
@@ -369,6 +501,7 @@ export function OverviewDashboardPage() {
       </div>
 
       <MetricsCard />
+      <CycleTimeCard />
     </div>
   )
 }

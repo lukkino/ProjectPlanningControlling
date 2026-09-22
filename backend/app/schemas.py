@@ -416,6 +416,21 @@ class OverviewMetrics(BaseModel):
     error: str | None = None
 
 
+class CycleTimePoint(BaseModel):
+    key: str
+    issue_type: str
+    finish_date: dt.date
+    cycle_time_days: float
+
+
+class CycleTimeMetrics(BaseModel):
+    points: list[CycleTimePoint]
+    p50: float | None = None
+    p85: float | None = None
+    p95: float | None = None
+    error: str | None = None
+
+
 # ---------- Configurazione ----------
 
 class AppSettingsPublic(BaseModel):
@@ -431,6 +446,7 @@ class AppSettingsPublic(BaseModel):
     # solo per l'avviso di scadenza in UI.
     jira_api_token_expires_at: dt.date | None = None
     jira_project_key: str | None = None
+    cycle_time_base_jql: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -442,6 +458,7 @@ class AppSettingsUpdate(BaseModel):
     jira_api_token: str | None = None
     jira_api_token_expires_at: dt.date | None = None
     jira_project_key: str | None = None
+    cycle_time_base_jql: str | None = None
 
 
 class TestConnectionResult(BaseModel):

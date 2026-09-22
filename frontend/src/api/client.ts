@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppSettingsUpdate,
   BacklogItem,
+  CycleTimeMetrics,
   DashboardMetrics,
   DocumentRevisionMeta,
   ForecastSimulation,
@@ -139,6 +140,7 @@ export const api = {
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
     overview: () => request<OverviewMetrics>('/dashboard/overview'),
+    cycleTime: () => request<CycleTimeMetrics>('/dashboard/cycle-time'),
   },
   forecasting: {
     list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),
