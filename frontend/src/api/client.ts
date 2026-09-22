@@ -10,6 +10,7 @@ import type {
   IncrementDetail,
   IncrementSnapshot,
   IncrementSnapshotValue,
+  OverviewMetrics,
   Phase,
   PprDeliverable,
   PprDocumentMeta,
@@ -137,6 +138,7 @@ export const api = {
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
+    overview: () => request<OverviewMetrics>('/dashboard/overview'),
   },
   forecasting: {
     list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),

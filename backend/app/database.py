@@ -198,6 +198,9 @@ def run_lightweight_migrations() -> None:
         if "jira_api_token_expires_at" not in app_settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE app_settings ADD COLUMN jira_api_token_expires_at DATE"))
+        if "jira_project_key" not in app_settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN jira_project_key TEXT"))
 
         with engine.begin() as conn:
             count = conn.execute(text("SELECT COUNT(*) FROM app_settings")).scalar()

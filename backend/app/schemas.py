@@ -394,6 +394,28 @@ class DashboardMetrics(BaseModel):
     phases: list[Phase]
 
 
+class PbiDoneCount(BaseModel):
+    issue_type: str
+    count: int
+
+
+class OverviewMetrics(BaseModel):
+    # PBI (Story/Bug/Activity, intero progetto Jira configurato in
+    # Configurazione) messi a Done negli ultimi 12 mesi, per il grafico a
+    # ciambella della Dashboard generale. Interrogato live su Jira (non dal
+    # backlog locale, che copre solo gli increment tracciati in questa app).
+    done_last_12_months: list[PbiDoneCount]
+    done_last_12_months_total: int
+    # Quanti dei Bug sopra hanno "Source Type" = Complaint: evidenziato a
+    # parte perche' un Bug segnalato da cliente (Complaint) ha un peso
+    # diverso da uno trovato internamente.
+    bug_complaint_count: int = 0
+    # Valorizzato se Jira non e' configurato (base URL/email/token) o manca
+    # la Jira project key in Configurazione: il frontend mostra questo
+    # messaggio al posto del grafico invece di un errore.
+    error: str | None = None
+
+
 # ---------- Configurazione ----------
 
 class AppSettingsPublic(BaseModel):
@@ -408,6 +430,7 @@ class AppSettingsPublic(BaseModel):
     # Inserita a mano (Jira non la espone via API, vedi models.AppSettings):
     # solo per l'avviso di scadenza in UI.
     jira_api_token_expires_at: dt.date | None = None
+    jira_project_key: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -418,6 +441,7 @@ class AppSettingsUpdate(BaseModel):
     # solo per impostarne uno nuovo.
     jira_api_token: str | None = None
     jira_api_token_expires_at: dt.date | None = None
+    jira_project_key: str | None = None
 
 
 class TestConnectionResult(BaseModel):

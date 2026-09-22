@@ -1,6 +1,19 @@
 import datetime as dt
 
+from sqlalchemy.orm import Session
+
 from app import models, schemas
+from app.routers.settings import SETTINGS_ROW_ID
+from app.services.jira_client import JiraClientError, count_issues, count_issues_by_type
+
+# Custom field Jira "Source Type" (dropdown): distingue i Bug segnalati da
+# cliente (Complaint) da quelli trovati internamente. Il suffisso [Dropdown]
+# nella JQL disambigua il campo, come confermato dall'utente.
+BUG_COMPLAINT_JQL_CLAUSE = '"Source Type[Dropdown]" = Complaint'
+
+# Tipi PBI mostrati nel grafico "Metriche" della Dashboard generale, nello
+# stesso ordine della JQL standard di sync del backlog (Story, Bug, Activity).
+PBI_TYPES_FOR_METRICS = ("Story", "Bug", "Activity")
 
 
 def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetrics:
@@ -134,4 +147,48 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         percent_material_used=(actual_material_total / budget_material_total) if budget_material_total else 0.0,
         budget_lines=list(increment.budget_lines),
         snapshots=list(increment.snapshots),
+    )
+
+
+def compute_overview_metrics(db: Session) -> schemas.OverviewMetrics:
+    """Grafico a ciambella della Dashboard generale: quanti Story/Bug/Activity
+    sono stati messi a Done negli ultimi 12 mesi, sull'INTERO progetto Jira
+    configurato in Configurazione (jira_project_key) - non solo gli increment
+    tracciati in questa app, il cui backlog locale e' un sottoinsieme filtrato
+    per fixVersion. Interrogato live su Jira ad ogni caricamento: 'status
+    CHANGED TO Done AFTER -365d' e' semanticamente la stessa richiesta che si
+    farebbe a mano in Jira (issue transitate a Done nella finestra, anche se
+    poi riaperte), a differenza di un filtro sullo stato attuale."""
+    settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    project_key = (settings.jira_project_key if settings else None) or ""
+    if not project_key.strip():
+        return schemas.OverviewMetrics(
+            done_last_12_months=[],
+            done_last_12_months_total=0,
+            error="Jira project key non configurata (sezione Configurazione).",
+        )
+
+    types_jql = ", ".join(PBI_TYPES_FOR_METRICS)
+    jql = f"project = {project_key} AND issuetype in ({types_jql}) AND status CHANGED TO Done AFTER -365d"
+
+    base_url = (settings.jira_base_url if settings else None) or ""
+    email = (settings.jira_email if settings else None) or ""
+    api_token = (settings.jira_api_token if settings else None) or ""
+
+    try:
+        raw_counts = count_issues_by_type(base_url, email, api_token, jql)
+        complaint_jql = (
+            f"project = {project_key} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} "
+            "AND status CHANGED TO Done AFTER -365d"
+        )
+        bug_complaint_count = count_issues(base_url, email, api_token, complaint_jql)
+    except JiraClientError as exc:
+        return schemas.OverviewMetrics(done_last_12_months=[], done_last_12_months_total=0, error=str(exc))
+
+    counts = {t: raw_counts.get(t, 0) for t in PBI_TYPES_FOR_METRICS}
+
+    return schemas.OverviewMetrics(
+        done_last_12_months=[schemas.PbiDoneCount(issue_type=t, count=c) for t, c in counts.items()],
+        done_last_12_months_total=sum(counts.values()),
+        bug_complaint_count=bug_complaint_count,
     )

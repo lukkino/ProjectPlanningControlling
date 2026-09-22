@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '../api/client'
 import type { Project } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
@@ -9,6 +10,16 @@ const BAR_HEIGHT = 30
 // Increment non "in corso": tinta chiara dello stesso blu --primary, cosi'
 // quelli "in corso" (blu pieno + bordo) risaltano per contrasto.
 const COLOR_INACTIVE = '#c7d9fb'
+
+// Palette categoriale fissa (Story/Bug/Activity, in quest'ordine) per il
+// grafico a ciambella "Metriche": stessi colori gia' usati nell'app per
+// altri scopi (--primary/--danger/--progetto), validata per distinguibilita'
+// in daltonismo con scripts/validate_palette.js della skill dataviz.
+const PBI_TYPE_COLORS: Record<string, string> = {
+  Story: '#2f6fed',
+  Bug: '#d3402f',
+  Activity: '#5b3fb0',
+}
 
 // Calendario a risoluzione mensile (un tick per mese) sull'intero range di
 // date coperto dagli increment - stessa logica di ProjectsDashboardPage, non
@@ -30,6 +41,103 @@ function buildMonthTicks(minEpoch: number, maxEpoch: number): { epoch: number; l
 
 type Row = { project: Project; startEpoch: number | null; endEpoch: number | null }
 
+// Grafico a ciambella: PBI (Story/Bug/Activity, tutti gli increment) messi a
+// Done negli ultimi 12 mesi, con il totale al centro e il dettaglio per tipo
+// sotto. Componente a se' (invece che inline in OverviewDashboardPage) cosi'
+// da poter comparire sia nel ramo "nessuna data" sia in quello normale senza
+// duplicare la query.
+function MetricsCard() {
+  const { data } = useQuery({ queryKey: ['dashboard', 'overview'], queryFn: api.dashboard.overview })
+
+  if (!data) {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Metriche</h3>
+        <p className="muted">Caricamento...</p>
+      </div>
+    )
+  }
+
+  const total = data.done_last_12_months_total
+  const chartData = data.done_last_12_months.map((d) => ({ ...d, color: PBI_TYPE_COLORS[d.issue_type] ?? COLOR_INACTIVE }))
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Metriche</h3>
+      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+        PBI (Story/Bug/Activity, intero progetto Jira) messi a Done negli ultimi 12 mesi.
+      </p>
+
+      {data.error ? (
+        <p className="muted">{data.error}</p>
+      ) : total === 0 ? (
+        <p className="muted">Nessun PBI messo a Done negli ultimi 12 mesi.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div style={{ position: 'relative', width: 220, height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  dataKey="count"
+                  nameKey="issue_type"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={70}
+                  outerRadius={100}
+                  paddingAngle={chartData.filter((d) => d.count > 0).length > 1 ? 2 : 0}
+                  startAngle={90}
+                  endAngle={-270}
+                  stroke="var(--surface)"
+                  strokeWidth={2}
+                >
+                  {chartData.map((d) => (
+                    <Cell key={d.issue_type} fill={d.color} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number, name: string) => [value, name]} />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Totale al centro della ciambella, sovrapposto al grafico. */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--text)', lineHeight: 1 }}>{total}</span>
+              <span className="muted" style={{ fontSize: 11 }}>
+                Totale
+              </span>
+            </div>
+          </div>
+
+          {/* Dettaglio con i singoli totali per tipo, sotto la torta. Sul Bug
+              e' evidenziato quanti sono Complaint (Source Type = Complaint). */}
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {chartData.map((d) => (
+              <span key={d.issue_type} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, display: 'inline-block' }} />
+                {d.issue_type}: <strong>{d.count}</strong>
+                {d.issue_type === 'Bug' && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    (di cui <strong>{data.bug_complaint_count}</strong> complaint)
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
 
@@ -45,11 +153,15 @@ export function OverviewDashboardPage() {
 
   if (allEpochs.length === 0) {
     return (
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
-        <p className="muted">
-          Nessuna data di inizio/fine impostata su nessun increment: non c'e' ancora niente da mostrare nel Gantt.
-        </p>
+      <div>
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
+          <p className="muted">
+            Nessuna data di inizio/fine impostata su nessun increment: non c'e' ancora niente da mostrare nel Gantt.
+          </p>
+        </div>
+
+        <MetricsCard />
       </div>
     )
   }
@@ -255,6 +367,8 @@ export function OverviewDashboardPage() {
           </div>
         </div>
       </div>
+
+      <MetricsCard />
     </div>
   )
 }

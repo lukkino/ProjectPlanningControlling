@@ -326,6 +326,10 @@ class AppSettings(Base):
     jira_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Chiave del progetto Jira (es. "PTBSYS"), usata per interrogare Jira a
+    # livello di intero progetto invece che di singolo increment - es. il
+    # grafico "Metriche" della Dashboard generale.
+    jira_project_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Jira Cloud non espone la scadenza di un token esistente via API: va
     # inserita a mano (e' visibile solo su id.atlassian.com alla creazione),
     # solo per mostrare un avviso in Configurazione - non blocca nulla da

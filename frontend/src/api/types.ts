@@ -198,6 +198,18 @@ export type DashboardMetrics = {
   phases: Phase[]
 }
 
+export type PbiDoneCount = {
+  issue_type: string
+  count: number
+}
+
+export type OverviewMetrics = {
+  done_last_12_months: PbiDoneCount[]
+  done_last_12_months_total: number
+  bug_complaint_count: number
+  error: string | null
+}
+
 export type AppSettings = {
   jira_base_url: string | null
   jira_email: string | null
@@ -205,6 +217,10 @@ export type AppSettings = {
   jira_api_token_preview: string | null
   // Jira non la espone via API: inserita a mano, solo per l'avviso in UI.
   jira_api_token_expires_at: string | null
+  // Chiave del progetto Jira (es. "PTBSYS"): usata per interrogare Jira a
+  // livello di intero progetto (es. il grafico "Metriche" della Dashboard
+  // generale) invece che di singolo increment.
+  jira_project_key: string | null
 }
 
 export type AppSettingsUpdate = {
@@ -213,6 +229,7 @@ export type AppSettingsUpdate = {
   // Vuoto/omesso = lascia invariato il token esistente lato backend.
   jira_api_token?: string
   jira_api_token_expires_at?: string | null
+  jira_project_key?: string | null
 }
 
 export type TestConnectionResult = {

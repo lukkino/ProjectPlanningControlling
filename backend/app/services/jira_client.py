@@ -252,6 +252,56 @@ def test_connection(base_url: str, email: str, api_token: str) -> str:
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 
 
+def count_issues_by_type(base_url: str, email: str, api_token: str, jql: str) -> dict[str, int]:
+    """Conta le issue di una JQL per issuetype, senza costruire JiraIssue
+    completi (niente changelog/task-detail per issue): usata per aggregati
+    di sola conta come il grafico "Metriche" della Dashboard generale, dove
+    servono solo i totali e recuperare 40+ changelog sarebbe inutilmente
+    lento."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+
+    base_url = base_url.rstrip("/")
+    counts: dict[str, int] = {}
+    next_page_token: str | None = None
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype"]}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in .env")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+
+                for raw in data.get("issues", []):
+                    type_name = ((raw.get("fields") or {}).get("issuetype") or {}).get("name", "")
+                    counts[type_name] = counts.get(type_name, 0) + 1
+
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+    return counts
+
+
+def count_issues(base_url: str, email: str, api_token: str, jql: str) -> int:
+    """Totale issue di una JQL, quando non serve il dettaglio per issuetype
+    (es. una JQL che filtra gia' un solo issuetype)."""
+    return sum(count_issues_by_type(base_url, email, api_token, jql).values())
+
+
 def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[JiraIssue]:
     if not (base_url and email and api_token):
         raise JiraClientError(

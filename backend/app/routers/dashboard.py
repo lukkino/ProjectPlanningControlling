@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
-from app.services.metrics import compute_dashboard_metrics
+from app.services.metrics import compute_dashboard_metrics, compute_overview_metrics
 
 router = APIRouter(tags=["dashboard"])
 
@@ -14,3 +14,8 @@ def get_dashboard(project_id: int, db: Session = Depends(get_db)):
     if project is None:
         raise HTTPException(status_code=404, detail="Progetto non trovato")
     return compute_dashboard_metrics(project)
+
+
+@router.get("/api/dashboard/overview", response_model=schemas.OverviewMetrics)
+def get_overview_dashboard(db: Session = Depends(get_db)):
+    return compute_overview_metrics(db)
