@@ -74,6 +74,7 @@ export type BacklogItem = {
 export type SyncResult = {
   created: number
   updated: number
+  removed: number
   total_matched: number
   errors: string[]
 }

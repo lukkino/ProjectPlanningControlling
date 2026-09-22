@@ -753,7 +753,8 @@ export function BacklogPage() {
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
-          Sync completata: {sync.data.created} nuove issue, {sync.data.updated} aggiornate (totale trovate:{' '}
+          Sync completata: {sync.data.created} nuove issue, {sync.data.updated} aggiornate
+          {sync.data.removed > 0 && `, ${sync.data.removed} rimosse (non più nella JQL)`} (totale trovate:{' '}
           {sync.data.total_matched}).
         </div>
       )}

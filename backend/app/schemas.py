@@ -163,6 +163,7 @@ class BacklogItem(BacklogItemBase):
 class SyncResult(BaseModel):
     created: int
     updated: int
+    removed: int = 0
     total_matched: int
     errors: list[str] = []
 

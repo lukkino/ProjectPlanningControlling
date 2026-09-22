@@ -90,6 +90,7 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
     updated = 0
     now = dt.datetime.utcnow()
     max_order = max((item.priority_order for item in existing.values()), default=0)
+    matched_keys = {issue.key for issue in issues}
 
     for issue in issues:
         labels = ";".join(issue.labels)
@@ -139,5 +140,14 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
             db.add(item)
             created += 1
 
+    # Rimuove gli item sincronizzati in precedenza che non sono piu' nel
+    # risultato della JQL (es. fix version cambiata su Jira): altrimenti
+    # resterebbero nel backlog per sempre, invisibili alla sync.
+    removed = 0
+    for jira_key, item in existing.items():
+        if jira_key not in matched_keys:
+            db.delete(item)
+            removed += 1
+
     db.commit()
-    return schemas.SyncResult(created=created, updated=updated, total_matched=len(issues))
+    return schemas.SyncResult(created=created, updated=updated, removed=removed, total_matched=len(issues))
