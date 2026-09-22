@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   CartesianGrid,
@@ -54,13 +54,23 @@ function buildMonthTicks(minEpoch: number, maxEpoch: number): { epoch: number; l
 
 type Row = { project: Project; startEpoch: number | null; endEpoch: number | null }
 
+// Pulsante di refresh usato sia nell'header di ogni singolo grafico sia,
+// aggregato su piu' query, in quello "Aggiorna tutti i grafici".
+function RefreshButton({ onClick, isFetching, label = 'Aggiorna' }: { onClick: () => void; isFetching: boolean; label?: string }) {
+  return (
+    <button className="btn" onClick={onClick} disabled={isFetching} style={{ fontSize: 12, padding: '4px 10px' }}>
+      {isFetching ? 'Aggiornamento...' : `⟳ ${label}`}
+    </button>
+  )
+}
+
 // Grafico a ciambella: PBI (Story/Bug/Activity, tutti gli increment) messi a
 // Done negli ultimi 12 mesi, con il totale al centro e il dettaglio per tipo
 // sotto. Componente a se' (invece che inline in OverviewDashboardPage) cosi'
 // da poter comparire sia nel ramo "nessuna data" sia in quello normale senza
 // duplicare la query.
 function MetricsCard() {
-  const { data } = useQuery({ queryKey: ['dashboard', 'overview'], queryFn: api.dashboard.overview })
+  const { data, refetch, isFetching } = useQuery({ queryKey: ['dashboard', 'overview'], queryFn: api.dashboard.overview })
 
   if (!data) {
     return (
@@ -76,8 +86,11 @@ function MetricsCard() {
 
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Metriche</h3>
-      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
+        <RefreshButton onClick={() => refetch()} isFetching={isFetching} />
+      </div>
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
         PBI (Story/Bug/Activity, intero progetto Jira) messi a Done negli ultimi 12 mesi.
       </p>
 
@@ -180,7 +193,7 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
 // Configurazione + ultimi 12 mesi), asse X la data di completamento, asse Y
 // il cycle time in giorni, con le linee di percentile 50/85/95.
 function CycleTimeCard() {
-  const { data } = useQuery({ queryKey: ['dashboard', 'cycle-time'], queryFn: api.dashboard.cycleTime })
+  const { data, refetch, isFetching } = useQuery({ queryKey: ['dashboard', 'cycle-time'], queryFn: api.dashboard.cycleTime })
 
   if (!data) {
     return (
@@ -202,8 +215,11 @@ function CycleTimeCard() {
 
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Cycle Time</h3>
-      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Cycle Time</h3>
+        <RefreshButton onClick={() => refetch()} isFetching={isFetching} />
+      </div>
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
         Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
         Le linee tratteggiate sono il 50°, 85° e 95° percentile.
       </p>
@@ -269,6 +285,30 @@ function CycleTimeCard() {
   )
 }
 
+// Riga con il pulsante "Aggiorna tutti i grafici": rifà entrambe le query
+// dei grafici (Metriche e Cycle Time) in un colpo solo, senza toccare quella
+// del Gantt increment (dati locali, non da Jira). Chiavi esplicite invece di
+// un prefisso generico ['dashboard'] per non intercettare per sbaglio la
+// query ['dashboard', projectId] della Dashboard di progetto.
+function RefreshAllRow() {
+  const queryClient = useQueryClient()
+  const fetchingOverview = useIsFetching({ queryKey: ['dashboard', 'overview'] })
+  const fetchingCycleTime = useIsFetching({ queryKey: ['dashboard', 'cycle-time'] })
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <RefreshButton
+        onClick={() => {
+          queryClient.refetchQueries({ queryKey: ['dashboard', 'overview'] })
+          queryClient.refetchQueries({ queryKey: ['dashboard', 'cycle-time'] })
+        }}
+        isFetching={fetchingOverview + fetchingCycleTime > 0}
+        label="Aggiorna tutti i grafici"
+      />
+    </div>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
 
@@ -292,6 +332,7 @@ export function OverviewDashboardPage() {
           </p>
         </div>
 
+        <RefreshAllRow />
         <MetricsCard />
         <CycleTimeCard />
       </div>
@@ -500,6 +541,7 @@ export function OverviewDashboardPage() {
         </div>
       </div>
 
+      <RefreshAllRow />
       <MetricsCard />
       <CycleTimeCard />
     </div>
