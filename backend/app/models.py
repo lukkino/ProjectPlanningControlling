@@ -338,3 +338,22 @@ class AppSettings(Base):
     # sola quando passa, lo stato vero lo dice test_connection.
     jira_api_token_expires_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DashboardSnapshot(Base):
+    """Fotografia dei grafici Jira della Dashboard generale (Metriche anno
+    corrente/precedente, Cycle Time/Throughput, Bug aperti) per entrambi i
+    team, presa in un giorno preciso: i grafici live cambiano ogni giorno
+    (finestre relative a oggi, issue che cambiano stato), mentre per la
+    presentazione mensile servono numeri congelati e rivedibili in seguito.
+    I dati sono le stesse risposte degli endpoint live, serializzate in JSON
+    (vedi schemas.DashboardSnapshotTeamData), cosi' il frontend li mostra
+    con gli stessi componenti senza una tabella per grafico."""
+
+    __tablename__ = "dashboard_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_date: Mapped[dt.date] = mapped_column(Date)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_json: Mapped[str] = mapped_column(Text)

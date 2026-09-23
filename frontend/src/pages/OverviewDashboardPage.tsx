@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { createContext, useContext, useState } from 'react'
+import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bar,
   BarChart,
@@ -20,7 +20,17 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
-import type { BugsOpenedMonth, BugStatusCount, CycleTimePoint, OverviewMetrics, OverviewPeriod, Project, Team } from '../api/types'
+import type {
+  BugsOpenedMonth,
+  BugStatusCount,
+  CycleTimePoint,
+  DashboardSnapshotDetail,
+  DashboardSnapshotTeamData,
+  OverviewMetrics,
+  OverviewPeriod,
+  Project,
+  Team,
+} from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 
 const ROW_LABEL_WIDTH = 160
@@ -83,6 +93,30 @@ function buildMonthTicks(minEpoch: number, maxEpoch: number): { epoch: number; l
 
 type Row = { project: Project; startEpoch: number | null; endEpoch: number | null }
 
+// Snapshot della Dashboard generale attualmente visualizzato (null = dati
+// live da Jira). Passato via context invece che come prop a ogni card: i
+// grafici non cambiano, cambia solo da dove leggono i dati.
+const SnapshotContext = createContext<DashboardSnapshotDetail | null>(null)
+
+// Dati di un grafico per il team scelto: dalla query live oppure, se si sta
+// guardando uno snapshot, dalla fotografia salvata (la query live resta
+// disabilitata, niente chiamate a Jira). isSnapshot serve alle card per
+// nascondere il pulsante Aggiorna, che su dati congelati non ha senso.
+function useChartData<T>(
+  team: Team,
+  queryKey: unknown[],
+  queryFn: () => Promise<T>,
+  fromSnapshot: (d: DashboardSnapshotTeamData) => T,
+): { data: T | undefined; refetch: () => void; isFetching: boolean; isSnapshot: boolean } {
+  const snapshot = useContext(SnapshotContext)
+  const live = useQuery({ queryKey, queryFn, enabled: snapshot === null })
+  if (snapshot) {
+    const teamData = snapshot.teams[team]
+    return { data: teamData ? fromSnapshot(teamData) : undefined, refetch: () => {}, isFetching: false, isSnapshot: true }
+  }
+  return { data: live.data, refetch: () => live.refetch(), isFetching: live.isFetching, isSnapshot: false }
+}
+
 // Pulsante di refresh usato sia nell'header di ogni singolo grafico sia,
 // aggregato su piu' query, in quello "Aggiorna tutti i grafici".
 function RefreshButton({ onClick, isFetching, label = 'Aggiorna' }: { onClick: () => void; isFetching: boolean; label?: string }) {
@@ -123,11 +157,13 @@ function TeamSelector({ team, onChange }: { team: Team; onChange: (t: Team) => v
 }
 
 // Finestre temporali del grafico Metriche, relative a oggi (vedi
-// OVERVIEW_PERIOD_JQL nel backend): scorrono col passare del tempo.
-function periodRangeLabel(period: OverviewPeriod): string {
+// OVERVIEW_PERIOD_JQL nel backend) o al giorno dello snapshot visualizzato:
+// scorrono col passare del tempo.
+function periodRangeLabel(period: OverviewPeriod, referenceDate: string | null): string {
   const DAY_MS = 24 * 60 * 60 * 1000
   const offsetDays = period === 'current' ? 0 : 365
-  const end = new Date(Date.now() - offsetDays * DAY_MS)
+  const reference = referenceDate ? new Date(`${referenceDate}T12:00:00`).getTime() : Date.now()
+  const end = new Date(reference - offsetDays * DAY_MS)
   const start = new Date(end.getTime() - 365 * DAY_MS)
   const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
   return `${fmt(start)} – ${fmt(end)}`
@@ -141,14 +177,20 @@ function periodRangeLabel(period: OverviewPeriod): string {
 // il confronto anno su anno non avrebbe senso.
 function MetricsCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const current = useQuery({
-    queryKey: ['dashboard', 'overview', team, 'current'],
-    queryFn: () => api.dashboard.overview(team, 'current'),
-  })
-  const previous = useQuery({
-    queryKey: ['dashboard', 'overview', team, 'previous'],
-    queryFn: () => api.dashboard.overview(team, 'previous'),
-  })
+  const snapshot = useContext(SnapshotContext)
+  const current = useChartData(
+    team,
+    ['dashboard', 'overview', team, 'current'],
+    () => api.dashboard.overview(team, 'current'),
+    (d) => d.overview_current,
+  )
+  const previous = useChartData(
+    team,
+    ['dashboard', 'overview', team, 'previous'],
+    () => api.dashboard.overview(team, 'previous'),
+    (d) => d.overview_previous,
+  )
+  const referenceDate = snapshot?.snapshot_date ?? null
 
   return (
     <div className="card">
@@ -156,7 +198,7 @@ function MetricsCard() {
         <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <TeamSelector team={team} onChange={setTeam} />
-          {(current.data || previous.data) && (
+          {!current.isSnapshot && (current.data || previous.data) && (
             <RefreshButton
               onClick={() => {
                 current.refetch()
@@ -173,8 +215,8 @@ function MetricsCard() {
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
-        <DoneDonut data={current.data} title="Ultimi 12 mesi" rangeLabel={periodRangeLabel('current')} />
-        <DoneDonut data={previous.data} title="12 mesi precedenti" rangeLabel={periodRangeLabel('previous')} />
+        <DoneDonut data={current.data} title="Ultimi 12 mesi" rangeLabel={periodRangeLabel('current', referenceDate)} />
+        <DoneDonut data={previous.data} title="12 mesi precedenti" rangeLabel={periodRangeLabel('previous', referenceDate)} />
       </div>
     </div>
   )
@@ -324,17 +366,19 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
 // il cycle time in giorni, con le linee di percentile 50/85/95.
 function CycleTimeCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['dashboard', 'cycle-time', team],
-    queryFn: () => api.dashboard.cycleTime(team),
-  })
+  const { data, refetch, isFetching, isSnapshot } = useChartData(
+    team,
+    ['dashboard', 'cycle-time', team],
+    () => api.dashboard.cycleTime(team),
+    (d) => d.cycle_time,
+  )
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ marginTop: 0, marginBottom: 0 }}>Cycle Time</h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <TeamSelector team={team} onChange={setTeam} />
-        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
     </div>
   )
@@ -455,17 +499,19 @@ function buildMonthBuckets(points: { finish_date: string }[]): { key: string; la
 // aggregata qui per mese invece che mostrata punto per punto.
 function ThroughputCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['dashboard', 'cycle-time', team],
-    queryFn: () => api.dashboard.cycleTime(team),
-  })
+  const { data, refetch, isFetching, isSnapshot } = useChartData(
+    team,
+    ['dashboard', 'cycle-time', team],
+    () => api.dashboard.cycleTime(team),
+    (d) => d.cycle_time,
+  )
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ marginTop: 0, marginBottom: 0 }}>Throughput</h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <TeamSelector team={team} onChange={setTeam} />
-        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
     </div>
   )
@@ -578,10 +624,12 @@ function BugsOpenedTooltip({ active, payload, showCve }: { active?: boolean; pay
 function BugsOpenedCard() {
   const [team, setTeam] = useState<Team>('sw')
   const [showCve, setShowCve] = useState(false)
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['dashboard', 'bugs-opened', team],
-    queryFn: () => api.dashboard.bugsOpened(team),
-  })
+  const { data, refetch, isFetching, isSnapshot } = useChartData(
+    team,
+    ['dashboard', 'bugs-opened', team],
+    () => api.dashboard.bugsOpened(team),
+    (d) => d.bugs_opened,
+  )
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -592,7 +640,7 @@ function BugsOpenedCard() {
           Mostra CVE
         </label>
         <TeamSelector team={team} onChange={setTeam} />
-        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
     </div>
   )
@@ -720,6 +768,158 @@ function BugStatusTable({ byStatus }: { byStatus: BugStatusCount[] }) {
   )
 }
 
+// Pannello snapshot in cima alla Dashboard generale: crea una fotografia dei
+// grafici Jira (entrambi i team) e ne elenca lo storico; lo snapshot scelto
+// finisce nell'URL (?snapshot=ID), cosi' un link o un refresh della pagina
+// riaprono gli stessi dati - comodo per la presentazione mensile.
+function SnapshotPanel({ selectedId, onSelect }: { selectedId: number | null; onSelect: (id: number | null) => void }) {
+  const queryClient = useQueryClient()
+  const [note, setNote] = useState('')
+  const { data: snapshots } = useQuery({ queryKey: ['dashboard-snapshots'], queryFn: api.dashboardSnapshots.list })
+
+  const create = useMutation({
+    mutationFn: () => api.dashboardSnapshots.create(note.trim() || null),
+    onSuccess: (created) => {
+      setNote('')
+      queryClient.invalidateQueries({ queryKey: ['dashboard-snapshots'] })
+      onSelect(created.id)
+    },
+  })
+  const update = useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string | null }) => api.dashboardSnapshots.update(id, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard-snapshots'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-snapshot'] })
+    },
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) => api.dashboardSnapshots.remove(id),
+    onSuccess: (_, id) => {
+      if (id === selectedId) onSelect(null)
+      queryClient.invalidateQueries({ queryKey: ['dashboard-snapshots'] })
+    },
+  })
+
+  const selected = snapshots?.find((s) => s.id === selectedId)
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Snapshot</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            placeholder="Nota (es. Presentazione settembre)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={create.isPending}
+            style={{ width: 260 }}
+          />
+          <button className="btn btn-primary" onClick={() => create.mutate()} disabled={create.isPending}>
+            {create.isPending ? 'Creazione in corso...' : '📷 Crea snapshot'}
+          </button>
+        </div>
+      </div>
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+        Uno snapshot congela i dati Jira di tutti i grafici qui sotto (Metriche, Cycle Time, Throughput, Bug aperti) per
+        entrambi i team, cosi' si possono rivedere in futuro esattamente come erano oggi.
+        {create.isPending && ' La raccolta da Jira puo\' richiedere circa un minuto.'}
+      </p>
+      {create.isError && <p style={{ color: 'var(--danger)' }}>Errore nella creazione: {(create.error as Error).message}</p>}
+
+      {selected && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: '8px 12px',
+            marginBottom: 12,
+            borderRadius: 'var(--radius)',
+            border: '1px solid var(--warning)',
+            background: 'var(--bg)',
+          }}
+        >
+          <span>
+            Stai visualizzando lo snapshot del <strong>{formatIsoDate(selected.snapshot_date)}</strong>
+            {selected.note ? ` (${selected.note})` : ''}: i grafici non si aggiornano.
+          </span>
+          <button className="btn" onClick={() => onSelect(null)}>
+            Torna ai dati live
+          </button>
+        </div>
+      )}
+
+      {snapshots && snapshots.length > 0 ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Nota</th>
+                <th>Creato alle</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshots.map((s) => (
+                <tr key={s.id} style={s.id === selectedId ? { background: 'var(--bg)' } : undefined}>
+                  <td>
+                    <strong>{formatIsoDate(s.snapshot_date)}</strong>
+                    {s.has_errors && (
+                      <span style={{ color: 'var(--warning)', marginLeft: 6 }} title="Alcuni grafici hanno restituito un errore al momento dello snapshot">
+                        ⚠
+                      </span>
+                    )}
+                  </td>
+                  <td className="editable-cell" style={{ width: '100%' }}>
+                    <input
+                      key={`${s.id}-${s.note ?? ''}`}
+                      defaultValue={s.note ?? ''}
+                      placeholder="Aggiungi una nota"
+                      onBlur={(e) => {
+                        if ((e.target.value.trim() || null) !== s.note) update.mutate({ id: s.id, note: e.target.value })
+                      }}
+                    />
+                  </td>
+                  <td className="muted">
+                    {new Date(`${s.created_at}Z`).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      {s.id === selectedId ? (
+                        <button className="btn active" onClick={() => onSelect(null)}>
+                          In visualizzazione
+                        </button>
+                      ) : (
+                        <button className="btn" onClick={() => onSelect(s.id)}>
+                          Visualizza
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => {
+                          if (confirm(`Eliminare lo snapshot del ${formatIsoDate(s.snapshot_date)}? L'operazione non è reversibile.`))
+                            remove.mutate(s.id)
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        snapshots && <p className="muted">Nessuno snapshot ancora: i grafici mostrano i dati live.</p>
+      )}
+    </div>
+  )
+}
+
 // Riga con il pulsante "Aggiorna tutti i grafici": rifà tutte le query dei
 // grafici (Metriche, Cycle Time/Throughput, che condividono la stessa
 // query, e Bug aperti), per QUALUNQUE team selezionato nelle singole card - la chiave
@@ -749,8 +949,48 @@ function RefreshAllRow() {
   )
 }
 
+// Grafici Jira della Dashboard generale, live o letti dallo snapshot scelto.
+// Con uno snapshot selezionato si aspetta di averlo caricato prima di
+// mostrarli, altrimenti partirebbero per un attimo le query live verso Jira.
+function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
+  const { data: snapshot, isError } = useQuery({
+    queryKey: ['dashboard-snapshot', snapshotId],
+    queryFn: () => api.dashboardSnapshots.get(snapshotId as number),
+    enabled: snapshotId !== null,
+  })
+
+  if (snapshotId !== null && !snapshot) {
+    return (
+      <div className="card">
+        <p className="muted">{isError ? 'Snapshot non trovato.' : 'Caricamento snapshot...'}</p>
+      </div>
+    )
+  }
+
+  return (
+    <SnapshotContext.Provider value={snapshotId !== null ? (snapshot ?? null) : null}>
+      {snapshotId === null && <RefreshAllRow />}
+      <MetricsCard />
+      <CycleTimeCard />
+      <ThroughputCard />
+      <BugsOpenedCard />
+    </SnapshotContext.Provider>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
+  const [searchParams, setSearchParams] = useSearchParams()
+  const snapshotParam = Number(searchParams.get('snapshot'))
+  const snapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : null
+  const selectSnapshot = (id: number | null) => setSearchParams(id === null ? {} : { snapshot: String(id) })
+
+  const jiraSection = (
+    <>
+      <SnapshotPanel selectedId={snapshotId} onSelect={selectSnapshot} />
+      <JiraCharts snapshotId={snapshotId} />
+    </>
+  )
 
   if (!projects) return <p className="muted">Caricamento...</p>
 
@@ -772,11 +1012,7 @@ export function OverviewDashboardPage() {
           </p>
         </div>
 
-        <RefreshAllRow />
-        <MetricsCard />
-        <CycleTimeCard />
-        <ThroughputCard />
-        <BugsOpenedCard />
+        {jiraSection}
       </div>
     )
   }
@@ -983,11 +1219,7 @@ export function OverviewDashboardPage() {
         </div>
       </div>
 
-      <RefreshAllRow />
-      <MetricsCard />
-      <CycleTimeCard />
-      <ThroughputCard />
-      <BugsOpenedCard />
+      {jiraSection}
     </div>
   )
 }

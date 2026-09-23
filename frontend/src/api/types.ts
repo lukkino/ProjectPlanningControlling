@@ -281,3 +281,24 @@ export type TestConnectionResult = {
   ok: boolean
   message: string
 }
+
+// Snapshot della Dashboard generale: i dati dei grafici Jira di entrambi i
+// team congelati in un giorno preciso (vedi models.DashboardSnapshot).
+export type DashboardSnapshotTeamData = {
+  overview_current: OverviewMetrics
+  overview_previous: OverviewMetrics
+  cycle_time: CycleTimeMetrics
+  bugs_opened: BugsOpenedMetrics
+}
+
+export type DashboardSnapshotSummary = {
+  id: number
+  snapshot_date: string
+  created_at: string
+  note: string | null
+  has_errors: boolean
+}
+
+export type DashboardSnapshotDetail = DashboardSnapshotSummary & {
+  teams: Partial<Record<Team, DashboardSnapshotTeamData>>
+}

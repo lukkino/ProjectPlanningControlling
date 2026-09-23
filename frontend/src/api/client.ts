@@ -5,6 +5,8 @@ import type {
   BugsOpenedMetrics,
   CycleTimeMetrics,
   DashboardMetrics,
+  DashboardSnapshotDetail,
+  DashboardSnapshotSummary,
   DocumentRevisionMeta,
   ForecastSimulation,
   Increment,
@@ -146,6 +148,13 @@ export const api = {
       request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
     cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
+  },
+  dashboardSnapshots: {
+    list: () => request<DashboardSnapshotSummary[]>('/dashboard/snapshots'),
+    get: (id: number) => request<DashboardSnapshotDetail>(`/dashboard/snapshots/${id}`),
+    create: (note: string | null) => post<DashboardSnapshotSummary>('/dashboard/snapshots', { note }),
+    update: (id: number, note: string | null) => put<DashboardSnapshotSummary>(`/dashboard/snapshots/${id}`, { note }),
+    remove: (id: number) => del(`/dashboard/snapshots/${id}`),
   },
   forecasting: {
     list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),

@@ -502,3 +502,38 @@ class AppSettingsUpdate(BaseModel):
 class TestConnectionResult(BaseModel):
     ok: bool
     message: str
+
+
+# ---------- Dashboard generale: snapshot ----------
+
+class DashboardSnapshotTeamData(BaseModel):
+    # Le stesse risposte degli endpoint live della Dashboard generale, per
+    # un team, congelate al momento dello snapshot.
+    overview_current: OverviewMetrics
+    overview_previous: OverviewMetrics
+    cycle_time: CycleTimeMetrics
+    bugs_opened: BugsOpenedMetrics
+
+
+class DashboardSnapshotCreate(BaseModel):
+    note: str | None = None
+
+
+class DashboardSnapshotUpdate(BaseModel):
+    note: str | None = None
+
+
+class DashboardSnapshotSummary(BaseModel):
+    id: int
+    snapshot_date: dt.date
+    created_at: dt.datetime
+    note: str | None = None
+    # Almeno un grafico di un team ha restituito un errore (Jira non
+    # raggiungibile, JQL del team non configurata...): lo snapshot esiste ma
+    # quel grafico mostrera' il messaggio d'errore invece dei dati.
+    has_errors: bool = False
+
+
+class DashboardSnapshotDetail(DashboardSnapshotSummary):
+    # Chiave = team ("sw", "embedded").
+    teams: dict[str, DashboardSnapshotTeamData]
