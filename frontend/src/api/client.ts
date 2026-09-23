@@ -93,6 +93,7 @@ export const api = {
     create: (data: Partial<Project>) => post<ProjectDetail>('/projects', data),
     update: (id: number, data: Partial<Project>) => put<ProjectDetail>(`/projects/${id}`, data),
     remove: (id: number) => del(`/projects/${id}`),
+    setGanttOrder: (projectIds: number[]) => put<void>('/projects/gantt-order', { project_ids: projectIds }),
   },
   increments: {
     list: () => request<Increment[]>('/increments'),

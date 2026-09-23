@@ -265,6 +265,11 @@ class ProjectCreate(ProjectBase):
     pass
 
 
+class ProjectGanttOrder(BaseModel):
+    # Id degli increment nell'ordine voluto, dall'alto verso il basso.
+    project_ids: list[int]
+
+
 class ProjectUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
@@ -283,6 +288,8 @@ class ProjectUpdate(BaseModel):
 class ProjectListItem(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
+    gantt_order: int | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
 

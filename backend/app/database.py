@@ -180,6 +180,9 @@ def run_lightweight_migrations() -> None:
         if "is_current" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN is_current BOOLEAN DEFAULT 0"))
+        if "gantt_order" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN gantt_order INTEGER"))
 
         # estimated_budget_hours/estimated_budget_material sono relitti di
         # uno schema precedente allo split Project/Increment (il budget vive

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -23,6 +24,22 @@ def _get_project_or_404(db: Session, project_id: int) -> models.Project:
 @router.get("", response_model=list[schemas.ProjectListItem])
 def list_projects(db: Session = Depends(get_db)):
     return db.query(models.Project).order_by(models.Project.updated_at.desc()).all()
+
+
+@router.put("/gantt-order", status_code=204)
+def set_gantt_order(payload: schemas.ProjectGanttOrder, db: Session = Depends(get_db)):
+    """Ordine manuale delle righe nel Gantt della Dashboard generale.
+    Dichiarato prima di PUT /{project_id}, che altrimenti catturerebbe
+    "gantt-order" come id. updated_at viene riscritto uguale a se stesso:
+    riordinare il Gantt non e' una modifica dell'increment e non deve
+    cambiare l'ordine "modificati di recente" della lista progetti."""
+    for position, project_id in enumerate(payload.project_ids):
+        db.execute(
+            update(models.Project)
+            .where(models.Project.id == project_id)
+            .values(gantt_order=position, updated_at=models.Project.updated_at)
+        )
+    db.commit()
 
 
 @router.post("", response_model=schemas.ProjectDetail, status_code=201)

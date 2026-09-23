@@ -81,6 +81,10 @@ class Project(Base):
     # contemporaneamente (es. per capire su quale backlog basare
     # l'ordinamento della colonna Next della Kanban Jira).
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Posizione della riga nel Gantt della Dashboard generale quando
+    # l'ordinamento e' "Manuale" (0 = in alto). None per gli increment mai
+    # riordinati a mano: finiscono in fondo, per data di inizio.
+    gantt_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

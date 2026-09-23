@@ -123,6 +123,9 @@ export type Project = {
   change_order_url: string | null
   change_order_label: string | null
   is_current: boolean
+  // Posizione nel Gantt della Dashboard generale in ordinamento Manuale
+  // (null = mai riordinato a mano).
+  gantt_order: number | null
   created_at: string
   updated_at: string
 }

@@ -93,6 +93,66 @@ function buildMonthTicks(minEpoch: number, maxEpoch: number): { epoch: number; l
 
 type Row = { project: Project; startEpoch: number | null; endEpoch: number | null }
 
+// Ordinamento delle righe del Gantt increment: un criterio (o l'ordine
+// manuale, salvato nel database per tutti) piu' la direzione. La scelta del
+// criterio invece e' una preferenza di chi guarda, tenuta in localStorage.
+type GanttSortKey = 'manual' | 'start' | 'end' | 'code' | 'name'
+type GanttSort = { key: GanttSortKey; dir: 'asc' | 'desc' }
+
+const GANTT_SORT_OPTIONS: { key: GanttSortKey; label: string }[] = [
+  { key: 'manual', label: 'Manuale' },
+  { key: 'start', label: 'Data inizio' },
+  { key: 'end', label: 'Planned finish' },
+  { key: 'code', label: 'Codice' },
+  { key: 'name', label: 'Nome' },
+]
+const GANTT_SORT_STORAGE_KEY = 'overviewDashboard.ganttSort'
+const DEFAULT_GANTT_SORT: GanttSort = { key: 'start', dir: 'asc' }
+
+function loadGanttSort(): GanttSort {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GANTT_SORT_STORAGE_KEY) ?? 'null')
+    if (GANTT_SORT_OPTIONS.some((o) => o.key === stored?.key) && (stored.dir === 'asc' || stored.dir === 'desc')) {
+      return stored
+    }
+  } catch {
+    // localStorage non disponibile o dato corrotto: usa il default
+  }
+  return DEFAULT_GANTT_SORT
+}
+
+// Righe senza il valore del criterio (data mancante, mai riordinate a mano)
+// sempre in fondo, qualunque sia la direzione; a parita' decide la data di
+// inizio, poi il codice, cosi' l'ordine e' stabile.
+function sortGanttRows(rows: Row[], sort: GanttSort): Row[] {
+  const valueOf = (r: Row): number | string | null => {
+    switch (sort.key) {
+      case 'manual':
+        return r.project.gantt_order
+      case 'start':
+        return r.startEpoch
+      case 'end':
+        return r.endEpoch
+      case 'code':
+        return r.project.code.toLowerCase()
+      case 'name':
+        return r.project.name.toLowerCase()
+    }
+  }
+  const sign = sort.key !== 'manual' && sort.dir === 'desc' ? -1 : 1
+  return [...rows].sort((a, b) => {
+    const va = valueOf(a)
+    const vb = valueOf(b)
+    if (va !== vb) {
+      if (va === null) return 1
+      if (vb === null) return -1
+      return (va < vb ? -1 : 1) * sign
+    }
+    const byStart = (a.startEpoch ?? Infinity) - (b.startEpoch ?? Infinity)
+    return byStart !== 0 ? byStart : a.project.code.localeCompare(b.project.code)
+  })
+}
+
 // Snapshot della Dashboard generale attualmente visualizzato (null = dati
 // live da Jira). Passato via context invece che come prop a ogni card: i
 // grafici non cambiano, cambia solo da dove leggono i dati.
@@ -985,6 +1045,28 @@ export function OverviewDashboardPage() {
   const snapshotId = Number.isInteger(snapshotParam) && snapshotParam > 0 ? snapshotParam : null
   const selectSnapshot = (id: number | null) => setSearchParams(id === null ? {} : { snapshot: String(id) })
 
+  const queryClient = useQueryClient()
+  const [ganttSort, setGanttSortState] = useState<GanttSort>(loadGanttSort)
+  const setGanttSort = (sort: GanttSort) => {
+    setGanttSortState(sort)
+    try {
+      localStorage.setItem(GANTT_SORT_STORAGE_KEY, JSON.stringify(sort))
+    } catch {
+      // preferenza non salvata: resta valida solo per questa sessione
+    }
+  }
+  // Aggiornamento ottimistico: la riga si sposta subito, senza aspettare il
+  // backend; in caso di errore si ricarica la lista vera.
+  const saveGanttOrder = useMutation({
+    mutationFn: api.projects.setGanttOrder,
+    onMutate: (ids: number[]) => {
+      queryClient.setQueryData<Project[]>(['projects'], (old) =>
+        old?.map((p) => ({ ...p, gantt_order: ids.includes(p.id) ? ids.indexOf(p.id) : p.gantt_order })),
+      )
+    },
+    onError: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  })
+
   const jiraSection = (
     <>
       <SnapshotPanel selectedId={snapshotId} onSelect={selectSnapshot} />
@@ -1025,7 +1107,18 @@ export function OverviewDashboardPage() {
   const monthTicks = buildMonthTicks(domainMin, domainMax)
   const todayEpoch = toEpochDays(new Date())
 
-  const sortedRows = [...rows].sort((a, b) => (a.startEpoch ?? Infinity) - (b.startEpoch ?? Infinity))
+  const sortedRows = sortGanttRows(rows, ganttSort)
+  const isManual = ganttSort.key === 'manual'
+  // Sposta una riga di una posizione e salva l'ordine completo: la prima
+  // volta fissa anche la posizione di tutte le altre righe, cosi' da li' in
+  // poi l'ordine manuale non dipende piu' dalle date.
+  const moveRow = (index: number, delta: -1 | 1) => {
+    const ids = sortedRows.map((r) => r.project.id)
+    const target = index + delta
+    if (target < 0 || target >= ids.length) return
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    saveGanttOrder.mutate(ids)
+  }
 
   return (
     <div>
@@ -1057,6 +1150,37 @@ export function OverviewDashboardPage() {
       </div>
 
       <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 13 }}>
+          <label htmlFor="gantt-sort" className="muted">
+            Ordina per
+          </label>
+          <select
+            id="gantt-sort"
+            value={ganttSort.key}
+            onChange={(e) => setGanttSort({ ...ganttSort, key: e.target.value as GanttSortKey })}
+            style={{ width: 'auto' }}
+          >
+            {GANTT_SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {isManual ? (
+            <span className="muted" style={{ fontSize: 12 }}>
+              Sposta le righe con le frecce ▲▼ accanto al codice: l'ordine viene salvato.
+            </span>
+          ) : (
+            <button
+              className="btn"
+              onClick={() => setGanttSort({ ...ganttSort, dir: ganttSort.dir === 'asc' ? 'desc' : 'asc' })}
+              title="Inverti l'ordine"
+              style={{ fontSize: 12, padding: '4px 10px' }}
+            >
+              {ganttSort.dir === 'asc' ? '↑ Crescente' : '↓ Decrescente'}
+            </button>
+          )}
+        </div>
         <div style={{ overflowX: 'auto' }}>
           <div style={{ minWidth: 720, paddingRight: 48 }}>
             {/* Header: tick dei mesi, allineato con le barre sotto */}
@@ -1083,7 +1207,7 @@ export function OverviewDashboardPage() {
               </div>
             </div>
 
-            {sortedRows.map(({ project, startEpoch, endEpoch }) => (
+            {sortedRows.map(({ project, startEpoch, endEpoch }, index) => (
               <div
                 key={project.id}
                 style={{
@@ -1095,16 +1219,40 @@ export function OverviewDashboardPage() {
                   borderTop: '1px solid var(--border)',
                 }}
               >
-                <Link to={`/projects/${project.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {project.code}
-                    {project.is_current && (
-                      <span title="In corso" style={{ color: 'var(--warning)' }}>
-                        ●
-                      </span>
-                    )}
-                  </div>
-                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  {isManual && (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <button
+                        className="gantt-move"
+                        onClick={() => moveRow(index, -1)}
+                        disabled={index === 0}
+                        title="Sposta su"
+                        aria-label={`Sposta ${project.code} su`}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        className="gantt-move"
+                        onClick={() => moveRow(index, 1)}
+                        disabled={index === sortedRows.length - 1}
+                        title="Sposta giù"
+                        aria-label={`Sposta ${project.code} giù`}
+                      >
+                        ▼
+                      </button>
+                    </div>
+                  )}
+                  <Link to={`/projects/${project.id}`} style={{ textDecoration: 'none', color: 'inherit', minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {project.code}
+                      {project.is_current && (
+                        <span title="In corso" style={{ color: 'var(--warning)' }}>
+                          ●
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                </div>
 
                 <div style={{ position: 'relative', height: BAR_HEIGHT }}>
                   {/* Griglia mensile di sfondo, per confrontare le righe */}
