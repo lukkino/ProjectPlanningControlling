@@ -198,12 +198,26 @@ def run_lightweight_migrations() -> None:
         if "jira_api_token_expires_at" not in app_settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE app_settings ADD COLUMN jira_api_token_expires_at DATE"))
-        if "jira_project_key" not in app_settings_columns:
+        # cycle_time_base_jql copriva solo il Cycle Time; con l'introduzione
+        # del Team Embedded diventa la JQL base del Team SW, condivisa da
+        # tutti e tre i grafici - rinominata invece di aggiunta da zero per
+        # non far riconfigurare a mano una JQL gia' impostata.
+        if "cycle_time_base_jql" in app_settings_columns and "team_sw_base_jql" not in app_settings_columns:
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE app_settings ADD COLUMN jira_project_key TEXT"))
-        if "cycle_time_base_jql" not in app_settings_columns:
+                conn.execute(text("ALTER TABLE app_settings RENAME COLUMN cycle_time_base_jql TO team_sw_base_jql"))
+            app_settings_columns = {col["name"] for col in inspect(engine).get_columns("app_settings")}
+        if "team_sw_base_jql" not in app_settings_columns:
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE app_settings ADD COLUMN cycle_time_base_jql TEXT"))
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN team_sw_base_jql TEXT"))
+        if "team_embedded_base_jql" not in app_settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN team_embedded_base_jql TEXT"))
+        # jira_project_key serviva solo alla query "intero progetto" delle
+        # Metriche, ora sostituita dalla JQL base per team (che include gia'
+        # "project in (...)"): colonna orfana, rimossa.
+        if "jira_project_key" in app_settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE app_settings DROP COLUMN jira_project_key"))
 
         with engine.begin() as conn:
             count = conn.execute(text("SELECT COUNT(*) FROM app_settings")).scalar()

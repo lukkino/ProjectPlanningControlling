@@ -302,19 +302,36 @@ def count_issues(base_url: str, email: str, api_token: str, jql: str) -> int:
     return sum(count_issues_by_type(base_url, email, api_token, jql).values())
 
 
+# Account bot che apre e chiude automaticamente i Bug generati dallo scan di
+# sicurezza (CVE su pacchetti/OS, vedi reporter delle issue): scoperto
+# investigando perche' giugno 2026 avesse 35 Bug Done, quando 34 erano in
+# realta' una chiusura massiva automatica dello stesso giorno, non lavoro di
+# sviluppo. Usato per evidenziare questi Bug separatamente nei grafici.
+CVE_BUG_REPORTER_EMAIL = "jira.security-pipeline@inpeco.com"
+
+
 class CycleTimeIssue:
-    def __init__(self, key: str, issue_type: str, actual_start: dt.date | None, actual_finish: dt.date | None):
+    def __init__(
+        self,
+        key: str,
+        issue_type: str,
+        actual_start: dt.date | None,
+        actual_finish: dt.date | None,
+        is_cve: bool = False,
+    ):
         self.key = key
         self.issue_type = issue_type
         self.actual_start = actual_start
         self.actual_finish = actual_finish
+        self.is_cve = is_cve
 
 
 def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> list[CycleTimeIssue]:
-    """Come search_issues, ma solo issuetype + le date effettive dal
+    """Come search_issues, ma solo issuetype/reporter + le date effettive dal
     changelog (niente description/task collegati/campi custom): usata dal
     grafico Cycle Time della Dashboard generale, dove serve solo la coppia
-    (actual_start, actual_finish) per PBI."""
+    (actual_start, actual_finish) per PBI, piu' il reporter per distinguere i
+    Bug CVE del security-pipeline (vedi CVE_BUG_REPORTER_EMAIL)."""
     if not (base_url and email and api_token):
         raise JiraClientError(
             "Integrazione Jira non configurata: compila Jira base URL, email e API token "
@@ -328,7 +345,7 @@ def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> li
     try:
         with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
             while True:
-                payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype"]}
+                payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype", "reporter"]}
                 if next_page_token:
                     payload["nextPageToken"] = next_page_token
 
@@ -342,9 +359,12 @@ def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> li
 
                 for raw in data.get("issues", []):
                     key = raw.get("key", "")
-                    issue_type = ((raw.get("fields") or {}).get("issuetype") or {}).get("name", "")
+                    fields = raw.get("fields") or {}
+                    issue_type = (fields.get("issuetype") or {}).get("name", "")
+                    reporter_email = (fields.get("reporter") or {}).get("emailAddress")
+                    is_cve = issue_type == "Bug" and reporter_email == CVE_BUG_REPORTER_EMAIL
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
-                    results.append(CycleTimeIssue(key, issue_type, actual_start, actual_finish))
+                    results.append(CycleTimeIssue(key, issue_type, actual_start, actual_finish, is_cve))
 
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):

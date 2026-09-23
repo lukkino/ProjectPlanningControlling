@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -15,7 +18,7 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
-import type { CycleTimePoint, Project } from '../api/types'
+import type { CycleTimePoint, Project, Team } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 
 const ROW_LABEL_WIDTH = 160
@@ -24,14 +27,38 @@ const BAR_HEIGHT = 30
 // quelli "in corso" (blu pieno + bordo) risaltano per contrasto.
 const COLOR_INACTIVE = '#c7d9fb'
 
-// Palette categoriale fissa (Story/Bug/Activity, in quest'ordine) per il
-// grafico a ciambella "Metriche": stessi colori gia' usati nell'app per
-// altri scopi (--primary/--danger/--progetto), validata per distinguibilita'
-// in daltonismo con scripts/validate_palette.js della skill dataviz.
+// Palette categoriale fissa (Story/Bug/Activity/Task, in quest'ordine) per
+// il grafico a ciambella "Metriche": stessi colori gia' usati nell'app per
+// altri scopi (--primary/--danger/--progetto/--warning) piu' Task (solo per
+// il Team Embedded), validata per distinguibilita' in daltonismo con
+// scripts/validate_palette.js della skill dataviz.
 const PBI_TYPE_COLORS: Record<string, string> = {
   Story: '#2f6fed',
   Bug: '#d3402f',
   Activity: '#5b3fb0',
+  Task: '#c97a12',
+}
+
+// Serie per i grafici Cycle Time/Throughput: i Bug del bot di security scan
+// (is_cve, vedi CycleTimePoint) sono evidenziati come serie a se' stante,
+// stesso rosso del Bug ma con opacita' ridotta, invece di una nuova tinta -
+// restano "Bug" concettualmente, solo chiusi in automatico e non da uno
+// sviluppatore (vedi bug_cve_count in Metriche).
+const SERIES: { key: string; color: string; opacity: number }[] = [
+  { key: 'Story', color: PBI_TYPE_COLORS.Story, opacity: 1 },
+  { key: 'Bug', color: PBI_TYPE_COLORS.Bug, opacity: 1 },
+  { key: 'Bug (CVE)', color: PBI_TYPE_COLORS.Bug, opacity: 0.35 },
+  { key: 'Activity', color: PBI_TYPE_COLORS.Activity, opacity: 1 },
+  { key: 'Task', color: PBI_TYPE_COLORS.Task, opacity: 1 },
+]
+
+const TEAMS: { key: Team; label: string }[] = [
+  { key: 'sw', label: 'SW' },
+  { key: 'embedded', label: 'Embedded' },
+]
+
+function seriesKeyFor(p: { issue_type: string; is_cve: boolean }): string {
+  return p.issue_type === 'Bug' && p.is_cve ? 'Bug (CVE)' : p.issue_type
 }
 
 // Calendario a risoluzione mensile (un tick per mese) sull'intero range di
@@ -64,34 +91,76 @@ function RefreshButton({ onClick, isFetching, label = 'Aggiorna' }: { onClick: (
   )
 }
 
+// Selettore Team SW/Embedded presente in ogni grafico (Metriche, Cycle Time,
+// Throughput): ognuno lo tiene come proprio stato locale, non condiviso -
+// si puo' quindi confrontare per esempio il Cycle Time di un team con le
+// Metriche dell'altro senza che si influenzino a vicenda.
+function TeamSelector({ team, onChange }: { team: Team; onChange: (t: Team) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 2, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 2 }}>
+      {TEAMS.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          style={{
+            border: 'none',
+            borderRadius: 6,
+            padding: '3px 10px',
+            fontSize: 12,
+            cursor: 'pointer',
+            background: team === t.key ? 'var(--primary)' : 'transparent',
+            color: team === t.key ? 'white' : 'var(--text)',
+            fontWeight: team === t.key ? 600 : 400,
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Grafico a ciambella: PBI (Story/Bug/Activity, tutti gli increment) messi a
 // Done negli ultimi 12 mesi, con il totale al centro e il dettaglio per tipo
 // sotto. Componente a se' (invece che inline in OverviewDashboardPage) cosi'
 // da poter comparire sia nel ramo "nessuna data" sia in quello normale senza
 // duplicare la query.
 function MetricsCard() {
-  const { data, refetch, isFetching } = useQuery({ queryKey: ['dashboard', 'overview'], queryFn: api.dashboard.overview })
+  const [team, setTeam] = useState<Team>('sw')
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['dashboard', 'overview', team],
+    queryFn: () => api.dashboard.overview(team),
+  })
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <TeamSelector team={team} onChange={setTeam} />
+        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+      </div>
+    </div>
+  )
 
   if (!data) {
     return (
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Metriche</h3>
+        {header}
         <p className="muted">Caricamento...</p>
       </div>
     )
   }
 
   const total = data.done_last_12_months_total
-  const chartData = data.done_last_12_months.map((d) => ({ ...d, color: PBI_TYPE_COLORS[d.issue_type] ?? COLOR_INACTIVE }))
+  const chartData = data.done_last_12_months
+    .filter((d) => d.count > 0)
+    .map((d) => ({ ...d, color: PBI_TYPE_COLORS[d.issue_type] ?? COLOR_INACTIVE }))
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
-        <RefreshButton onClick={() => refetch()} isFetching={isFetching} />
-      </div>
+      {header}
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        PBI (Story/Bug/Activity, intero progetto Jira) messi a Done negli ultimi 12 mesi.
+        PBI messi a Done negli ultimi 12 mesi (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}).
       </p>
 
       {data.error ? (
@@ -111,7 +180,7 @@ function MetricsCard() {
                   cy="50%"
                   innerRadius={70}
                   outerRadius={100}
-                  paddingAngle={chartData.filter((d) => d.count > 0).length > 1 ? 2 : 0}
+                  paddingAngle={chartData.length > 1 ? 2 : 0}
                   startAngle={90}
                   endAngle={-270}
                   stroke="var(--surface)"
@@ -143,16 +212,23 @@ function MetricsCard() {
             </div>
           </div>
 
-          {/* Dettaglio con i singoli totali per tipo, sotto la torta. Sul Bug
-              e' evidenziato quanti sono Complaint (Source Type = Complaint). */}
+          {/* Dettaglio con i singoli totali per tipo, sotto la torta. Sulla
+              Story e' evidenziato quante sono Enhancement (Enhancement =
+              Yes); sul Bug quanti sono Complaint (Source Type = Complaint) e
+              quanti CVE del bot di security scan (vedi bug_cve_count). */}
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
             {chartData.map((d) => (
               <span key={d.issue_type} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, display: 'inline-block' }} />
                 {d.issue_type}: <strong>{d.count}</strong>
+                {d.issue_type === 'Story' && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    (di cui <strong>{data.story_enhancement_count}</strong> enhancement)
+                  </span>
+                )}
                 {d.issue_type === 'Bug' && (
                   <span className="muted" style={{ fontSize: 12 }}>
-                    (di cui <strong>{data.bug_complaint_count}</strong> complaint)
+                    (di cui <strong>{data.bug_complaint_count}</strong> complaint, <strong>{data.bug_cve_count}</strong> CVE)
                   </span>
                 )}
               </span>
@@ -181,7 +257,8 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
       }}
     >
       <div style={{ fontWeight: 600 }}>
-        {p.key} ({p.issue_type})
+        {p.key} ({p.issue_type}
+        {p.is_cve ? ' · CVE' : ''})
       </div>
       <div>Completato: {formatIsoDate(p.finish_date)}</div>
       <div>Cycle time: {p.cycle_time_days} giorni</div>
@@ -193,32 +270,43 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
 // Configurazione + ultimi 12 mesi), asse X la data di completamento, asse Y
 // il cycle time in giorni, con le linee di percentile 50/85/95.
 function CycleTimeCard() {
-  const { data, refetch, isFetching } = useQuery({ queryKey: ['dashboard', 'cycle-time'], queryFn: api.dashboard.cycleTime })
+  const [team, setTeam] = useState<Team>('sw')
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['dashboard', 'cycle-time', team],
+    queryFn: () => api.dashboard.cycleTime(team),
+  })
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Cycle Time</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <TeamSelector team={team} onChange={setTeam} />
+        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+      </div>
+    </div>
+  )
 
   if (!data) {
     return (
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Cycle Time</h3>
+        {header}
         <p className="muted">Caricamento...</p>
       </div>
     )
   }
 
-  const pointsByType: Record<string, ScatterPoint[]> = {}
+  const pointsBySeries: Record<string, ScatterPoint[]> = {}
   const xs: number[] = []
   for (const p of data.points) {
     const x = dateStrToEpochDays(p.finish_date)
     if (x === null) continue
     xs.push(x)
-    ;(pointsByType[p.issue_type] ??= []).push({ ...p, x, y: p.cycle_time_days })
+    ;(pointsBySeries[seriesKeyFor(p)] ??= []).push({ ...p, x, y: p.cycle_time_days })
   }
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Cycle Time</h3>
-        <RefreshButton onClick={() => refetch()} isFetching={isFetching} />
-      </div>
+      {header}
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
         Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
         Le linee tratteggiate sono il 50°, 85° e 95° percentile.
@@ -273,8 +361,8 @@ function CycleTimeCard() {
                     label={{ value: `P95: ${data.p95.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--danger)' }}
                   />
                 )}
-                {Object.entries(pointsByType).map(([type, points]) => (
-                  <Scatter key={type} name={type} data={points} fill={PBI_TYPE_COLORS[type] ?? COLOR_INACTIVE} />
+                {SERIES.filter((s) => pointsBySeries[s.key]?.length).map((s) => (
+                  <Scatter key={s.key} name={s.key} data={pointsBySeries[s.key]} fill={s.color} fillOpacity={s.opacity} />
                 ))}
               </ScatterChart>
             </ResponsiveContainer>
@@ -285,11 +373,112 @@ function CycleTimeCard() {
   )
 }
 
-// Riga con il pulsante "Aggiorna tutti i grafici": rifà entrambe le query
-// dei grafici (Metriche e Cycle Time) in un colpo solo, senza toccare quella
-// del Gantt increment (dati locali, non da Jira). Chiavi esplicite invece di
-// un prefisso generico ['dashboard'] per non intercettare per sbaglio la
-// query ['dashboard', projectId] della Dashboard di progetto.
+// Bucket mensili per il grafico Throughput, dal mese del primo al mese
+// dell'ultimo PBI completato presente nei punti del Cycle Time - cosi' il
+// totale delle barre torna sempre uguale al numero di punti dello scatter
+// (invece di un fisso "ultimi 12 mesi solari" che potrebbe tagliare fuori il
+// mese piu' vecchio, dato che la finestra Jira e' "AFTER -365d" a giorni,
+// non a mesi solari).
+function buildMonthBuckets(points: { finish_date: string }[]): { key: string; label: string }[] {
+  if (points.length === 0) return []
+  const monthKeys = points.map((p) => p.finish_date.slice(0, 7)).sort()
+  const [minYear, minMonth] = monthKeys[0].split('-').map(Number)
+  const [maxYear, maxMonth] = monthKeys[monthKeys.length - 1].split('-').map(Number)
+  const cursor = new Date(Date.UTC(minYear, minMonth - 1, 1))
+  const end = new Date(Date.UTC(maxYear, maxMonth - 1, 1))
+  const buckets: { key: string; label: string }[] = []
+  while (cursor <= end) {
+    const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`
+    const label = cursor.toLocaleDateString('it-IT', { month: 'short', year: '2-digit', timeZone: 'UTC' })
+    buckets.push({ key, label })
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+  }
+  return buckets
+}
+
+// Throughput: PBI completati per mese, sugli stessi PBI del Cycle Time -
+// stessa query ['dashboard','cycle-time'] (React Query la condivide tra i
+// due componenti, un'unica chiamata a Jira per entrambi i grafici), solo
+// aggregata qui per mese invece che mostrata punto per punto.
+function ThroughputCard() {
+  const [team, setTeam] = useState<Team>('sw')
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['dashboard', 'cycle-time', team],
+    queryFn: () => api.dashboard.cycleTime(team),
+  })
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Throughput</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <TeamSelector team={team} onChange={setTeam} />
+        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+      </div>
+    </div>
+  )
+
+  if (!data) {
+    return (
+      <div className="card">
+        {header}
+        <p className="muted">Caricamento...</p>
+      </div>
+    )
+  }
+
+  const buckets = buildMonthBuckets(data.points)
+  const countsByMonth: Record<string, Record<string, number>> = {}
+  for (const b of buckets) countsByMonth[b.key] = Object.fromEntries(SERIES.map((s) => [s.key, 0]))
+  for (const p of data.points) {
+    const key = p.finish_date.slice(0, 7)
+    const seriesKey = seriesKeyFor(p)
+    countsByMonth[key][seriesKey] = (countsByMonth[key][seriesKey] ?? 0) + 1
+  }
+  const chartData = buckets.map((b) => ({ label: b.label, ...countsByMonth[b.key] }))
+
+  return (
+    <div className="card">
+      {header}
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+        PBI completati per mese (stessi PBI del grafico Cycle Time), ultimi 12 mesi.
+      </p>
+
+      {data.error ? (
+        <p className="muted">{data.error}</p>
+      ) : data.points.length === 0 ? (
+        <p className="muted">Nessun PBI completato negli ultimi 12 mesi.</p>
+      ) : (
+        <div style={{ height: 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 12 }}
+                label={{ value: 'PBI', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+              />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {SERIES.map((s) => (
+                <Bar key={s.key} dataKey={s.key} name={s.key} stackId="throughput" fill={s.color} fillOpacity={s.opacity} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Riga con il pulsante "Aggiorna tutti i grafici": rifà tutte le query dei
+// grafici (Metriche e Cycle Time/Throughput, che condividono la stessa
+// query), per QUALUNQUE team selezionato nelle singole card - la chiave
+// parziale ['dashboard','overview']/['dashboard','cycle-time'] matcha sia
+// [...,'sw'] sia [...,'embedded'] - senza toccare quella del Gantt increment
+// (dati locali, non da Jira). Chiavi esplicite invece di un prefisso
+// generico ['dashboard'] per non intercettare per sbaglio la query
+// ['dashboard', projectId] della Dashboard di progetto.
 function RefreshAllRow() {
   const queryClient = useQueryClient()
   const fetchingOverview = useIsFetching({ queryKey: ['dashboard', 'overview'] })
@@ -335,6 +524,7 @@ export function OverviewDashboardPage() {
         <RefreshAllRow />
         <MetricsCard />
         <CycleTimeCard />
+        <ThroughputCard />
       </div>
     )
   }
@@ -544,6 +734,7 @@ export function OverviewDashboardPage() {
       <RefreshAllRow />
       <MetricsCard />
       <CycleTimeCard />
+      <ThroughputCard />
     </div>
   )
 }

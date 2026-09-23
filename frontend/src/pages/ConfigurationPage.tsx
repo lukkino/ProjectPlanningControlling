@@ -25,7 +25,7 @@ export function ConfigurationPage() {
   // nuovi invece di restare fermo su un vecchio stato locale.
   return (
     <ConfigurationForm
-      key={`${settings.jira_base_url}|${settings.jira_email}|${settings.jira_api_token_expires_at}|${settings.jira_project_key}|${settings.cycle_time_base_jql}`}
+      key={`${settings.jira_base_url}|${settings.jira_email}|${settings.jira_api_token_expires_at}|${settings.team_sw_base_jql}|${settings.team_embedded_base_jql}`}
       settings={settings}
     />
   )
@@ -39,8 +39,8 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
   // restituisce mai): vuoto = "lascialo invariato" al salvataggio.
   const [token, setToken] = useState('')
   const [expiresAt, setExpiresAt] = useState(settings.jira_api_token_expires_at ?? '')
-  const [projectKey, setProjectKey] = useState(settings.jira_project_key ?? '')
-  const [cycleTimeJql, setCycleTimeJql] = useState(settings.cycle_time_base_jql ?? '')
+  const [swJql, setSwJql] = useState(settings.team_sw_base_jql ?? '')
+  const [embeddedJql, setEmbeddedJql] = useState(settings.team_embedded_base_jql ?? '')
 
   const save = useMutation({
     mutationFn: () =>
@@ -49,8 +49,8 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
         jira_email: email,
         jira_api_token: token || undefined,
         jira_api_token_expires_at: expiresAt || null,
-        jira_project_key: projectKey || null,
-        cycle_time_base_jql: cycleTimeJql || null,
+        team_sw_base_jql: swJql || null,
+        team_embedded_base_jql: embeddedJql || null,
       }),
     onSuccess: (saved) => {
       queryClient.setQueryData(['app-settings'], saved)
@@ -120,24 +120,28 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Jira project key</span>
-          <input value={projectKey} onChange={(e) => setProjectKey(e.target.value)} placeholder="PTBSYS" style={{ maxWidth: 200 }} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Team SW — JQL base</span>
+          <input
+            value={swJql}
+            onChange={(e) => setSwJql(e.target.value)}
+            placeholder='project in (PTBSYS) AND issuetype in (Activity, Bug, Story) AND labels not in (...)'
+          />
           <span className="muted" style={{ fontSize: 12 }}>
-            Usata per le metriche calcolate sull'intero progetto Jira (es. il grafico "Metriche" nella Dashboard
-            generale), a differenza della JQL per-increment del Backlog.
+            PBI del Team SW nei grafici della Dashboard generale (Metriche, Cycle Time, Throughput), senza filtro di
+            status/finestra temporale: il backend aggiunge automaticamente{' '}
+            <code>AND status CHANGED TO Done AFTER -365d</code>.
           </span>
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Cycle Time JQL (base)</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Team Embedded — JQL base</span>
           <input
-            value={cycleTimeJql}
-            onChange={(e) => setCycleTimeJql(e.target.value)}
-            placeholder='project in (PTBSYS) AND issuetype in (Activity, Bug, Story) AND labels not in (...)'
+            value={embeddedJql}
+            onChange={(e) => setEmbeddedJql(e.target.value)}
+            placeholder='project in (PTBSYS) AND issuetype in (Activity, Task, Bug, Story) AND labels in (...)'
           />
           <span className="muted" style={{ fontSize: 12 }}>
-            PBI da includere nel grafico Cycle Time della Dashboard generale, senza filtro di status/finestra
-            temporale: il backend aggiunge automaticamente <code>AND status CHANGED TO Done AFTER -365d</code>.
+            Stessi grafici, PBI del Team Embedded (stesso progetto Jira, issuetype/label diversi).
           </span>
         </label>
 

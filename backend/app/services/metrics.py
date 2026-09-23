@@ -5,16 +5,41 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.routers.settings import SETTINGS_ROW_ID
-from app.services.jira_client import JiraClientError, count_issues, count_issues_by_type, fetch_cycle_times
+from app.services.jira_client import (
+    CVE_BUG_REPORTER_EMAIL,
+    JiraClientError,
+    count_issues,
+    count_issues_by_type,
+    fetch_cycle_times,
+)
 
 # Custom field Jira "Source Type" (dropdown): distingue i Bug segnalati da
 # cliente (Complaint) da quelli trovati internamente. Il suffisso [Dropdown]
 # nella JQL disambigua il campo, come confermato dall'utente.
 BUG_COMPLAINT_JQL_CLAUSE = '"Source Type[Dropdown]" = Complaint'
 
-# Tipi PBI mostrati nel grafico "Metriche" della Dashboard generale, nello
-# stesso ordine della JQL standard di sync del backlog (Story, Bug, Activity).
-PBI_TYPES_FOR_METRICS = ("Story", "Bug", "Activity")
+# Stessa identificazione usata in jira_client.fetch_cycle_times per i punti
+# del Cycle Time: qui serve come clausola JQL per contare i Bug CVE nel
+# grafico Metriche.
+CVE_BUG_JQL_CLAUSE = f'reporter = "{CVE_BUG_REPORTER_EMAIL}"'
+
+# Custom field Jira "Enhancement" (dropdown): distingue le Story che sono
+# miglioramenti (Enhancement = Yes) da quelle di sviluppo standard.
+STORY_ENHANCEMENT_JQL_CLAUSE = '"Enhancement[Dropdown]" = Yes'
+
+# Tipi PBI mostrati nel grafico "Metriche" della Dashboard generale, sempre
+# in quest'ordine indipendentemente dal team - Task compare solo per il Team
+# Embedded (la JQL base del Team SW non lo include mai), ma tenerlo fisso
+# in entrambi i casi (0 se assente) mantiene colori/legenda stabili.
+ALL_PBI_TYPES = ("Story", "Bug", "Activity", "Task")
+
+TEAM_LABELS = {"sw": "Team SW", "embedded": "Team Embedded"}
+
+
+def _team_base_jql(settings: models.AppSettings | None, team: str) -> str:
+    if team == "embedded":
+        return (settings.team_embedded_base_jql if settings else None) or ""
+    return (settings.team_sw_base_jql if settings else None) or ""
 
 
 def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetrics:
@@ -151,26 +176,27 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     )
 
 
-def compute_overview_metrics(db: Session) -> schemas.OverviewMetrics:
-    """Grafico a ciambella della Dashboard generale: quanti Story/Bug/Activity
-    sono stati messi a Done negli ultimi 12 mesi, sull'INTERO progetto Jira
-    configurato in Configurazione (jira_project_key) - non solo gli increment
-    tracciati in questa app, il cui backlog locale e' un sottoinsieme filtrato
-    per fixVersion. Interrogato live su Jira ad ogni caricamento: 'status
-    CHANGED TO Done AFTER -365d' e' semanticamente la stessa richiesta che si
-    farebbe a mano in Jira (issue transitate a Done nella finestra, anche se
-    poi riaperte), a differenza di un filtro sullo stato attuale."""
+def compute_overview_metrics(db: Session, team: str = "sw") -> schemas.OverviewMetrics:
+    """Grafico a ciambella della Dashboard generale: quanti PBI sono stati
+    messi a Done negli ultimi 12 mesi, sulla JQL base del team scelto
+    (team_sw_base_jql o team_embedded_base_jql, configurate in
+    Configurazione - gia' comprensive di project/issuetype/label) - non solo
+    gli increment tracciati in questa app, il cui backlog locale e' un
+    sottoinsieme filtrato per fixVersion. Interrogato live su Jira ad ogni
+    caricamento: 'status CHANGED TO Done AFTER -365d' e' semanticamente la
+    stessa richiesta che si farebbe a mano in Jira (issue transitate a Done
+    nella finestra, anche se poi riaperte), a differenza di un filtro sullo
+    stato attuale."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
-    project_key = (settings.jira_project_key if settings else None) or ""
-    if not project_key.strip():
+    base_jql = _team_base_jql(settings, team)
+    if not base_jql.strip():
         return schemas.OverviewMetrics(
             done_last_12_months=[],
             done_last_12_months_total=0,
-            error="Jira project key non configurata (sezione Configurazione).",
+            error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione).",
         )
 
-    types_jql = ", ".join(PBI_TYPES_FOR_METRICS)
-    jql = f"project = {project_key} AND issuetype in ({types_jql}) AND status CHANGED TO Done AFTER -365d"
+    jql = f"{base_jql} AND status CHANGED TO Done AFTER -365d"
 
     base_url = (settings.jira_base_url if settings else None) or ""
     email = (settings.jira_email if settings else None) or ""
@@ -178,20 +204,25 @@ def compute_overview_metrics(db: Session) -> schemas.OverviewMetrics:
 
     try:
         raw_counts = count_issues_by_type(base_url, email, api_token, jql)
-        complaint_jql = (
-            f"project = {project_key} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} "
-            "AND status CHANGED TO Done AFTER -365d"
-        )
+        complaint_jql = f"{base_jql} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
         bug_complaint_count = count_issues(base_url, email, api_token, complaint_jql)
+        cve_jql = f"{base_jql} AND issuetype = Bug AND {CVE_BUG_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
+        bug_cve_count = count_issues(base_url, email, api_token, cve_jql)
+        enhancement_jql = (
+            f"{base_jql} AND issuetype = Story AND {STORY_ENHANCEMENT_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
+        )
+        story_enhancement_count = count_issues(base_url, email, api_token, enhancement_jql)
     except JiraClientError as exc:
         return schemas.OverviewMetrics(done_last_12_months=[], done_last_12_months_total=0, error=str(exc))
 
-    counts = {t: raw_counts.get(t, 0) for t in PBI_TYPES_FOR_METRICS}
+    counts = {t: raw_counts.get(t, 0) for t in ALL_PBI_TYPES}
 
     return schemas.OverviewMetrics(
         done_last_12_months=[schemas.PbiDoneCount(issue_type=t, count=c) for t, c in counts.items()],
         done_last_12_months_total=sum(counts.values()),
+        story_enhancement_count=story_enhancement_count,
         bug_complaint_count=bug_complaint_count,
+        bug_cve_count=bug_cve_count,
     )
 
 
@@ -210,16 +241,17 @@ def _percentile(sorted_values: list[float], p: float) -> float | None:
     return sorted_values[f] * (c - k) + sorted_values[c] * (k - f)
 
 
-def compute_cycle_time_metrics(db: Session) -> schemas.CycleTimeMetrics:
-    """Scatterplot Cycle Time della Dashboard generale: un punto per PBI (la
-    JQL "base" configurata in Configurazione + finestra ultimi 12 mesi),
-    asse Y il cycle time in giorni (actual_finish - actual_start, entrambi
-    ricavati dal changelog Jira), con le linee di percentile 50/85/95."""
+def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTimeMetrics:
+    """Scatterplot Cycle Time della Dashboard generale (e dati sorgente del
+    Throughput, che li aggrega per mese lato frontend): un punto per PBI
+    sulla JQL base del team scelto + finestra ultimi 12 mesi, asse Y il
+    cycle time in giorni (actual_finish - actual_start, entrambi ricavati dal
+    changelog Jira), con le linee di percentile 50/85/95."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
-    base_jql = (settings.cycle_time_base_jql if settings else None) or ""
+    base_jql = _team_base_jql(settings, team)
     if not base_jql.strip():
         return schemas.CycleTimeMetrics(
-            points=[], error="JQL base del Cycle Time non configurata (sezione Configurazione)."
+            points=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
         )
 
     jql = f"{base_jql} AND status CHANGED TO Done AFTER -365d"
@@ -240,6 +272,7 @@ def compute_cycle_time_metrics(db: Session) -> schemas.CycleTimeMetrics:
             issue_type=issue.issue_type,
             finish_date=issue.actual_finish,
             cycle_time_days=(issue.actual_finish - issue.actual_start).days,
+            is_cve=issue.is_cve,
         )
         for issue in issues
         if issue.actual_start is not None and issue.actual_finish is not None

@@ -19,6 +19,7 @@ import type {
   ProjectDetail,
   Snapshot,
   SyncResult,
+  Team,
   TestConnectionResult,
 } from './types'
 
@@ -139,8 +140,8 @@ export const api = {
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
-    overview: () => request<OverviewMetrics>('/dashboard/overview'),
-    cycleTime: () => request<CycleTimeMetrics>('/dashboard/cycle-time'),
+    overview: (team: Team) => request<OverviewMetrics>(`/dashboard/overview?team=${team}`),
+    cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
   },
   forecasting: {
     list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),

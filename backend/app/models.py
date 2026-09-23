@@ -326,15 +326,12 @@ class AppSettings(Base):
     jira_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Chiave del progetto Jira (es. "PTBSYS"), usata per interrogare Jira a
-    # livello di intero progetto invece che di singolo increment - es. il
-    # grafico "Metriche" della Dashboard generale.
-    jira_project_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # JQL "base" (senza filtro di status/finestra temporale, aggiunto dal
-    # backend) che seleziona i PBI da includere nel grafico Cycle Time della
-    # Dashboard generale - es. esclude label di tipo diverso da sviluppo
-    # standard (rilavorazioni, refinement non fatto, ecc.).
-    cycle_time_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JQL "base" (project/issuetype/label, senza filtro di status/finestra
+    # temporale ne' AND finale, aggiunti dal backend) che seleziona i PBI dei
+    # due team per i grafici della Dashboard generale (Metriche, Cycle Time,
+    # Throughput) - stesso progetto Jira, issuetype e label diversi.
+    team_sw_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    team_embedded_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Jira Cloud non espone la scadenza di un token esistente via API: va
     # inserita a mano (e' visibile solo su id.atlassian.com alla creazione),
     # solo per mostrare un avviso in Configurazione - non blocca nulla da

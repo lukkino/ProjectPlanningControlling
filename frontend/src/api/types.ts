@@ -198,6 +198,10 @@ export type DashboardMetrics = {
   phases: Phase[]
 }
 
+// Team a cui sono assegnati i PBI: JQL base diversa (issuetype/label) per
+// ciascuno, configurata in Configurazione - vedi AppSettings.team_*_base_jql.
+export type Team = 'sw' | 'embedded'
+
 export type PbiDoneCount = {
   issue_type: string
   count: number
@@ -206,7 +210,9 @@ export type PbiDoneCount = {
 export type OverviewMetrics = {
   done_last_12_months: PbiDoneCount[]
   done_last_12_months_total: number
+  story_enhancement_count: number
   bug_complaint_count: number
+  bug_cve_count: number
   error: string | null
 }
 
@@ -215,6 +221,7 @@ export type CycleTimePoint = {
   issue_type: string
   finish_date: string
   cycle_time_days: number
+  is_cve: boolean
 }
 
 export type CycleTimeMetrics = {
@@ -232,13 +239,11 @@ export type AppSettings = {
   jira_api_token_preview: string | null
   // Jira non la espone via API: inserita a mano, solo per l'avviso in UI.
   jira_api_token_expires_at: string | null
-  // Chiave del progetto Jira (es. "PTBSYS"): usata per interrogare Jira a
-  // livello di intero progetto (es. il grafico "Metriche" della Dashboard
-  // generale) invece che di singolo increment.
-  jira_project_key: string | null
-  // JQL base (senza status/finestra temporale, aggiunti dal backend) per il
-  // grafico Cycle Time della Dashboard generale.
-  cycle_time_base_jql: string | null
+  // JQL base (project/issuetype/label, senza status/finestra temporale ne'
+  // AND finale, aggiunti dal backend) per i grafici della Dashboard
+  // generale (Metriche, Cycle Time, Throughput), una per team.
+  team_sw_base_jql: string | null
+  team_embedded_base_jql: string | null
 }
 
 export type AppSettingsUpdate = {
@@ -247,8 +252,8 @@ export type AppSettingsUpdate = {
   // Vuoto/omesso = lascia invariato il token esistente lato backend.
   jira_api_token?: string
   jira_api_token_expires_at?: string | null
-  jira_project_key?: string | null
-  cycle_time_base_jql?: string | null
+  team_sw_base_jql?: string | null
+  team_embedded_base_jql?: string | null
 }
 
 export type TestConnectionResult = {

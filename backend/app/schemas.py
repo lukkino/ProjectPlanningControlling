@@ -406,10 +406,17 @@ class OverviewMetrics(BaseModel):
     # backlog locale, che copre solo gli increment tracciati in questa app).
     done_last_12_months: list[PbiDoneCount]
     done_last_12_months_total: int
+    # Quante delle Story sopra hanno "Enhancement" = Yes.
+    story_enhancement_count: int = 0
     # Quanti dei Bug sopra hanno "Source Type" = Complaint: evidenziato a
     # parte perche' un Bug segnalato da cliente (Complaint) ha un peso
     # diverso da uno trovato internamente.
     bug_complaint_count: int = 0
+    # Quanti dei Bug sopra sono aperti/chiusi dal bot di security scan
+    # (reporter = jira.security-pipeline, vedi jira_client.CVE_BUG_REPORTER_EMAIL):
+    # spesso chiusi in blocco lo stesso giorno, non lavoro di sviluppo vero e
+    # proprio, quindi vanno evidenziati a parte per non gonfiare il numero.
+    bug_cve_count: int = 0
     # Valorizzato se Jira non e' configurato (base URL/email/token) o manca
     # la Jira project key in Configurazione: il frontend mostra questo
     # messaggio al posto del grafico invece di un errore.
@@ -421,6 +428,11 @@ class CycleTimePoint(BaseModel):
     issue_type: str
     finish_date: dt.date
     cycle_time_days: float
+    # Bug generato/chiuso dal bot di security scan (vedi
+    # OverviewMetrics.bug_cve_count): il frontend lo mostra con uno stile
+    # diverso invece di un colore/serie a se', per non aggiungere una nuova
+    # tinta alla palette categoriale gia' validata.
+    is_cve: bool = False
 
 
 class CycleTimeMetrics(BaseModel):
@@ -445,8 +457,8 @@ class AppSettingsPublic(BaseModel):
     # Inserita a mano (Jira non la espone via API, vedi models.AppSettings):
     # solo per l'avviso di scadenza in UI.
     jira_api_token_expires_at: dt.date | None = None
-    jira_project_key: str | None = None
-    cycle_time_base_jql: str | None = None
+    team_sw_base_jql: str | None = None
+    team_embedded_base_jql: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -457,8 +469,8 @@ class AppSettingsUpdate(BaseModel):
     # solo per impostarne uno nuovo.
     jira_api_token: str | None = None
     jira_api_token_expires_at: dt.date | None = None
-    jira_project_key: str | None = None
-    cycle_time_base_jql: str | None = None
+    team_sw_base_jql: str | None = None
+    team_embedded_base_jql: str | None = None
 
 
 class TestConnectionResult(BaseModel):
