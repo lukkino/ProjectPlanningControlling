@@ -443,6 +443,32 @@ class CycleTimeMetrics(BaseModel):
     error: str | None = None
 
 
+class BugsOpenedMonth(BaseModel):
+    # Mese solare di apertura, formato "YYYY-MM".
+    month: str
+    complaint: int
+    # Esclusi i CVE del bot di security scan, contati a parte in cve.
+    non_complaint: int
+    cve: int = 0
+
+
+class BugStatusCount(BaseModel):
+    status: str
+    count: int
+
+
+class BugsOpenedMetrics(BaseModel):
+    # Bug aperti (created) per mese negli ultimi 12 mesi, divisi tra
+    # Complaint (Source Type = Complaint) e non Complaint. Tutti i mesi della
+    # finestra sono presenti, anche a zero, cosi' l'andamento non ha buchi.
+    # I CVE del bot di security scan sono una terza categoria a se'.
+    months: list[BugsOpenedMonth]
+    # Gli stessi Bug (CVE esclusi) raggruppati per stato Jira attuale,
+    # ordinati per numerosita' decrescente.
+    by_status: list[BugStatusCount] = []
+    error: str | None = None
+
+
 # ---------- Configurazione ----------
 
 class AppSettingsPublic(BaseModel):

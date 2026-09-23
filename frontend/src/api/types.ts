@@ -207,6 +207,9 @@ export type PbiDoneCount = {
   count: number
 }
 
+// Finestra del grafico Metriche: ultimi 365 giorni o i 365 precedenti.
+export type OverviewPeriod = 'current' | 'previous'
+
 export type OverviewMetrics = {
   done_last_12_months: PbiDoneCount[]
   done_last_12_months_total: number
@@ -222,6 +225,24 @@ export type CycleTimePoint = {
   finish_date: string
   cycle_time_days: number
   is_cve: boolean
+}
+
+export type BugsOpenedMonth = {
+  month: string
+  complaint: number
+  non_complaint: number
+  cve: number
+}
+
+export type BugStatusCount = {
+  status: string
+  count: number
+}
+
+export type BugsOpenedMetrics = {
+  months: BugsOpenedMonth[]
+  by_status: BugStatusCount[]
+  error: string | null
 }
 
 export type CycleTimeMetrics = {

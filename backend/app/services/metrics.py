@@ -10,6 +10,7 @@ from app.services.jira_client import (
     JiraClientError,
     count_issues,
     count_issues_by_type,
+    fetch_created_and_status,
     fetch_cycle_times,
 )
 
@@ -34,6 +35,14 @@ STORY_ENHANCEMENT_JQL_CLAUSE = '"Enhancement[Dropdown]" = Yes'
 ALL_PBI_TYPES = ("Story", "Bug", "Activity", "Task")
 
 TEAM_LABELS = {"sw": "Team SW", "embedded": "Team Embedded"}
+
+# Finestre temporali del grafico "Metriche": ultimi 365 giorni e i 365
+# giorni precedenti, entrambe relative a oggi (scorrono col tempo). Stessa
+# semantica "CHANGED TO Done" in entrambe, cosi' i due anni sono confrontabili.
+OVERVIEW_PERIOD_JQL = {
+    "current": "status CHANGED TO Done AFTER -365d",
+    "previous": "status CHANGED TO Done DURING (-730d, -365d)",
+}
 
 
 def _team_base_jql(settings: models.AppSettings | None, team: str) -> str:
@@ -176,7 +185,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     )
 
 
-def compute_overview_metrics(db: Session, team: str = "sw") -> schemas.OverviewMetrics:
+def compute_overview_metrics(db: Session, team: str = "sw", period: str = "current") -> schemas.OverviewMetrics:
     """Grafico a ciambella della Dashboard generale: quanti PBI sono stati
     messi a Done negli ultimi 12 mesi, sulla JQL base del team scelto
     (team_sw_base_jql o team_embedded_base_jql, configurate in
@@ -186,9 +195,11 @@ def compute_overview_metrics(db: Session, team: str = "sw") -> schemas.OverviewM
     caricamento: 'status CHANGED TO Done AFTER -365d' e' semanticamente la
     stessa richiesta che si farebbe a mano in Jira (issue transitate a Done
     nella finestra, anche se poi riaperte), a differenza di un filtro sullo
-    stato attuale."""
+    stato attuale. Con period="previous" la finestra diventa l'anno prima
+    ancora (da -730 a -365 giorni), per il confronto affiancato."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
     base_jql = _team_base_jql(settings, team)
+    window = OVERVIEW_PERIOD_JQL[period]
     if not base_jql.strip():
         return schemas.OverviewMetrics(
             done_last_12_months=[],
@@ -196,7 +207,7 @@ def compute_overview_metrics(db: Session, team: str = "sw") -> schemas.OverviewM
             error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione).",
         )
 
-    jql = f"{base_jql} AND status CHANGED TO Done AFTER -365d"
+    jql = f"{base_jql} AND {window}"
 
     base_url = (settings.jira_base_url if settings else None) or ""
     email = (settings.jira_email if settings else None) or ""
@@ -204,12 +215,12 @@ def compute_overview_metrics(db: Session, team: str = "sw") -> schemas.OverviewM
 
     try:
         raw_counts = count_issues_by_type(base_url, email, api_token, jql)
-        complaint_jql = f"{base_jql} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
+        complaint_jql = f"{base_jql} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} AND {window}"
         bug_complaint_count = count_issues(base_url, email, api_token, complaint_jql)
-        cve_jql = f"{base_jql} AND issuetype = Bug AND {CVE_BUG_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
+        cve_jql = f"{base_jql} AND issuetype = Bug AND {CVE_BUG_JQL_CLAUSE} AND {window}"
         bug_cve_count = count_issues(base_url, email, api_token, cve_jql)
         enhancement_jql = (
-            f"{base_jql} AND issuetype = Story AND {STORY_ENHANCEMENT_JQL_CLAUSE} AND status CHANGED TO Done AFTER -365d"
+            f"{base_jql} AND issuetype = Story AND {STORY_ENHANCEMENT_JQL_CLAUSE} AND {window}"
         )
         story_enhancement_count = count_issues(base_url, email, api_token, enhancement_jql)
     except JiraClientError as exc:
@@ -286,4 +297,67 @@ def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTi
         p50=_percentile(durations, 50),
         p85=_percentile(durations, 85),
         p95=_percentile(durations, 95),
+    )
+
+
+def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOpenedMetrics:
+    """Andamento mese per mese dei Bug aperti (data di creazione) negli
+    ultimi 12 mesi sulla JQL base del team scelto, divisi tra Complaint, non
+    Complaint e CVE del bot di security scan (tenuti a parte perche' aperti
+    in blocco a centinaia, schiaccerebbero il resto). Ricerche separate
+    invece di leggere il campo "Source Type" per issue: la clausola JQL con
+    [Dropdown] e' gia' quella verificata per la ciambella Metriche, mentre
+    l'id del custom field non e' noto."""
+    settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    base_jql = _team_base_jql(settings, team)
+    if not base_jql.strip():
+        return schemas.BugsOpenedMetrics(
+            months=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
+        )
+
+    base_url = (settings.jira_base_url if settings else None) or ""
+    email = (settings.jira_email if settings else None) or ""
+    api_token = (settings.jira_api_token if settings else None) or ""
+
+    bugs_jql = f"{base_jql} AND issuetype = Bug AND created >= -365d"
+    try:
+        all_bugs = fetch_created_and_status(base_url, email, api_token, bugs_jql)
+        complaint_keys = set(
+            fetch_created_and_status(base_url, email, api_token, f"{bugs_jql} AND {BUG_COMPLAINT_JQL_CLAUSE}")
+        )
+        cve_keys = set(fetch_created_and_status(base_url, email, api_token, f"{bugs_jql} AND {CVE_BUG_JQL_CLAUSE}"))
+    except JiraClientError as exc:
+        return schemas.BugsOpenedMetrics(months=[], error=str(exc))
+
+    # Tutti i mesi solari toccati dalla finestra di 365 giorni, dal mese di
+    # oggi-365 a quello corrente (il primo e l'ultimo sono parziali).
+    today = dt.date.today()
+    cursor = (today - dt.timedelta(days=365)).replace(day=1)
+    counts: dict[str, dict[str, int]] = {}
+    while cursor <= today:
+        counts[cursor.strftime("%Y-%m")] = {"complaint": 0, "non_complaint": 0, "cve": 0}
+        cursor = (cursor + dt.timedelta(days=32)).replace(day=1)
+
+    # Riepilogo per stato attuale degli stessi Bug del grafico, CVE esclusi
+    # come nella linea del totale.
+    status_counts: dict[str, int] = {}
+    for key, (created, status) in all_bugs.items():
+        bucket = counts.get(created.strftime("%Y-%m"))
+        if bucket is None:
+            continue
+        if key in complaint_keys:
+            bucket["complaint"] += 1
+        elif key in cve_keys:
+            bucket["cve"] += 1
+            continue
+        else:
+            bucket["non_complaint"] += 1
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return schemas.BugsOpenedMetrics(
+        months=[schemas.BugsOpenedMonth(month=m, **c) for m, c in counts.items()],
+        by_status=[
+            schemas.BugStatusCount(status=st, count=c)
+            for st, c in sorted(status_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ],
     )

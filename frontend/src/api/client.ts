@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppSettingsUpdate,
   BacklogItem,
+  BugsOpenedMetrics,
   CycleTimeMetrics,
   DashboardMetrics,
   DocumentRevisionMeta,
@@ -12,6 +13,7 @@ import type {
   IncrementSnapshot,
   IncrementSnapshotValue,
   OverviewMetrics,
+  OverviewPeriod,
   Phase,
   PprDeliverable,
   PprDocumentMeta,
@@ -140,8 +142,10 @@ export const api = {
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
-    overview: (team: Team) => request<OverviewMetrics>(`/dashboard/overview?team=${team}`),
+    overview: (team: Team, period: OverviewPeriod = 'current') =>
+      request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
     cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
+    bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
   },
   forecasting: {
     list: (projectId: number) => request<ForecastSimulation[]>(`/projects/${projectId}/forecasting`),

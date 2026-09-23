@@ -7,6 +7,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ReferenceLine,
@@ -18,7 +20,7 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
-import type { CycleTimePoint, Project, Team } from '../api/types'
+import type { BugsOpenedMonth, BugStatusCount, CycleTimePoint, OverviewMetrics, OverviewPeriod, Project, Team } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 
 const ROW_LABEL_WIDTH = 160
@@ -120,33 +122,84 @@ function TeamSelector({ team, onChange }: { team: Team; onChange: (t: Team) => v
   )
 }
 
-// Grafico a ciambella: PBI (Story/Bug/Activity, tutti gli increment) messi a
-// Done negli ultimi 12 mesi, con il totale al centro e il dettaglio per tipo
-// sotto. Componente a se' (invece che inline in OverviewDashboardPage) cosi'
-// da poter comparire sia nel ramo "nessuna data" sia in quello normale senza
-// duplicare la query.
+// Finestre temporali del grafico Metriche, relative a oggi (vedi
+// OVERVIEW_PERIOD_JQL nel backend): scorrono col passare del tempo.
+function periodRangeLabel(period: OverviewPeriod): string {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const offsetDays = period === 'current' ? 0 : 365
+  const end = new Date(Date.now() - offsetDays * DAY_MS)
+  const start = new Date(end.getTime() - 365 * DAY_MS)
+  const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return `${fmt(start)} – ${fmt(end)}`
+}
+
+// Grafico Metriche: PBI messi a Done sulla JQL base del team, due ciambelle
+// affiancate - a sinistra gli ultimi 365 giorni, a destra i 365 precedenti.
+// Componente a se' (invece che inline in OverviewDashboardPage) cosi' da
+// poter comparire sia nel ramo "nessuna data" sia in quello normale senza
+// duplicare le query. Il team e' condiviso tra le due ciambelle, altrimenti
+// il confronto anno su anno non avrebbe senso.
 function MetricsCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['dashboard', 'overview', team],
-    queryFn: () => api.dashboard.overview(team),
+  const current = useQuery({
+    queryKey: ['dashboard', 'overview', team, 'current'],
+    queryFn: () => api.dashboard.overview(team, 'current'),
+  })
+  const previous = useQuery({
+    queryKey: ['dashboard', 'overview', team, 'previous'],
+    queryFn: () => api.dashboard.overview(team, 'previous'),
   })
 
-  const header = (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <TeamSelector team={team} onChange={setTeam} />
-        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <TeamSelector team={team} onChange={setTeam} />
+          {(current.data || previous.data) && (
+            <RefreshButton
+              onClick={() => {
+                current.refetch()
+                previous.refetch()
+              }}
+              isFetching={current.isFetching || previous.isFetching}
+            />
+          )}
+        </div>
+      </div>
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+        PBI messi a Done (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): ultimo anno a confronto con
+        l'anno precedente.
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
+        <DoneDonut data={current.data} title="Ultimi 12 mesi" rangeLabel={periodRangeLabel('current')} />
+        <DoneDonut data={previous.data} title="12 mesi precedenti" rangeLabel={periodRangeLabel('previous')} />
+      </div>
+    </div>
+  )
+}
+
+// Singola ciambella del grafico Metriche: totale al centro e dettaglio per
+// tipo sotto. MetricsCard ne affianca due con la stessa impaginazione, per
+// confrontare i due anni a colpo d'occhio.
+function DoneDonut({ data, title, rangeLabel }: { data: OverviewMetrics | undefined; title: string; rangeLabel: string }) {
+  const heading = (
+    <div style={{ textAlign: 'center', marginBottom: 12 }}>
+      <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+      <div className="muted" style={{ fontSize: 12 }}>
+        {rangeLabel}
       </div>
     </div>
   )
 
   if (!data) {
     return (
-      <div className="card">
-        {header}
-        <p className="muted">Caricamento...</p>
+      <div>
+        {heading}
+        <p className="muted" style={{ textAlign: 'center' }}>
+          Caricamento...
+        </p>
       </div>
     )
   }
@@ -157,16 +210,16 @@ function MetricsCard() {
     .map((d) => ({ ...d, color: PBI_TYPE_COLORS[d.issue_type] ?? COLOR_INACTIVE }))
 
   return (
-    <div className="card">
-      {header}
-      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        PBI messi a Done negli ultimi 12 mesi (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}).
-      </p>
-
+    <div>
+      {heading}
       {data.error ? (
-        <p className="muted">{data.error}</p>
+        <p className="muted" style={{ textAlign: 'center' }}>
+          {data.error}
+        </p>
       ) : total === 0 ? (
-        <p className="muted">Nessun PBI messo a Done negli ultimi 12 mesi.</p>
+        <p className="muted" style={{ textAlign: 'center' }}>
+          Nessun PBI messo a Done in questo periodo.
+        </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
           <div style={{ position: 'relative', width: 220, height: 220 }}>
@@ -471,9 +524,205 @@ function ThroughputCard() {
   )
 }
 
+// Serie del grafico Bug aperti: Complaint col rosso pieno del Bug (peso
+// maggiore, segnalati da cliente), non Complaint in grigio neutro, CVE come
+// nel Cycle Time (rosso a opacita' ridotta, tratteggiato) e nascosti di
+// default perche' aperti in blocco a centinaia dal bot di security scan.
+const BUGS_OPENED_SERIES = [
+  { key: 'complaint', name: 'Complaint', color: PBI_TYPE_COLORS.Bug, opacity: 1, dash: undefined },
+  { key: 'non_complaint', name: 'Non Complaint', color: '#6b7280', opacity: 1, dash: undefined },
+  { key: 'cve', name: 'CVE (bot)', color: PBI_TYPE_COLORS.Bug, opacity: 0.45, dash: '5 4' },
+] as const
+
+type BugsOpenedPoint = BugsOpenedMonth & { label: string; total: number }
+
+// Tooltip del grafico Bug aperti: valori per serie piu' i totali del mese,
+// cosi' non serve sommarli a mente. Il totale con i CVE compare solo quando
+// sono visibili.
+function BugsOpenedTooltip({ active, payload, showCve }: { active?: boolean; payload?: { payload: BugsOpenedPoint }[]; showCve: boolean }) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  const row = (label: string, value: number, color: string, bold = false) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontWeight: bold ? 600 : 400 }}>
+      <span style={{ color }}>{label}</span>
+      <span>{value}</span>
+    </div>
+  )
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.label}</div>
+      {row('Complaint', p.complaint, PBI_TYPE_COLORS.Bug)}
+      {row('Non Complaint', p.non_complaint, '#6b7280')}
+      {row('Totale (esclusi CVE)', p.total, 'var(--text)', true)}
+      {showCve && (
+        <>
+          {row('CVE (bot)', p.cve, PBI_TYPE_COLORS.Bug)}
+          {row('Totale (con CVE)', p.total + p.cve, 'var(--text)', true)}
+        </>
+      )}
+    </div>
+  )
+}
+
+// Andamento mese per mese dei Bug aperti negli ultimi 12 mesi, Complaint e
+// non Complaint piu' la loro somma (CVE opzionali, mai inclusi nel totale).
+function BugsOpenedCard() {
+  const [team, setTeam] = useState<Team>('sw')
+  const [showCve, setShowCve] = useState(false)
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['dashboard', 'bugs-opened', team],
+    queryFn: () => api.dashboard.bugsOpened(team),
+  })
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Bug aperti</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showCve} onChange={(e) => setShowCve(e.target.checked)} />
+          Mostra CVE
+        </label>
+        <TeamSelector team={team} onChange={setTeam} />
+        {data && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+      </div>
+    </div>
+  )
+
+  if (!data) {
+    return (
+      <div className="card">
+        {header}
+        <p className="muted">Caricamento...</p>
+      </div>
+    )
+  }
+
+  const chartData = data.months.map((m) => {
+    const [year, month] = m.month.split('-').map(Number)
+    const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('it-IT', {
+      month: 'short',
+      year: '2-digit',
+      timeZone: 'UTC',
+    })
+    return { ...m, label, total: m.complaint + m.non_complaint }
+  })
+  const totals = Object.fromEntries(
+    BUGS_OPENED_SERIES.map((s) => [s.key, data.months.reduce((sum, m) => sum + m[s.key], 0)]),
+  ) as Record<(typeof BUGS_OPENED_SERIES)[number]['key'], number>
+  const visibleSeries = BUGS_OPENED_SERIES.filter((s) => s.key !== 'cve' || showCve)
+
+  return (
+    <div className="card">
+      {header}
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+        Bug creati per mese negli ultimi 12 mesi (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): totale{' '}
+        <strong>{totals.complaint + totals.non_complaint}</strong> (<strong>{totals.complaint}</strong> complaint,{' '}
+        <strong>{totals.non_complaint}</strong> non complaint)
+        {totals.cve > 0 && (
+          <>
+            , più <strong>{totals.cve}</strong> CVE del bot di security scan{showCve ? '' : ' (nascosti)'}
+          </>
+        )}
+        .
+      </p>
+
+      {data.error ? (
+        <p className="muted">{data.error}</p>
+      ) : (
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div style={{ flex: '1 1 480px', minWidth: 0, height: 280 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 12 }}
+                  label={{ value: 'Bug', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+                />
+                <Tooltip content={<BugsOpenedTooltip showCve={showCve} />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line
+                  type="linear"
+                  dataKey="total"
+                  name="Totale (esclusi CVE)"
+                  stroke="var(--text)"
+                  strokeWidth={3}
+                  dot={{ r: 3, fill: 'var(--text)' }}
+                />
+                {visibleSeries.map((s) => (
+                  <Line
+                    key={s.key}
+                    type="linear"
+                    dataKey={s.key}
+                    name={s.name}
+                    stroke={s.color}
+                    strokeOpacity={s.opacity}
+                    strokeDasharray={s.dash}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: s.color, fillOpacity: s.opacity }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <BugStatusTable byStatus={data.by_status} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Tabellina a fianco del grafico Bug aperti: gli stessi Bug (ultimi 12 mesi,
+// CVE esclusi) per stato Jira attuale - "aperti" nel grafico vuol dire
+// segnalati nel mese, qui si vede quanti sono poi stati chiusi o scartati.
+function BugStatusTable({ byStatus }: { byStatus: BugStatusCount[] }) {
+  const total = byStatus.reduce((sum, s) => sum + s.count, 0)
+  const cell = { padding: '4px 8px', borderBottom: '1px solid var(--border)' }
+  return (
+    <div style={{ flex: '0 0 auto' }}>
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Stato attuale</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        Bug degli ultimi 12 mesi, CVE esclusi
+      </div>
+      <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ ...cell, textAlign: 'left' }}>Stato</th>
+            <th style={{ ...cell, textAlign: 'right' }}>Bug</th>
+          </tr>
+        </thead>
+        <tbody>
+          {byStatus.map((s) => (
+            <tr key={s.status}>
+              <td style={cell}>{s.status}</td>
+              <td style={{ ...cell, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{s.count}</td>
+            </tr>
+          ))}
+          <tr>
+            <td style={{ ...cell, fontWeight: 600, borderBottom: 'none' }}>Totale</td>
+            <td style={{ ...cell, fontWeight: 600, borderBottom: 'none', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {total}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // Riga con il pulsante "Aggiorna tutti i grafici": rifà tutte le query dei
-// grafici (Metriche e Cycle Time/Throughput, che condividono la stessa
-// query), per QUALUNQUE team selezionato nelle singole card - la chiave
+// grafici (Metriche, Cycle Time/Throughput, che condividono la stessa
+// query, e Bug aperti), per QUALUNQUE team selezionato nelle singole card - la chiave
 // parziale ['dashboard','overview']/['dashboard','cycle-time'] matcha sia
 // [...,'sw'] sia [...,'embedded'] - senza toccare quella del Gantt increment
 // (dati locali, non da Jira). Chiavi esplicite invece di un prefisso
@@ -483,6 +732,7 @@ function RefreshAllRow() {
   const queryClient = useQueryClient()
   const fetchingOverview = useIsFetching({ queryKey: ['dashboard', 'overview'] })
   const fetchingCycleTime = useIsFetching({ queryKey: ['dashboard', 'cycle-time'] })
+  const fetchingBugsOpened = useIsFetching({ queryKey: ['dashboard', 'bugs-opened'] })
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -490,8 +740,9 @@ function RefreshAllRow() {
         onClick={() => {
           queryClient.refetchQueries({ queryKey: ['dashboard', 'overview'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'cycle-time'] })
+          queryClient.refetchQueries({ queryKey: ['dashboard', 'bugs-opened'] })
         }}
-        isFetching={fetchingOverview + fetchingCycleTime > 0}
+        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened > 0}
         label="Aggiorna tutti i grafici"
       />
     </div>
@@ -525,6 +776,7 @@ export function OverviewDashboardPage() {
         <MetricsCard />
         <CycleTimeCard />
         <ThroughputCard />
+        <BugsOpenedCard />
       </div>
     )
   }
@@ -735,6 +987,7 @@ export function OverviewDashboardPage() {
       <MetricsCard />
       <CycleTimeCard />
       <ThroughputCard />
+      <BugsOpenedCard />
     </div>
   )
 }
