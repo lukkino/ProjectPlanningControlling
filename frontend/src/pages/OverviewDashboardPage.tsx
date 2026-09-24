@@ -471,10 +471,28 @@ function CycleTimeCard() {
   return (
     <div className="card">
       {header}
-      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
-        Le linee tratteggiate sono il 50°, 85° e 95° percentile.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginTop: 8, marginBottom: 12 }}>
+        <p className="muted" style={{ margin: 0, flex: '1 1 320px' }}>
+          Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
+          Le linee tratteggiate sono il 50°, 85° e 95° percentile.
+        </p>
+        {/* 85° percentile in evidenza: e' il valore da citare in
+            presentazione ("l'85% dei PBI si chiude entro N giorni"), stesso
+            colore della sua linea nel grafico. */}
+        {!data.error && data.p85 != null && (
+          <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Cycle time 85° percentile
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--warning)' }}>
+              {data.p85.toFixed(1)} <span style={{ fontSize: 16, fontWeight: 600 }}>giorni</span>
+            </div>
+            <div className="muted" style={{ fontSize: 11 }}>
+              l'85% dei PBI si chiude entro questo tempo
+            </div>
+          </div>
+        )}
+      </div>
 
       {data.error ? (
         <p className="muted">{data.error}</p>
