@@ -257,7 +257,8 @@ def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTi
     Throughput, che li aggrega per mese lato frontend): un punto per PBI
     sulla JQL base del team scelto + finestra ultimi 12 mesi, asse Y il
     cycle time in giorni (actual_finish - actual_start, entrambi ricavati dal
-    changelog Jira), con le linee di percentile 50/85/95."""
+    changelog Jira), con le linee di percentile 50/85/95 (calcolate senza i
+    Bug CVE)."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
     base_jql = _team_base_jql(settings, team)
     if not base_jql.strip():
@@ -291,7 +292,10 @@ def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTi
     ]
     points.sort(key=lambda p: p.finish_date)
 
-    durations = sorted(p.cycle_time_days for p in points)
+    # Percentili senza i Bug CVE del bot di security scan: chiusi in blocco
+    # quasi subito (cycle time 0), abbasserebbero i percentili fino a dare
+    # un P50 di 0 giorni. Restano comunque nei punti, come serie a se'.
+    durations = sorted(p.cycle_time_days for p in points if not p.is_cve)
     return schemas.CycleTimeMetrics(
         points=points,
         p50=_percentile(durations, 50),

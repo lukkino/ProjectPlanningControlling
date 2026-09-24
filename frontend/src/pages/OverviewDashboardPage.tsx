@@ -474,7 +474,7 @@ function CycleTimeCard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginTop: 8, marginBottom: 12 }}>
         <p className="muted" style={{ margin: 0, flex: '1 1 320px' }}>
           Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
-          Le linee tratteggiate sono il 50°, 85° e 95° percentile.
+          Le linee tratteggiate sono il 50°, 85° e 95° percentile, calcolati senza i Bug CVE del bot di security scan.
         </p>
         {/* 85° percentile in evidenza: e' il valore da citare in
             presentazione ("l'85% dei PBI si chiude entro N giorni"), stesso
@@ -488,7 +488,7 @@ function CycleTimeCard() {
               {data.p85.toFixed(1)} <span style={{ fontSize: 16, fontWeight: 600 }}>giorni</span>
             </div>
             <div className="muted" style={{ fontSize: 11 }}>
-              l'85% dei PBI si chiude entro questo tempo
+              l'85% dei PBI (CVE esclusi) si chiude entro questo tempo
             </div>
           </div>
         )}
