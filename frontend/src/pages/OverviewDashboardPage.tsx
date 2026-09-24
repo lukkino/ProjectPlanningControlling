@@ -31,7 +31,14 @@ import type {
   Project,
   Team,
 } from '../api/types'
-import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
+import {
+  dateStrToEpochDays,
+  epochDaysToDate,
+  formatEpochDaysAsDate,
+  formatIsoDate,
+  parseBackendDateTime,
+  toEpochDays,
+} from '../lib/dates'
 
 const ROW_LABEL_WIDTH = 160
 const BAR_HEIGHT = 30
@@ -944,7 +951,7 @@ function SnapshotPanel({ selectedId, onSelect }: { selectedId: number | null; on
                     />
                   </td>
                   <td className="muted">
-                    {new Date(`${s.created_at}Z`).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                    {parseBackendDateTime(s.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>

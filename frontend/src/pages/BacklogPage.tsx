@@ -15,7 +15,7 @@ import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats } from '../lib/backlogStats'
-import { formatIsoDate } from '../lib/dates'
+import { formatIsoDate, parseBackendDateTime } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
@@ -64,7 +64,7 @@ function addWorkingDays(startStr: string | null, days: number | null): string | 
 // una data valida (es. un item mai sincronizzato).
 function formatDateTime(value: string | null): string | null {
   if (!value) return null
-  const d = new Date(value)
+  const d = parseBackendDateTime(value)
   if (Number.isNaN(d.getTime())) return null
   return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
 }

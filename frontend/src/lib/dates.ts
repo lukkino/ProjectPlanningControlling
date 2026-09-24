@@ -26,6 +26,14 @@ export function formatIsoDate(value: string | null | undefined): string | null {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : null
 }
 
+// Data+ora dal backend (created_at, last_synced_at...): salvate in UTC ma
+// serializzate senza fuso ("2026-09-23T15:29:50"), che new Date() leggerebbe
+// come ora locale - in Italia risulterebbero 1-2 ore indietro. Si aggiunge
+// la Z se manca un fuso esplicito.
+export function parseBackendDateTime(value: string): Date {
+  return new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
+}
+
 export function formatEpochDaysAsDate(days: number): string {
   const d = epochDaysToDate(days)
   const dd = String(d.getUTCDate()).padStart(2, '0')
