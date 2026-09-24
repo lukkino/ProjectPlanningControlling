@@ -15,26 +15,8 @@ import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats } from '../lib/backlogStats'
-import { formatIsoDate, parseBackendDateTime } from '../lib/dates'
+import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
-
-// Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
-// inclusi. Restituisce null se una delle due date manca o se fine < inizio.
-function workingDaysBetween(startStr: string | null, endStr: string | null): number | null {
-  if (!startStr || !endStr) return null
-  const start = new Date(`${startStr}T00:00:00`)
-  const end = new Date(`${endStr}T00:00:00`)
-  if (end < start) return null
-
-  let count = 0
-  const cursor = new Date(start)
-  while (cursor <= end) {
-    const day = cursor.getDay() // 0 = domenica, 6 = sabato
-    if (day !== 0 && day !== 6) count++
-    cursor.setDate(cursor.getDate() + 1)
-  }
-  return count
-}
 
 function toIsoLocal(d: Date): string {
   const yyyy = d.getFullYear()

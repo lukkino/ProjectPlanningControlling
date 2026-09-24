@@ -1,14 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { api } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
+import type { BacklogItem } from '../api/types'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Palette categorica validata del progetto (skill data-viz): blu e arancio
 // per le due serie di ore reali.
 const COLOR_ACTUAL_HOURS = '#2a78d6'
 const COLOR_ACTUAL_LOGGED = '#eb6834'
+// Grafici previsione vs effettivo (Sizing/Durata, Ore stimate/loggate):
+// previsione in grigio neutro, effettivo nel blu primario - il dato reale e'
+// quello da guardare, la previsione fa da riferimento.
+const COLOR_PLANNED = '#a3acb9'
+const COLOR_ACTUAL = '#2f6fed'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 
@@ -29,6 +48,182 @@ function spiStatusLabel(spi: number | null) {
 }
 
 const BADGE_CLASS_BY_TONE: Record<string, string> = { done: 'done', progress: 'progress', '': 'todo' }
+
+type PlanVsActualPoint = {
+  key: string
+  summary: string | null
+  planned: number
+  actual: number
+  delta: number
+}
+
+// Scostamento effettivo - previsto: positivo = oltre la previsione (rosso),
+// negativo = sotto (verde).
+function deltaColor(delta: number): string {
+  if (delta > 0) return 'var(--danger)'
+  if (delta < 0) return 'var(--success)'
+  return 'var(--text-muted)'
+}
+
+const fmtNumber = (v: number) => v.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+
+type PlanVsActualLabels = { planned: string; actual: string; unit: string }
+
+function PlanVsActualTooltip({
+  active,
+  payload,
+  labels,
+}: {
+  active?: boolean
+  payload?: { payload: PlanVsActualPoint }[]
+  labels: PlanVsActualLabels
+}) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+        maxWidth: 320,
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{p.key}</div>
+      {p.summary && <div className="muted" style={{ marginBottom: 4, whiteSpace: 'normal' }}>{p.summary}</div>}
+      <div>
+        {labels.planned}: {fmtNumber(p.planned)} {labels.unit}
+      </div>
+      <div>
+        {labels.actual}: {fmtNumber(p.actual)} {labels.unit}
+      </div>
+      <div style={{ fontWeight: 600, color: deltaColor(p.delta) }}>
+        Scostamento: {p.delta > 0 ? '+' : ''}
+        {fmtNumber(p.delta)} {labels.unit}
+      </div>
+    </div>
+  )
+}
+
+// Grafico previsione vs effettivo per PBI (nell'ordine del Backlog): in un
+// solo grafico, per ogni PBI, la barra della previsione (grigia), quella del
+// dato effettivo (blu) e lo scostamento effettivo - previsto (rosso sopra lo
+// zero se oltre la previsione, verde sotto se entro). Usato per Sizing vs
+// Durata e Ore stimate vs Ore loggate.
+function PlanVsActualCard({
+  title,
+  description,
+  emptyMessage,
+  labels,
+  points,
+}: {
+  title: string
+  description: string
+  emptyMessage: string
+  labels: PlanVsActualLabels
+  points: PlanVsActualPoint[]
+}) {
+  const over = points.filter((p) => p.delta > 0).length
+  const totalPlanned = points.reduce((sum, p) => sum + p.planned, 0)
+  const totalActual = points.reduce((sum, p) => sum + p.actual, 0)
+  const totalDeltaPct = totalPlanned > 0 ? Math.round(((totalActual - totalPlanned) / totalPlanned) * 100) : null
+  // Con molti PBI le etichette dei codici si inclinano per non sovrapporsi.
+  const rotateLabels = points.length > 12
+
+  return (
+    <div className="card">
+      <h3>{title}</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        {description}
+      </p>
+      {points.length === 0 ? (
+        <p className="muted">{emptyMessage}</p>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, marginTop: 0 }}>
+            <strong>{points.length}</strong> PBI: <strong style={{ color: 'var(--danger)' }}>{over}</strong> oltre la
+            previsione, <strong style={{ color: 'var(--success)' }}>{points.length - over}</strong> entro. Totale{' '}
+            <strong>
+              {fmtNumber(totalActual)} {labels.unit}
+            </strong>{' '}
+            effettivi su{' '}
+            <strong>
+              {fmtNumber(totalPlanned)} {labels.unit}
+            </strong>{' '}
+            previsti
+            {totalDeltaPct !== null && (
+              <>
+                {' '}
+                (<strong style={{ color: deltaColor(totalDeltaPct) }}>
+                  {totalDeltaPct > 0 ? '+' : ''}
+                  {totalDeltaPct}%
+                </strong>
+                )
+              </>
+            )}
+            .
+          </p>
+          <div style={{ height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={points} margin={{ top: 8, right: 16, left: 8, bottom: 8 }} barGap={2}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="key"
+                  tick={{ fontSize: 11 }}
+                  interval={0}
+                  angle={rotateLabels ? -45 : 0}
+                  textAnchor={rotateLabels ? 'end' : 'middle'}
+                  height={rotateLabels ? 70 : 30}
+                />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  label={{ value: labels.unit, angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+                />
+                <Tooltip content={<PlanVsActualTooltip labels={labels} />} cursor={{ fill: 'var(--bg)' }} />
+                <Legend
+                  wrapperStyle={{ fontSize: 12 }}
+                  payload={[
+                    { value: labels.planned, type: 'square', color: COLOR_PLANNED },
+                    { value: labels.actual, type: 'square', color: COLOR_ACTUAL },
+                    { value: 'Scostamento oltre la previsione', type: 'square', color: 'var(--danger)' },
+                    { value: 'Scostamento entro la previsione', type: 'square', color: 'var(--success)' },
+                  ]}
+                />
+                <ReferenceLine y={0} stroke="var(--text-muted)" />
+                <Bar dataKey="planned" name={labels.planned} fill={COLOR_PLANNED} radius={[3, 3, 0, 0]} maxBarSize={22} />
+                <Bar dataKey="actual" name={labels.actual} fill={COLOR_ACTUAL} radius={[3, 3, 0, 0]} maxBarSize={22} />
+                <Bar dataKey="delta" name="Scostamento" radius={[3, 3, 3, 3]} maxBarSize={22}>
+                  {points.map((p) => (
+                    <Cell key={p.key} fill={deltaColor(p.delta)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// PBI in scope nell'ordine del Backlog, con i due valori (previsto,
+// effettivo) estratti da getValues; esclusi quelli a cui ne manca uno.
+function planVsActualPoints(
+  items: BacklogItem[] | undefined,
+  getValues: (i: BacklogItem) => [number | null | undefined, number | null | undefined],
+): PlanVsActualPoint[] {
+  return [...(items ?? [])]
+    .filter((i) => i.in_scope)
+    .sort((a, b) => a.priority_order - b.priority_order)
+    .flatMap((i) => {
+      const [planned, actual] = getValues(i)
+      if (planned == null || actual == null) return []
+      return [{ key: i.jira_key, summary: i.summary, planned, actual, delta: actual - planned }]
+    })
+}
 
 export function DashboardPage() {
   const { project } = useProjectContext()
@@ -57,6 +252,12 @@ export function DashboardPage() {
   const { data: snapshots } = useQuery({
     queryKey: ['snapshots', project.id],
     queryFn: () => api.snapshots.list(project.id),
+  })
+
+  // Stessa query (e cache) della tab Backlog.
+  const { data: backlogItems } = useQuery({
+    queryKey: ['backlog', project.id],
+    queryFn: () => api.backlog.list(project.id),
   })
 
   const chartData = (snapshots ?? []).map((s) => ({
@@ -226,6 +427,21 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+
+      <PlanVsActualCard
+        title="Sizing vs Durata"
+        description="Per ogni PBI in scope: Sizing (previsione) e Durata effettiva in giorni lavorativi, da Actual start ad Actual finish come nella colonna Durata (gg) del Backlog, con lo scostamento Durata - Sizing."
+        emptyMessage="Nessun PBI con sia il Sizing (gg) sia la Durata (gg): servono il Sizing compilato nel Backlog e le date effettive di inizio/fine dal sync Jira."
+        labels={{ planned: 'Sizing', actual: 'Durata', unit: 'gg' }}
+        points={planVsActualPoints(backlogItems, (i) => [i.planned_duration_days, workingDaysBetween(i.actual_start, i.actual_finish)])}
+      />
+      <PlanVsActualCard
+        title="Ore stimate vs Ore loggate"
+        description="Per ogni PBI in scope: Ore stimate (Developer Effort da Jira, solo Story) e Ore loggate, con lo scostamento Ore loggate - Ore stimate."
+        emptyMessage="Nessun PBI con sia le Ore stimate sia le Ore loggate."
+        labels={{ planned: 'Ore stimate', actual: 'Ore loggate', unit: 'h' }}
+        points={planVsActualPoints(backlogItems, (i) => [i.dev_effort_hours, i.logged_hours])}
+      />
     </div>
   )
 }

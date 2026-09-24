@@ -66,3 +66,23 @@ export function dateStrToEpochDays(value: string | null): number | null {
   const d = parseFlexibleDate(value)
   return d ? toEpochDays(d) : null
 }
+
+// Giorni lavorativi (lun-ven, festivita' escluse) tra due date, estremi
+// inclusi: usata per la colonna "Durata (gg)" del Backlog e per il grafico
+// Sizing vs Durata della Dashboard increment. Restituisce null se una delle
+// due date manca o se fine < inizio.
+export function workingDaysBetween(startStr: string | null, endStr: string | null): number | null {
+  if (!startStr || !endStr) return null
+  const start = new Date(`${startStr}T00:00:00`)
+  const end = new Date(`${endStr}T00:00:00`)
+  if (end < start) return null
+
+  let count = 0
+  const cursor = new Date(start)
+  while (cursor <= end) {
+    const day = cursor.getDay() // 0 = domenica, 6 = sabato
+    if (day !== 0 && day !== 6) count++
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return count
+}
