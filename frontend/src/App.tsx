@@ -7,6 +7,7 @@ import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
 import { IncrementDetailPage } from './pages/IncrementDetailPage'
 import { IncrementsPage } from './pages/IncrementsPage'
+import { MonteCarloPage } from './pages/MonteCarloPage'
 import { OverviewDashboardPage } from './pages/OverviewDashboardPage'
 import { ProjectIncrementLinkPage } from './pages/ProjectIncrementLinkPage'
 import { ProjectLayout } from './pages/ProjectLayout'
@@ -14,7 +15,7 @@ import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/documents', '/projects-dashboard', '/dashboard']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard']
 
 export default function App() {
   const location = useLocation()
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="backlog" element={<BacklogPage />} />
             <Route path="snapshots" element={<SnapshotsPage />} />
             <Route path="forecasting" element={<ForecastingPage />} />
+            <Route path="montecarlo" element={<MonteCarloPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="progetti" element={<ProjectIncrementLinkPage />} />
           </Route>
