@@ -14,7 +14,7 @@ import type { BacklogItem } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
-import { countBacklogStats } from '../lib/backlogStats'
+import { countBacklogStats, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
@@ -69,7 +69,17 @@ function nextWorkingDay(startStr: string): string {
 // non corrisponde piu' a priority_order.
 const STATUS_SORT_RANK: Record<string, number> = { Done: 0, 'In Progress': 1, 'To Do': 2 }
 
-const COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v1'
+// v2: "Durata effettiva" spostata accanto a "Sizing (gg)". Un ordine gia'
+// salvato con la v1 viene migrato riposizionando solo quella colonna, cosi'
+// il resto dell'ordine personalizzato si conserva.
+const COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v2'
+const LEGACY_COLUMN_ORDER_STORAGE_KEY = 'backlog-column-order-v1'
+
+function migrateLegacyColumnOrder(order: string[]): string[] {
+  const rest = order.filter((k) => k !== 'duration')
+  const i = rest.indexOf('planned_duration_days')
+  return i < 0 ? order : [...rest.slice(0, i + 1), 'duration', ...rest.slice(i + 1)]
+}
 const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
 const MIN_COLUMN_WIDTH = 32
 
@@ -332,6 +342,48 @@ export function BacklogPage() {
         />
       ),
     },
+    {
+      key: 'duration',
+      label: 'Durata effettiva (gg)',
+      className: 'text-right',
+      // Da Start eff. a Fine eff.; se l'item e' iniziato ma non ancora chiuso,
+      // durata provvisoria fino a oggi, in corsivo con ⏳ per distinguerla da
+      // quella definitiva. In rosso in entrambi i casi se supera il Sizing (gg).
+      render: (item) => {
+        const final = workingDaysBetween(item.actual_start, item.actual_finish)
+        const partial =
+          final == null && !item.actual_finish ? workingDaysBetween(item.actual_start, toIsoLocal(new Date())) : null
+        const days = final ?? partial
+        if (days == null) return <span className="muted">—</span>
+        const over = item.planned_duration_days != null && days > item.planned_duration_days
+        const overText = over ? `, oltre il Sizing di ${item.planned_duration_days} gg` : ''
+        if (final != null) {
+          return over ? (
+            <span
+              title={`${final} gg lavorativi${overText}`}
+              style={{ cursor: 'help', color: 'var(--danger)', fontWeight: 600 }}
+            >
+              {final}
+            </span>
+          ) : (
+            final
+          )
+        }
+        return (
+          <span
+            title={`In corso: ${partial} gg lavorativi da Start eff. a oggi${overText} (valore provvisorio)`}
+            style={{
+              fontStyle: 'italic',
+              cursor: 'help',
+              color: over ? 'var(--danger)' : 'var(--text-muted)',
+              fontWeight: over ? 600 : undefined,
+            }}
+          >
+            ⏳ {partial}
+          </span>
+        )
+      },
+    },
     // Dev (h) / Test (h) / Planned (h) tolte per ora dalla vista - i campi
     // restano sul modello dati, basta ri-aggiungere le colonne qui sotto per
     // rimetterle.
@@ -408,12 +460,6 @@ export function BacklogPage() {
       ),
     },
     {
-      key: 'duration',
-      label: 'Durata (gg)',
-      className: 'text-right',
-      render: (item) => workingDaysBetween(item.actual_start, item.actual_finish) ?? <span className="muted">—</span>,
-    },
-    {
       key: 'logged_hours',
       label: 'Ore loggate',
       className: 'editable-cell',
@@ -473,8 +519,11 @@ export function BacklogPage() {
   const [columnOrder, setColumnOrder] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
-      if (stored) {
-        const parsed = JSON.parse(stored) as string[]
+      const legacy = stored ? null : localStorage.getItem(LEGACY_COLUMN_ORDER_STORAGE_KEY)
+      if (stored || legacy) {
+        const parsed = stored
+          ? (JSON.parse(stored) as string[])
+          : migrateLegacyColumnOrder(JSON.parse(legacy as string) as string[])
         const known = parsed.filter((k) => defaultColumnOrder.includes(k))
         const missing = defaultColumnOrder.filter((k) => !known.includes(k))
         return [...known, ...missing]
@@ -569,6 +618,7 @@ export function BacklogPage() {
   }
 
   const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
+  const avgDuration = trimmedMeanDuration(items ?? [])
 
   // Ultima sync Jira di QUESTO progetto: il piu' recente last_synced_at tra
   // tutti i suoi item (la sync valorizza lo stesso timestamp su ognuno,
@@ -720,6 +770,17 @@ export function BacklogPage() {
         <div className="stat-chip orange">
           <span className="value">{remainingCount}</span>
           <span className="label">Rimanenti (In Progress + To Do)</span>
+        </div>
+        <div
+          className="stat-chip teal"
+          title={`Media della Durata effettiva (gg) dei PBI in scope chiusi, escludendo il valore più grande e quello più piccolo (${avgDuration.count} PBI con durata)`}
+        >
+          <span className="value">
+            {avgDuration.mean != null
+              ? avgDuration.mean.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+              : '—'}
+          </span>
+          <span className="label">Durata media (gg, senza min/max)</span>
         </div>
       </div>
 

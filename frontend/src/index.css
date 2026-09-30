@@ -232,6 +232,7 @@ input, select, textarea {
 .stat-chip.violet { background: #ede7fb; color: #5b3fb0; }
 .stat-chip.green { background: #e3f6ea; color: var(--success); }
 .stat-chip.orange { background: #fff2df; color: var(--warning); }
+.stat-chip.teal { background: #e0f4f4; color: #1f7a7a; }
 
 .tabs {
   display: flex;

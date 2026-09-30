@@ -1,4 +1,5 @@
 import type { BacklogItem } from '../api/types'
+import { workingDaysBetween } from './dates'
 
 // Conteggi condivisi tra BacklogPage (riga di stat in cima), ForecastingPage
 // (default di #PBI Remaining su una nuova simulazione) e SnapshotsPage
@@ -23,6 +24,23 @@ export function countBacklogStats(items: BacklogItem[]) {
     remainingCount,
     loggedHoursTotal,
   }
+}
+
+// Media della Durata effettiva (gg) sui PBI in scope gia' chiusi (Start eff.
+// e Fine eff. valorizzate, stesso calcolo della colonna del Backlog),
+// scartando il valore piu' grande e quello piu' piccolo per limitare
+// l'effetto degli outlier. Le durate provvisorie degli item in corso non
+// entrano. null se ci sono meno di 3 item (tolti gli estremi non resterebbe
+// nulla).
+export function trimmedMeanDuration(items: BacklogItem[]): { mean: number | null; count: number } {
+  const durations = items
+    .filter((i) => i.in_scope)
+    .map((i) => workingDaysBetween(i.actual_start, i.actual_finish))
+    .filter((d): d is number => d != null)
+    .sort((a, b) => a - b)
+  if (durations.length < 3) return { mean: null, count: durations.length }
+  const kept = durations.slice(1, -1)
+  return { mean: kept.reduce((sum, d) => sum + d, 0) / kept.length, count: durations.length }
 }
 
 function hasLabel(labels: string | null, label: string): boolean {
