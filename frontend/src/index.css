@@ -532,6 +532,16 @@ tr.phase-current input { background: #e6eefc; }
   color: var(--text-muted);
   text-decoration: line-through;
 }
+/* Spunta verde a destra del testo della voce completata. inline-block: la
+   barratura del paragrafo non si propaga ai figli inline-block, quindi la
+   spunta resta pulita. */
+.rich-text ul[data-type='taskList'] > li[data-checked='true'] > div > p:first-child::after {
+  content: '✓';
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--success);
+  font-weight: 700;
+}
 /* Sola lettura senza salvataggio (es. pagina del Progetto): caselle non
    cliccabili. */
 .rich-text--static ul[data-type='taskList'] input { pointer-events: none; }
