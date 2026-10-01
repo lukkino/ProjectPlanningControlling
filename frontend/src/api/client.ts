@@ -9,9 +9,11 @@ import type {
   DashboardSnapshotSummary,
   DocumentRevisionMeta,
   ForecastSimulation,
+  HoursCalculator,
   Increment,
   IncrementBudgetLine,
   IncrementDetail,
+  IncrementResourceType,
   IncrementSnapshot,
   IncrementSnapshotValue,
   OverviewMetrics,
@@ -127,6 +129,16 @@ export const api = {
   incrementSnapshotValues: {
     update: (id: number, data: Partial<IncrementSnapshotValue>) =>
       put<IncrementSnapshotValue>(`/increments/snapshot-values/${id}`, data),
+  },
+  hoursCalculator: {
+    get: (incrementId: number) => request<HoursCalculator>(`/increments/${incrementId}/hours-calculator`),
+    update: (incrementId: number, data: Partial<Omit<HoursCalculator, 'resource_types'>>) =>
+      put<HoursCalculator>(`/increments/${incrementId}/hours-calculator`, data),
+    addResourceType: (incrementId: number, data: Partial<IncrementResourceType>) =>
+      post<IncrementResourceType>(`/increments/${incrementId}/resource-types`, data),
+    updateResourceType: (id: number, data: Partial<IncrementResourceType>) =>
+      put<IncrementResourceType>(`/increments/resource-types/${id}`, data),
+    removeResourceType: (id: number) => del(`/increments/resource-types/${id}`),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

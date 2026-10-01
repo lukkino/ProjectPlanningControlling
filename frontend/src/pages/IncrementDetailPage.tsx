@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { HoursCalculatorCard } from '../components/HoursCalculatorCard'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { RichText } from '../components/ScopeCard'
@@ -117,6 +118,12 @@ export function IncrementDetailPage() {
       </div>
 
       <IncrementHistoryCard incrementId={increment.id} />
+
+      <HoursCalculatorCard
+        incrementId={increment.id}
+        projectStartDate={increment.start_date}
+        projectEndDate={increment.end_date}
+      />
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Increment collegato</h3>

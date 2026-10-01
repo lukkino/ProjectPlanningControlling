@@ -48,6 +48,22 @@ def _get_snapshot_value_or_404(db: Session, value_id: int) -> models.IncrementSn
     return value
 
 
+def _get_resource_type_or_404(db: Session, resource_type_id: int) -> models.IncrementResourceType:
+    resource_type = db.get(models.IncrementResourceType, resource_type_id)
+    if resource_type is None:
+        raise HTTPException(status_code=404, detail="Tipologia di risorsa non trovata")
+    return resource_type
+
+
+def _hours_calculator(increment: models.Increment) -> schemas.HoursCalculator:
+    return schemas.HoursCalculator(
+        start_date=increment.calc_start_date,
+        end_date=increment.calc_end_date,
+        vacation_days=increment.calc_vacation_days or 0,
+        resource_types=list(increment.resource_types),
+    )
+
+
 @router.get("", response_model=list[schemas.Increment])
 def list_increments(db: Session = Depends(get_db)):
     return db.query(models.Increment).order_by(models.Increment.code).all()
@@ -64,6 +80,8 @@ def create_increment(payload: schemas.IncrementCreate, db: Session = Depends(get
                 increment_id=increment.id, category_name=category_name, is_hours=is_hours, order=order
             )
         )
+    for order, name in enumerate(models.DEFAULT_RESOURCE_TYPES, start=1):
+        db.add(models.IncrementResourceType(increment_id=increment.id, name=name, order=order))
     db.commit()
     db.refresh(increment)
     return increment
@@ -216,3 +234,52 @@ def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValue
     db.commit()
     db.refresh(value)
     return value
+
+
+# ---------- Calcolatore ore progetto ----------
+
+@router.get("/{increment_id}/hours-calculator", response_model=schemas.HoursCalculator)
+def get_hours_calculator(increment_id: int, db: Session = Depends(get_db)):
+    return _hours_calculator(_get_increment_or_404(db, increment_id))
+
+
+@router.put("/{increment_id}/hours-calculator", response_model=schemas.HoursCalculator)
+def update_hours_calculator(increment_id: int, payload: schemas.HoursCalculatorUpdate, db: Session = Depends(get_db)):
+    increment = _get_increment_or_404(db, increment_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        # vacation_days non e' annullabile: un valore vuoto vale 0.
+        setattr(increment, f"calc_{field}", (value or 0) if field == "vacation_days" else value)
+    db.commit()
+    db.refresh(increment)
+    return _hours_calculator(increment)
+
+
+@router.post("/{increment_id}/resource-types", response_model=schemas.IncrementResourceType, status_code=201)
+def create_resource_type(
+    increment_id: int, payload: schemas.IncrementResourceTypeCreate, db: Session = Depends(get_db)
+):
+    _get_increment_or_404(db, increment_id)
+    resource_type = models.IncrementResourceType(increment_id=increment_id, **payload.model_dump())
+    db.add(resource_type)
+    db.commit()
+    db.refresh(resource_type)
+    return resource_type
+
+
+@router.put("/resource-types/{resource_type_id}", response_model=schemas.IncrementResourceType)
+def update_resource_type(
+    resource_type_id: int, payload: schemas.IncrementResourceTypeUpdate, db: Session = Depends(get_db)
+):
+    resource_type = _get_resource_type_or_404(db, resource_type_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(resource_type, field, value)
+    db.commit()
+    db.refresh(resource_type)
+    return resource_type
+
+
+@router.delete("/resource-types/{resource_type_id}", status_code=204)
+def delete_resource_type(resource_type_id: int, db: Session = Depends(get_db)):
+    resource_type = _get_resource_type_or_404(db, resource_type_id)
+    db.delete(resource_type)
+    db.commit()

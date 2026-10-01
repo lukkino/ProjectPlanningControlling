@@ -31,6 +31,25 @@ export type IncrementSnapshot = {
   values: IncrementSnapshotValue[]
 }
 
+// Calcolatore ore progetto: una tipologia di risorsa ("DEV") con quante
+// risorse lavorano sul progetto e quante ore effettive al giorno ciascuna.
+export type IncrementResourceType = {
+  id: number
+  increment_id: number
+  name: string
+  resource_count: number
+  hours_per_day: number
+  order: number
+}
+
+export type HoursCalculator = {
+  // null = non impostata: si usa la data corrispondente del progetto.
+  start_date: string | null
+  end_date: string | null
+  vacation_days: number
+  resource_types: IncrementResourceType[]
+}
+
 export type ImplementedByTask = {
   key: string
   summary: string | null

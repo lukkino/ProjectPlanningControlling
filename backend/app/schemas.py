@@ -1,6 +1,6 @@
 import datetime as dt
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Phase ----------
@@ -89,6 +89,48 @@ class IncrementSnapshot(IncrementSnapshotBase):
     id: int
     increment_id: int
     values: list[IncrementSnapshotValue] = []
+
+
+# ---------- Calcolatore ore progetto ----------
+
+class IncrementResourceTypeBase(BaseModel):
+    name: str
+    resource_count: float = Field(default=1, ge=0)
+    hours_per_day: float = Field(default=8, ge=0, le=24)
+    order: int = 0
+
+
+class IncrementResourceTypeCreate(IncrementResourceTypeBase):
+    pass
+
+
+class IncrementResourceTypeUpdate(BaseModel):
+    name: str | None = None
+    resource_count: float | None = Field(default=None, ge=0)
+    hours_per_day: float | None = Field(default=None, ge=0, le=24)
+    order: int | None = None
+
+
+class IncrementResourceType(IncrementResourceTypeBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    increment_id: int
+
+
+class HoursCalculatorUpdate(BaseModel):
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    vacation_days: float | None = Field(default=None, ge=0)
+
+
+class HoursCalculator(BaseModel):
+    """start_date/end_date null = non impostate: la UI usa le date del
+    progetto."""
+
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    vacation_days: float = 0
+    resource_types: list[IncrementResourceType] = []
 
 
 # ---------- BacklogItem ----------

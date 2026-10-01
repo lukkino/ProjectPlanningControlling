@@ -30,10 +30,20 @@ class Increment(Base):
     # Project (rilascio/"Increment" in UI) su cui questo progetto rendiconta
     # le ore, se assegnato: un progetto appartiene al massimo a un Project.
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    # "Calcolatore ore progetto": periodo su cui calcolare le ore disponibili
+    # (se vuoto la UI usa start_date/end_date del progetto) e giorni di
+    # ferie/chiusura da sottrarre ai giorni lavorativi del periodo. Le
+    # tipologie di risorsa sono in IncrementResourceType.
+    calc_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    calc_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    calc_vacation_days: Mapped[float] = mapped_column(Float, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     project: Mapped["Project | None"] = relationship(back_populates="progetti")
+    resource_types: Mapped[list["IncrementResourceType"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementResourceType.order"
+    )
     budget_lines: Mapped[list["IncrementBudgetLine"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetLine.order"
     )
@@ -137,6 +147,32 @@ class IncrementBudgetLine(Base):
     )
 
     increment: Mapped["Increment"] = relationship(back_populates="budget_lines")
+
+
+# Tipologie di risorsa di default del Calcolatore ore di un progetto: create
+# alla creazione del progetto (e, una tantum, per quelli gia' esistenti - vedi
+# run_lightweight_migrations), poi liberamente modificabili.
+DEFAULT_RESOURCE_TYPES = ["PJM", "Dev", "Tester", "System Tester"]
+
+
+class IncrementResourceType(Base):
+    """Una tipologia di risorsa ("DEV") del Calcolatore ore progetto: quante
+    risorse di quel tipo lavorano sul progetto e quante ore effettive al
+    giorno ciascuna. Le ore disponibili (giorni lavorativi netti x risorse x
+    ore/giorno) sono calcolate dalla UI, qui restano solo i dati inseriti."""
+
+    __tablename__ = "increment_resource_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    # Float: una risorsa puo' essere assegnata al progetto solo in parte
+    # (es. 0.5).
+    resource_count: Mapped[float] = mapped_column(Float, default=1)
+    hours_per_day: Mapped[float] = mapped_column(Float, default=8)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="resource_types")
 
 
 class IncrementSnapshot(Base):

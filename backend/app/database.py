@@ -71,6 +71,28 @@ def run_lightweight_migrations() -> None:
                     )
                 )
 
+    # Calcolatore ore progetto. La tabella increment_resource_types e' nuova
+    # (gia' creata da create_all, che gira prima di questa funzione): i
+    # progetti gia' esistenti ricevono qui, una volta sola, le stesse
+    # tipologie di default di un progetto nuovo.
+    if "calc_vacation_days" not in increment_columns:
+        from app.models import DEFAULT_RESOURCE_TYPES  # import locale: models importa Base da qui
+
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE increments ADD COLUMN calc_start_date DATE"))
+            conn.execute(text("ALTER TABLE increments ADD COLUMN calc_end_date DATE"))
+            conn.execute(text("ALTER TABLE increments ADD COLUMN calc_vacation_days FLOAT DEFAULT 0"))
+            for (increment_id,) in conn.execute(text("SELECT id FROM increments")).fetchall():
+                for order, name in enumerate(DEFAULT_RESOURCE_TYPES, start=1):
+                    conn.execute(
+                        text(
+                            "INSERT INTO increment_resource_types "
+                            '(increment_id, name, resource_count, hours_per_day, "order") '
+                            "VALUES (:inc, :name, 1, 8, :order)"
+                        ),
+                        {"inc": increment_id, "name": name, "order": order},
+                    )
+
     if "backlog_items" in table_names:
         backlog_columns = {col["name"] for col in inspector.get_columns("backlog_items")}
         if "progetto_id" not in backlog_columns:
