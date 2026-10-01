@@ -1,6 +1,8 @@
-import { OrderedList } from '@tiptap/extension-list'
+import { OrderedList, TaskItem, TaskList } from '@tiptap/extension-list'
+import { TableKit } from '@tiptap/extension-table'
+import { Color, TextStyle } from '@tiptap/extension-text-style'
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { Plugin } from '@tiptap/pm/state'
+import { Plugin, TextSelection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
 import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -15,7 +17,7 @@ import StarterKit from '@tiptap/starter-kit'
 
 const BULLET_RE = /^\s*[-*•]\s+(.*)$/
 const NUMBERED_RE = /^\s*\d+[.)]\s+(.*)$/
-const HTML_RE = /^\s*<(p|h[1-6]|ul|ol|blockquote|pre|hr)[\s>]/i
+const HTML_RE = /^\s*<(p|h[1-6]|ul|ol|blockquote|pre|hr|table)[\s>]/i
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
@@ -113,7 +115,10 @@ const NumberedList = OrderedList.extend({
 // aggiunge dopo elenchi e blocchi). I link non si aprono mai via JS: in sola
 // lettura sono normali <a target="_blank">, in modifica un click posiziona
 // solo il cursore.
-export function richTextExtensions(editable: boolean) {
+// checkable: in sola lettura le caselle degli elenchi di controllo restano
+// spuntabili (senza, TipTap annulla il click); chi monta l'editor deve poi
+// riportare la spunta nel documento e salvarla, vedi setTaskCheckedFromDom.
+export function richTextExtensions({ editable, checkable = false }: { editable: boolean; checkable?: boolean }) {
   return [
     StarterKit.configure({
       orderedList: false,
@@ -122,7 +127,34 @@ export function richTextExtensions(editable: boolean) {
       trailingNode: editable ? {} : false,
     }),
     NumberedList,
+    TaskList,
+    TaskItem.configure({
+      nested: true,
+      onReadOnlyChecked: checkable ? () => true : undefined,
+      a11y: { checkboxLabel: (node) => `Completato: ${node.textContent || 'voce vuota'}` },
+    }),
+    TextStyle,
+    Color,
+    TableKit.configure({ table: { resizable: false } }),
   ]
+}
+
+// Sola lettura: riporta nel documento la spunta appena cambiata su una
+// casella (in modifica lo fa gia' TipTap). Restituisce false se la casella
+// non appartiene a una voce di elenco di controllo.
+export function setTaskCheckedFromDom(editor: Editor, checkbox: HTMLInputElement): boolean {
+  const content = checkbox.closest('li')?.querySelector(':scope > div')
+  if (!content) return false
+  const $pos = editor.state.doc.resolve(editor.view.posAtDOM(content, 0))
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth)
+    if (node.type.name !== 'taskItem') continue
+    editor.view.dispatch(
+      editor.state.tr.setNodeMarkup($pos.before(depth), undefined, { ...node.attrs, checked: checkbox.checked }),
+    )
+    return true
+  }
+  return false
 }
 
 type ListAt = { node: PMNode; pos: number }
@@ -133,7 +165,7 @@ export function innermostList(state: EditorState): ListAt | null {
   const { $from } = state.selection
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth)
-    if (isNumbered(node) || node.type.name === 'bulletList') return { node, pos: $from.before(depth) }
+    if (isNumbered(node) || node.type.name === 'bulletList' || node.type.name === 'taskList') return { node, pos: $from.before(depth) }
   }
   return null
 }
@@ -148,12 +180,37 @@ function setListAttrs(editor: Editor, list: ListAt, attrs: Record<string, unknow
   editor.view.dispatch(editor.state.tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, ...attrs }))
 }
 
-// Pulsante "Elenco numerato": come toggleOrderedList, ma un elenco appena
-// creato prosegue la numerazione di quello che lo precede, se c'e'. Per
-// ripartire da 1: pulsante "Continua numerazione" (o scrivere "1. " a mano).
+const ITEM_TYPE = { bulletList: 'listItem', orderedList: 'listItem', taskList: 'taskItem' } as const
+type ListName = keyof typeof ITEM_TYPE
+
+// Pulsanti degli elenchi: attiva/disattiva l'elenco o ne cambia il tipo. Il
+// comando standard di TipTap, quando il cambio di tipo cambia anche il tipo
+// delle voci (elenco di controllo <-> puntato/numerato), smonta l'elenco e
+// lo ricrea al livello superiore, perdendo l'annidamento: in quel caso
+// l'elenco viene invece sostituito sul posto, voce per voce.
+export function toggleList(editor: Editor, listName: ListName) {
+  const list = innermostList(editor.state)
+  const current = list?.node.type.name as ListName | undefined
+  if (!list || !current || current === listName || ITEM_TYPE[current] === ITEM_TYPE[listName]) {
+    editor.chain().focus().toggleList(listName, ITEM_TYPE[listName]).run()
+    return
+  }
+  const { schema, selection, tr } = editor.state
+  const items: PMNode[] = []
+  list.node.forEach((item) => items.push(schema.nodes[ITEM_TYPE[listName]].create(null, item.content)))
+  tr.replaceWith(list.pos, list.pos + list.node.nodeSize, schema.nodes[listName].create(null, items))
+  // Stessa struttura, stesse dimensioni: il cursore resta dov'era.
+  tr.setSelection(TextSelection.create(tr.doc, selection.from, selection.to))
+  editor.view.dispatch(tr)
+  editor.commands.focus()
+}
+
+// Pulsante "Elenco numerato": un elenco appena creato prosegue la
+// numerazione di quello che lo precede, se c'e'. Per ripartire da 1:
+// pulsante "Continua numerazione" (o scrivere "1. " a mano).
 export function toggleNumberedList(editor: Editor) {
   const before = innermostList(editor.state)
-  editor.chain().focus().toggleOrderedList().run()
+  toggleList(editor, 'orderedList')
   const after = innermostList(editor.state)
   if (!after || !isNumbered(after.node) || (before && isNumbered(before.node))) return
   if (hasEarlierNumberedList(editor.state, after)) setListAttrs(editor, after, { continued: true })

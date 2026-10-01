@@ -521,17 +521,72 @@ tr.phase-current input { background: #e6eefc; }
 }
 .rich-text hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 
+/* Elenco di controllo: casella a sinistra, voce completata barrata e
+   attenuata (solo il suo testo, non gli eventuali elenchi annidati). */
+.rich-text ul[data-type='taskList'] { list-style: none; padding-left: 4px; }
+.rich-text ul[data-type='taskList'] > li { display: flex; align-items: flex-start; gap: 8px; }
+.rich-text ul[data-type='taskList'] > li > label { flex: 0 0 auto; user-select: none; }
+.rich-text ul[data-type='taskList'] > li > label input { margin: 4px 0 0; cursor: pointer; }
+.rich-text ul[data-type='taskList'] > li > div { flex: 1; min-width: 0; }
+.rich-text ul[data-type='taskList'] > li[data-checked='true'] > div > p {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+/* Sola lettura senza salvataggio (es. pagina del Progetto): caselle non
+   cliccabili. */
+.rich-text--static ul[data-type='taskList'] input { pointer-events: none; }
+
+/* Tabelle: annullano le regole globali di th/td (nowrap, maiuscoletto,
+   hover di riga) pensate per le tabelle dati dell'app. */
+.rich-text .tableWrapper { overflow-x: auto; }
+.rich-text table { border-collapse: collapse; width: auto; max-width: 100%; margin: 0 0 6px; font-size: inherit; }
+.rich-text th, .rich-text td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  min-width: 70px;
+  white-space: normal;
+  vertical-align: top;
+  text-transform: none;
+  font-size: inherit;
+  color: inherit;
+}
+.rich-text th { background: var(--bg); font-weight: 600; }
+.rich-text tbody tr:hover { background: none; }
+.rich-text th > p, .rich-text td > p { margin: 0; }
+.rich-text .selectedCell { background: #e6eefc; }
+
 .rich-text-editor { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .rich-text-editor:focus-within { border-color: var(--primary); }
 .rich-text-editor .rich-text { padding: 10px 12px; min-height: 140px; }
-.rich-text-toolbar {
+.rich-text-toolbar { border-bottom: 1px solid var(--border); }
+.rich-text-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; }
+.rich-text-toolbar-row + .rich-text-toolbar-row { border-top: 1px solid var(--border); background: var(--bg); }
+.rich-text-toolbar-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px; }
+.rich-text-color { position: relative; display: inline-flex; }
+.rich-text-backdrop { position: fixed; inset: 0; z-index: 10; }
+.rich-text-palette {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 11;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
+.rich-text-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rich-text-swatch--default { background: var(--surface); color: var(--text); font-size: 12px; font-weight: 700; line-height: 1; }
+.rich-text-swatch:hover, .rich-text-swatch.active { outline: 2px solid var(--primary); outline-offset: 1px; }
 .rich-text-tool { padding: 3px 8px; min-width: 30px; font-size: 13px; line-height: 1.4; border-radius: 6px; }
 .rich-text-style { padding: 3px 6px; font-size: 13px; }
 .rich-text-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border); }
