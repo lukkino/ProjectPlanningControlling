@@ -226,6 +226,60 @@ function planVsActualPoints(
     })
 }
 
+const RECENTLY_CLOSED_DAYS = 7
+
+// Issue in scope chiuse negli ultimi 7 giorni (oggi compreso), dalla piu'
+// recente: Done con Actual finish (dal sync Jira) da 7 giorni fa in poi. Le
+// date sono stringhe ISO yyyy-mm-dd, confrontabili direttamente.
+function recentlyClosedItems(items: BacklogItem[] | undefined): BacklogItem[] {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - RECENTLY_CLOSED_DAYS)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`
+  return (items ?? [])
+    .filter((i) => i.in_scope && i.status === 'Done' && i.actual_finish != null && i.actual_finish >= cutoffStr)
+    .sort((a, b) => (b.actual_finish ?? '').localeCompare(a.actual_finish ?? '') || a.priority_order - b.priority_order)
+}
+
+function RecentlyClosedCard({ items }: { items: BacklogItem[] | undefined }) {
+  const closed = recentlyClosedItems(items)
+  return (
+    <div className="card">
+      <h3>Issue chiuse nell'ultima settimana{closed.length > 0 && ` (${closed.length})`}</h3>
+      {closed.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>
+          Nessuna issue in scope chiusa negli ultimi {RECENTLY_CLOSED_DAYS} giorni.
+        </p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Summary</th>
+                <th>Chiusa il</th>
+              </tr>
+            </thead>
+            <tbody>
+              {closed.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
+                      {item.jira_key}
+                    </a>
+                  </td>
+                  <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
+                  <td>{formatIsoDate(item.actual_finish)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function DashboardPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
@@ -354,6 +408,8 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <RecentlyClosedCard items={backlogItems} />
 
       <PhasesCard projectId={project.id} currentStatus={project.status} />
 
