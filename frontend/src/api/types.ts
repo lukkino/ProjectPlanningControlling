@@ -324,3 +324,29 @@ export type DashboardSnapshotSummary = {
 export type DashboardSnapshotDetail = DashboardSnapshotSummary & {
   teams: Partial<Record<Team, DashboardSnapshotTeamData>>
 }
+
+export type SalesforceStatus = 'Aperto' | 'Chiuso'
+
+// Un complaint: Bug Jira nato da un case Salesforce (vedi models.Complaint).
+export type Complaint = {
+  id: number
+  jira_key: string
+  summary: string | null
+  jira_status: string | null
+  jira_created: string | null
+  labels: string | null
+  // Label di architettura (Legacy/NA5/NA6/NA7); piu' d'una separate da ", ".
+  architecture: string | null
+  salesforce_case_number: string | null
+  salesforce_case_id: string | null
+  // Non esiste in Jira: gestito a mano, la sync non lo tocca.
+  salesforce_status: SalesforceStatus
+  customer_site: string | null
+  // true = corretto a mano, la sync non lo ricalcola dalle label Jira.
+  customer_site_manual: boolean
+  last_synced_at: string | null
+}
+
+export type ComplaintsSettings = {
+  base_jql: string
+}

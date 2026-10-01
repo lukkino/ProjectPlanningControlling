@@ -22,6 +22,10 @@ export function Sidebar() {
         📊 Dashboard
       </NavLink>
 
+      <NavLink to="/complaints" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
+        📣 Complaints
+      </NavLink>
+
       <div className="sidebar-section">
         <Link to="/increments" className="sidebar-section-title">
           Progetti

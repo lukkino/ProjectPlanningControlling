@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import models
 from app.database import Base, engine, run_lightweight_migrations
-from app.routers import backlog, dashboard, dashboard_snapshots, documents, forecasting, increments, projects, settings, snapshots
+from app.routers import backlog, complaints, dashboard, dashboard_snapshots, documents, forecasting, increments, projects, settings, snapshots
 
 # MVP: create tables directly from the models on startup instead of a
 # migration tool (Alembic can be introduced later if the schema needs to
@@ -30,6 +30,7 @@ app.include_router(dashboard_snapshots.router)
 app.include_router(forecasting.router)
 app.include_router(documents.router)
 app.include_router(settings.router)
+app.include_router(complaints.router)
 
 
 @app.get("/api/health")

@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -586,3 +587,32 @@ class DashboardSnapshotSummary(BaseModel):
 class DashboardSnapshotDetail(DashboardSnapshotSummary):
     # Chiave = team ("sw", "embedded").
     teams: dict[str, DashboardSnapshotTeamData]
+
+
+# ---------- Complaints ----------
+
+class Complaint(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    jira_key: str
+    summary: str | None = None
+    jira_status: str | None = None
+    jira_created: dt.date | None = None
+    labels: str | None = None
+    architecture: str | None = None
+    salesforce_case_number: str | None = None
+    salesforce_case_id: str | None = None
+    salesforce_status: Literal["Aperto", "Chiuso"] = "Aperto"
+    customer_site: str | None = None
+    customer_site_manual: bool = False
+    last_synced_at: dt.datetime | None = None
+
+
+class ComplaintUpdate(BaseModel):
+    salesforce_status: Literal["Aperto", "Chiuso"] | None = None
+    # Stringa vuota/None = torna al valore ricavato dalle label Jira.
+    customer_site: str | None = None
+
+
+class ComplaintsSettings(BaseModel):
+    base_jql: str

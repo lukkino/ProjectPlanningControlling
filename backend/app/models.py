@@ -372,6 +372,9 @@ class AppSettings(Base):
     # Throughput) - stesso progetto Jira, issuetype e label diversi.
     team_sw_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     team_embedded_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JQL base dell'area Complaints (completa, usata cosi' com'e' dalla
+    # sync); null = DEFAULT_COMPLAINTS_JQL.
+    complaints_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Jira Cloud non espone la scadenza di un token esistente via API: va
     # inserita a mano (e' visibile solo su id.atlassian.com alla creazione),
     # solo per mostrare un avviso in Configurazione - non blocca nulla da
@@ -397,3 +400,43 @@ class DashboardSnapshot(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_json: Mapped[str] = mapped_column(Text)
+
+
+# JQL base di default dell'area Complaints (modificabile dalla pagina, vedi
+# AppSettings.complaints_base_jql): i Bug aperti in Jira dall'integrazione
+# Salesforce a fronte di un reclamo.
+DEFAULT_COMPLAINTS_JQL = 'project = PTBSYS AND type = Bug AND "source type[dropdown]" = Complaint'
+
+
+class Complaint(Base):
+    """Un complaint: un Bug Jira nato da un case Salesforce, sincronizzato
+    dalla JQL base dell'area Complaints (non appartiene a un Project).
+
+    Da Jira (sovrascritti a ogni sync): summary, stato, label, numero e id
+    del case Salesforce. Architettura e Sito Cliente non hanno un campo Jira
+    dedicato: sono ricavati dalle label (vedi routers/complaints.py). Lo
+    stato Salesforce non esiste in Jira: e' gestito a mano qui e la sync non
+    lo tocca."""
+
+    __tablename__ = "complaints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jira_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    jira_created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Label Jira separate da ";" (come BacklogItem.labels).
+    labels: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Label di architettura (Legacy/NA5/NA6/NA7); piu' d'una separate da ", ".
+    architecture: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Numero del case Salesforce come lo vede l'utente (campo Jira "Source
+    # Note", es. "00076665") e id tecnico del record ("Salesforce Case ID",
+    # es. "500Vj00000atnMqIAI"), valorizzato solo sui case piu' recenti.
+    salesforce_case_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    salesforce_case_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    salesforce_status: Mapped[str] = mapped_column(String(16), default="Aperto")
+    customer_site: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # True se il Sito Cliente e' stato corretto a mano: la sync non lo
+    # ricalcola piu' dalle label.
+    customer_site_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)

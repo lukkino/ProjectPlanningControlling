@@ -3,6 +3,8 @@ import type {
   AppSettingsUpdate,
   BacklogItem,
   BugsOpenedMetrics,
+  Complaint,
+  ComplaintsSettings,
   CycleTimeMetrics,
   DashboardMetrics,
   DashboardSnapshotDetail,
@@ -147,6 +149,14 @@ export const api = {
     update: (id: number, data: Partial<BacklogItem>) => put<BacklogItem>(`/backlog/${id}`, data),
     remove: (id: number) => del(`/backlog/${id}`),
     sync: (projectId: number) => post<SyncResult>(`/projects/${projectId}/backlog/sync`),
+  },
+  complaints: {
+    list: () => request<Complaint[]>('/complaints'),
+    update: (id: number, data: Partial<Pick<Complaint, 'salesforce_status' | 'customer_site'>>) =>
+      put<Complaint>(`/complaints/${id}`, data),
+    sync: () => post<SyncResult>('/complaints/sync'),
+    getSettings: () => request<ComplaintsSettings>('/complaints/settings'),
+    updateSettings: (data: ComplaintsSettings) => put<ComplaintsSettings>('/complaints/settings', data),
   },
   snapshots: {
     list: (projectId: number) => request<Snapshot[]>(`/projects/${projectId}/snapshots`),

@@ -244,6 +244,10 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE app_settings DROP COLUMN jira_project_key"))
 
+        if "complaints_base_jql" not in app_settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN complaints_base_jql TEXT"))
+
         with engine.begin() as conn:
             count = conn.execute(text("SELECT COUNT(*) FROM app_settings")).scalar()
             if not count:

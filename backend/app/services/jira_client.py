@@ -519,3 +519,84 @@ def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[J
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 
     return issues
+
+
+class ComplaintIssue:
+    def __init__(
+        self,
+        key: str,
+        summary: str,
+        status: str,
+        labels: list[str],
+        created: dt.date | None,
+        source_note: str | None,
+        salesforce_case_id: str | None,
+    ):
+        self.key = key
+        self.summary = summary
+        self.status = status
+        self.labels = labels
+        self.created = created
+        # Campo custom Jira "Source Note" (customfield_10189): per i
+        # complaint contiene il numero del case Salesforce (es. "00076665").
+        self.source_note = source_note
+        # Campo custom Jira "Salesforce Case ID" (customfield_10286): id
+        # tecnico del record Salesforce, presente solo sui case creati
+        # dall'integrazione automatica.
+        self.salesforce_case_id = salesforce_case_id
+
+
+def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> list[ComplaintIssue]:
+    """Issue di una JQL con i soli campi che servono all'area Complaints:
+    niente changelog ne' task collegati, quindi poche chiamate anche con
+    centinaia di issue."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+
+    base_url = base_url.rstrip("/")
+    SOURCE_NOTE_FIELD = "customfield_10189"
+    SALESFORCE_CASE_ID_FIELD = "customfield_10286"
+    fields = ["summary", "status", "labels", "created", SOURCE_NOTE_FIELD, SALESFORCE_CASE_ID_FIELD]
+    results: list[ComplaintIssue] = []
+    next_page_token: str | None = None
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": fields}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in Configurazione")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+
+                for raw in data.get("issues", []):
+                    f = raw.get("fields") or {}
+                    created = f.get("created")
+                    results.append(
+                        ComplaintIssue(
+                            key=raw.get("key", ""),
+                            summary=f.get("summary", ""),
+                            status=(f.get("status") or {}).get("name", ""),
+                            labels=f.get("labels") or [],
+                            created=_parse_jira_datetime(created).date() if created else None,
+                            source_note=f.get(SOURCE_NOTE_FIELD),
+                            salesforce_case_id=f.get(SALESFORCE_CASE_ID_FIELD),
+                        )
+                    )
+
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+    return results
