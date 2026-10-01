@@ -1,29 +1,215 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, KeyboardEvent, ReactNode } from 'react'
+import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import type { Editor } from '@tiptap/react'
+import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { api } from '../api/client'
-import { richTextToHtml, serializeRichText } from '../lib/richText'
+import {
+  editorToStoredHtml,
+  hasEarlierNumberedList,
+  innermostList,
+  richTextExtensions,
+  toEditorHtml,
+  toggleContinuedNumbering,
+  toggleNumberedList,
+} from '../lib/richText'
 
-// Sola lettura di un testo formattato (vedi lib/richText). L'HTML e' generato
-// da richTextToHtml a partire da testo con escape, mai salvato ne' preso
-// dall'utente cosi' com'e'.
+// Sola lettura di un testo formattato (vedi lib/richText): stesso motore e
+// stesso CSS dell'editor, cosi' cio' che si vede modificando e' identico a
+// cio' che resta dopo il salvataggio.
 export function RichText({ text }: { text: string | null | undefined }) {
-  return <div className="rich-text" dangerouslySetInnerHTML={{ __html: richTextToHtml(text) }} />
+  const editor = useEditor(
+    {
+      extensions: richTextExtensions(false),
+      content: toEditorHtml(text),
+      editable: false,
+      editorProps: { attributes: { class: 'rich-text' } },
+    },
+    [text],
+  )
+  return <EditorContent editor={editor} />
 }
 
-type Format = 'bold' | 'insertUnorderedList' | 'insertOrderedList'
+type ToolProps = {
+  label: ReactNode
+  title: string
+  active?: boolean
+  disabled?: boolean
+  onClick: () => void
+}
 
-const NO_FORMAT: Record<Format, boolean> = { bold: false, insertUnorderedList: false, insertOrderedList: false }
+// onMouseDown + preventDefault: il click sul pulsante non deve togliere il
+// focus (e la selezione) all'editor.
+function Tool({ label, title, active = false, disabled = false, onClick }: ToolProps) {
+  return (
+    <button
+      type="button"
+      className={`btn rich-text-tool${active ? ' active' : ''}`}
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      disabled={disabled}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  )
+}
+
+const BLOCK_STYLES = [
+  { value: '0', label: 'Testo normale' },
+  { value: '1', label: 'Titolo 1' },
+  { value: '2', label: 'Titolo 2' },
+  { value: '3', label: 'Titolo 3' },
+]
+
+function Toolbar({ editor }: { editor: Editor }) {
+  // useEditor non fa ri-renderizzare a ogni transazione: lo stato dei
+  // pulsanti (attivo/disabilitato) viene letto qui, a ogni cambio di
+  // selezione o contenuto.
+  const s = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const list = innermostList(e.state)
+      const numbered = list?.node.type.name === 'orderedList'
+      return {
+        heading: [1, 2, 3].find((level) => e.isActive('heading', { level })) ?? 0,
+        bold: e.isActive('bold'),
+        italic: e.isActive('italic'),
+        underline: e.isActive('underline'),
+        strike: e.isActive('strike'),
+        code: e.isActive('code'),
+        link: e.isActive('link'),
+        bullet: list?.node.type.name === 'bulletList',
+        numbered,
+        continued: numbered && !!list?.node.attrs.continued,
+        canContinue: numbered && !!list && (!!list.node.attrs.continued || hasEarlierNumberedList(e.state, list)),
+        canIndent: e.can().sinkListItem('listItem'),
+        canOutdent: e.can().liftListItem('listItem'),
+        blockquote: e.isActive('blockquote'),
+        codeBlock: e.isActive('codeBlock'),
+        canUndo: e.can().undo(),
+        canRedo: e.can().redo(),
+      }
+    },
+  })
+
+  const chain = () => editor.chain().focus()
+
+  const setBlockStyle = (value: string) => {
+    const level = Number(value) as 0 | 1 | 2 | 3
+    if (level === 0) chain().setParagraph().run()
+    else chain().setHeading({ level }).run()
+  }
+
+  const editLink = () => {
+    const current = editor.getAttributes('link').href as string | undefined
+    const input = window.prompt('Indirizzo del link (vuoto per rimuoverlo)', current ?? 'https://')
+    if (input === null) return
+    const href = input.trim()
+    if (!href || href === 'https://') {
+      chain().extendMarkRange('link').unsetLink().run()
+    } else if (editor.state.selection.empty && !current) {
+      // Nessun testo selezionato: inserisce l'indirizzo stesso come link.
+      chain().insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).run()
+    } else {
+      chain().extendMarkRange('link').setLink({ href }).run()
+    }
+  }
+
+  return (
+    <div className="rich-text-toolbar">
+      <select
+        className="rich-text-style"
+        title="Stile del testo"
+        aria-label="Stile del testo"
+        value={String(s.heading)}
+        onChange={(e) => setBlockStyle(e.target.value)}
+      >
+        {BLOCK_STYLES.map((b) => (
+          <option key={b.value} value={b.value}>
+            {b.label}
+          </option>
+        ))}
+      </select>
+      <span className="rich-text-sep" />
+      <Tool label={<strong>G</strong>} title="Grassetto (Ctrl+B)" active={s.bold} onClick={() => chain().toggleBold().run()} />
+      <Tool label={<em>C</em>} title="Corsivo (Ctrl+I)" active={s.italic} onClick={() => chain().toggleItalic().run()} />
+      <Tool label={<u>S</u>} title="Sottolineato (Ctrl+U)" active={s.underline} onClick={() => chain().toggleUnderline().run()} />
+      <Tool label={<s>ab</s>} title="Barrato (Ctrl+Shift+S)" active={s.strike} onClick={() => chain().toggleStrike().run()} />
+      <Tool label="</>" title="Codice (Ctrl+E)" active={s.code} onClick={() => chain().toggleCode().run()} />
+      <span className="rich-text-sep" />
+      <Tool label="• Elenco" title="Elenco puntato (Ctrl+Shift+8)" active={s.bullet} onClick={() => chain().toggleBulletList().run()} />
+      <Tool label="1. Elenco" title="Elenco numerato (Ctrl+Shift+7)" active={s.numbered} onClick={() => toggleNumberedList(editor)} />
+      <Tool label="⇥" title="Aumenta rientro: annida la voce nell'elenco (Tab)" disabled={!s.canIndent} onClick={() => chain().sinkListItem('listItem').run()} />
+      <Tool label="⇤" title="Riduci rientro (Shift+Tab)" disabled={!s.canOutdent} onClick={() => chain().liftListItem('listItem').run()} />
+      <Tool
+        label="…2. 3."
+        title="Continua la numerazione dell'elenco numerato precedente (disattivato: riparte da 1)"
+        active={s.continued}
+        disabled={!s.canContinue}
+        onClick={() => toggleContinuedNumbering(editor)}
+      />
+      <span className="rich-text-sep" />
+      <Tool label="Link" title="Inserisci o modifica link" active={s.link} onClick={editLink} />
+      <Tool label="❝" title="Citazione" active={s.blockquote} onClick={() => chain().toggleBlockquote().run()} />
+      <Tool label="{ }" title="Blocco di codice" active={s.codeBlock} onClick={() => chain().toggleCodeBlock().run()} />
+      <Tool label="―" title="Linea orizzontale" onClick={() => chain().setHorizontalRule().run()} />
+      <span className="rich-text-sep" />
+      <Tool label="↶" title="Annulla (Ctrl+Z)" disabled={!s.canUndo} onClick={() => chain().undo().run()} />
+      <Tool label="↷" title="Ripeti (Ctrl+Y)" disabled={!s.canRedo} onClick={() => chain().redo().run()} />
+      <Tool label="Tx" title="Rimuovi formattazione" onClick={() => chain().unsetAllMarks().clearNodes().run()} />
+    </div>
+  )
+}
+
+type EditorProps = {
+  initialText: string | null
+  saving: boolean
+  error: Error | null
+  onSave: (value: string | null) => void
+  onCancel: () => void
+}
+
+function ScopeEditor({ initialText, saving, error, onSave, onCancel }: EditorProps) {
+  const editor = useEditor({
+    extensions: richTextExtensions(true),
+    content: toEditorHtml(initialText),
+    autofocus: 'end',
+    editorProps: { attributes: { class: 'rich-text', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Scope' } },
+  })
+
+  return (
+    <>
+      <div className="rich-text-editor">
+        <Toolbar editor={editor} />
+        <EditorContent editor={editor} />
+      </div>
+      {error && (
+        <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
+          Salvataggio non riuscito: {error.message}
+        </div>
+      )}
+      <div className="form-actions">
+        <button className="btn" onClick={onCancel} disabled={saving}>
+          Annulla
+        </button>
+        <button className="btn btn-primary" onClick={() => onSave(editorToStoredHtml(editor))} disabled={saving}>
+          {saving ? 'Salvataggio...' : 'Salva'}
+        </button>
+      </div>
+    </>
+  )
+}
 
 type Props = { projectId: number; scope: string | null }
 
 // Scope dell'increment modificabile direttamente dalla Dashboard, senza
-// passare dal modale "Modifica increment", con grassetto ed elenchi
-// puntati/numerati.
+// passare dal modale "Modifica increment", con un editor di testo formattato
+// (stili, elenchi annidati, link...).
 export function ScopeCard({ projectId, scope }: Props) {
   const [editing, setEditing] = useState(false)
-  const [active, setActive] = useState(NO_FORMAT)
-  const editorRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
   const save = useMutation({
@@ -37,70 +223,10 @@ export function ScopeCard({ projectId, scope }: Props) {
     },
   })
 
-  // Contenuto iniziale scritto a mano nel DOM (non via JSX): da li' in poi
-  // l'editor e' gestito dal browser e React non deve piu' toccarlo, o un
-  // re-render azzererebbe testo e posizione del cursore.
-  const initialHtml = useRef('')
-  useLayoutEffect(() => {
-    if (!editing || !editorRef.current) return
-    editorRef.current.innerHTML = initialHtml.current
-    editorRef.current.focus()
-  }, [editing])
-
-  const refreshActive = () =>
-    setActive({
-      bold: document.queryCommandState('bold'),
-      insertUnorderedList: document.queryCommandState('insertUnorderedList'),
-      insertOrderedList: document.queryCommandState('insertOrderedList'),
-    })
-
-  const applyFormat = (format: Format) => {
-    editorRef.current?.focus()
-    document.execCommand(format)
-    refreshActive()
-  }
-
-  // Ctrl+B funziona gia' da solo; corsivo e sottolineato invece non vengono
-  // salvati, quindi le loro scorciatoie sono disattivate per non mostrare
-  // una formattazione che sparirebbe al salvataggio.
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if ((e.ctrlKey || e.metaKey) && ['i', 'u'].includes(e.key.toLowerCase())) e.preventDefault()
-  }
-
-  // Incolla sempre come testo semplice: niente font/colori/tabelle da Word,
-  // Jira o pagine web.
-  const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'))
-  }
-
   const startEditing = () => {
     save.reset()
-    initialHtml.current = richTextToHtml(scope)
-    setActive(NO_FORMAT)
     setEditing(true)
   }
-
-  const handleSave = () => {
-    if (editorRef.current) save.mutate(serializeRichText(editorRef.current) || null)
-  }
-
-  // onMouseDown + preventDefault: il click sul pulsante non deve togliere il
-  // focus (e la selezione) all'editor, altrimenti il comando non avrebbe
-  // nulla a cui applicarsi.
-  const toolbarButton = (format: Format, label: ReactNode, title: string) => (
-    <button
-      type="button"
-      className={`btn rich-text-tool${active[format] ? ' active' : ''}`}
-      title={title}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        applyFormat(format)
-      }}
-    >
-      {label}
-    </button>
-  )
 
   return (
     <div className="card">
@@ -116,39 +242,13 @@ export function ScopeCard({ projectId, scope }: Props) {
       {!editing && (scope ? <RichText text={scope} /> : <p className="muted" style={{ margin: 0 }}>Nessuno scope definito.</p>)}
 
       {editing && (
-        <>
-          <div className="rich-text-toolbar">
-            {toolbarButton('bold', <strong>G</strong>, 'Grassetto (Ctrl+B)')}
-            {toolbarButton('insertUnorderedList', '• Elenco puntato', 'Elenco puntato')}
-            {toolbarButton('insertOrderedList', '1. Elenco numerato', 'Elenco numerato')}
-          </div>
-          <div
-            ref={editorRef}
-            className="rich-text rich-text-editor"
-            contentEditable
-            suppressContentEditableWarning
-            role="textbox"
-            aria-multiline="true"
-            aria-label="Scope"
-            onKeyDown={handleKeyDown}
-            onKeyUp={refreshActive}
-            onMouseUp={refreshActive}
-            onPaste={handlePaste}
-          />
-          {save.isError && (
-            <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
-              Salvataggio non riuscito: {(save.error as Error).message}
-            </div>
-          )}
-          <div className="form-actions">
-            <button className="btn" onClick={() => setEditing(false)} disabled={save.isPending}>
-              Annulla
-            </button>
-            <button className="btn btn-primary" onClick={handleSave} disabled={save.isPending}>
-              {save.isPending ? 'Salvataggio...' : 'Salva'}
-            </button>
-          </div>
-        </>
+        <ScopeEditor
+          initialText={scope}
+          saving={save.isPending}
+          error={save.error as Error | null}
+          onSave={(value) => save.mutate(value)}
+          onCancel={() => setEditing(false)}
+        />
       )}
     </div>
   )
