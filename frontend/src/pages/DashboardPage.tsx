@@ -15,6 +15,7 @@ import {
 } from 'recharts'
 import { api } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
+import { ScopeCard } from '../components/ScopeCard'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
@@ -304,12 +305,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {project.scope && (
-        <div className="card">
-          <h3>Scope</h3>
-          <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{project.scope}</p>
-        </div>
-      )}
+      <ScopeCard projectId={project.id} scope={project.scope} />
 
       <div className="card">
         <div className="grid-5">

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
+import { RichText } from '../components/ScopeCard'
 import { formatIsoDate } from '../lib/dates'
 
 export function IncrementDetailPage() {
@@ -157,7 +158,7 @@ export function IncrementDetailPage() {
                     </div>
                   </td>
                   <td style={{ whiteSpace: 'normal', minWidth: 200 }}>
-                    {increment.project.scope ?? <span className="muted">-</span>}
+                    {increment.project.scope ? <RichText text={increment.project.scope} /> : <span className="muted">-</span>}
                   </td>
                   <td>{formatIsoDate(increment.project.start_date) ?? <span className="muted">-</span>}</td>
                   <td>{formatIsoDate(increment.project.planned_finish_date) ?? <span className="muted">-</span>}</td>

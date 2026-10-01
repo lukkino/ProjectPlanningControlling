@@ -40,7 +40,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
 
   const save = useMutation({
     mutationFn: () => {
-      const payload = {
+      const payload: Partial<Project> = {
         ...form,
         start_date: form.start_date || null,
         code_freeze_date: form.code_freeze_date || null,
@@ -48,6 +48,9 @@ export function ProjectFormModal({ project, onClose }: Props) {
         scope: form.scope || null,
         jira_jql: form.jira_jql || null,
       }
+      // Lo Scope di un increment esistente si modifica direttamente dalla
+      // Dashboard (ScopeCard, con formattazione): qui solo alla creazione.
+      if (project) delete payload.scope
       return project ? api.projects.update(project.id, payload) : api.projects.create(payload)
     },
     onSuccess: (saved) => {
@@ -81,10 +84,12 @@ export function ProjectFormModal({ project, onClose }: Props) {
           <label>Nome</label>
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
         </div>
-        <div className="form-row">
-          <label>Scope</label>
-          <textarea rows={2} value={form.scope} onChange={(e) => set('scope', e.target.value)} />
-        </div>
+        {!project && (
+          <div className="form-row">
+            <label>Scope</label>
+            <textarea rows={2} value={form.scope} onChange={(e) => set('scope', e.target.value)} />
+          </div>
+        )}
         <div className="grid-3">
           <div className="form-row">
             <label>Project start</label>

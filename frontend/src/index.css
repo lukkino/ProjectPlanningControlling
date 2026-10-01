@@ -478,6 +478,22 @@ tr.phase-current input { background: #e6eefc; }
 .editable-cell input:hover, .editable-cell select:hover { border-color: var(--border); }
 .editable-cell input:focus, .editable-cell select:focus { border-color: var(--primary); outline: none; background: var(--surface); }
 
+/* Testo formattato (Scope dell'increment): sola lettura ed editor
+   condividono .rich-text, cosi' cio' che si vede modificando e' identico a
+   cio' che resta dopo il salvataggio. */
+.rich-text { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.rich-text ul, .rich-text ol { margin: 4px 0; padding-left: 24px; }
+.rich-text-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
+.rich-text-tool { padding: 4px 10px; font-size: 13px; border-radius: 6px; }
+.rich-text-editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-height: 96px;
+  background: var(--surface);
+}
+.rich-text-editor:focus { border-color: var(--primary); outline: none; }
+
 .drag-handle {
   cursor: grab;
   color: var(--text-muted);
