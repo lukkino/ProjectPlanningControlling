@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { Complaint, SalesforceStatus } from '../api/types'
-import { parseBackendDateTime } from '../lib/dates'
+import { formatIsoDate, parseBackendDateTime } from '../lib/dates'
 
 // Le quattro architetture (label Jira) in ordine fisso; i complaint senza
 // nessuna di queste label finiscono sotto NO_ARCHITECTURE.
@@ -108,6 +108,7 @@ export function ComplaintsPage() {
   const [architectureFilter, setArchitectureFilter] = useState<Set<string>>(new Set())
   const [salesforceFilter, setSalesforceFilter] = useState<Set<string>>(new Set())
   const [jiraFilter, setJiraFilter] = useState<Set<string>>(new Set())
+  const [newestFirst, setNewestFirst] = useState(true)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['complaints'] })
 
@@ -138,12 +139,24 @@ export function ComplaintsPage() {
       return (ia === -1 ? JIRA_STATUS_ORDER.length : ia) - (ib === -1 ? JIRA_STATUS_ORDER.length : ib) || a.localeCompare(b)
     })
 
-  const visible = all.filter(
-    (c) =>
-      (architectureFilter.size === 0 || architecturesOf(c).some((a) => architectureFilter.has(a))) &&
-      (salesforceFilter.size === 0 || salesforceFilter.has(c.salesforce_status)) &&
-      (jiraFilter.size === 0 || jiraFilter.has(c.jira_status ?? '')),
-  )
+  // Ordinamento per data di creazione Jira (stringhe ISO yyyy-mm-dd,
+  // confrontabili direttamente); a parita' di data per numero di issue, nello
+  // stesso verso. I complaint senza data restano sempre in fondo.
+  const direction = newestFirst ? -1 : 1
+  const visible = all
+    .filter(
+      (c) =>
+        (architectureFilter.size === 0 || architecturesOf(c).some((a) => architectureFilter.has(a))) &&
+        (salesforceFilter.size === 0 || salesforceFilter.has(c.salesforce_status)) &&
+        (jiraFilter.size === 0 || jiraFilter.has(c.jira_status ?? '')),
+    )
+    .sort((a, b) => {
+      if (!a.jira_created || !b.jira_created) return (a.jira_created ? 0 : 1) - (b.jira_created ? 0 : 1)
+      return (
+        direction *
+        (a.jira_created.localeCompare(b.jira_created) || a.jira_key.localeCompare(b.jira_key, undefined, { numeric: true }))
+      )
+    })
   const filtersActive = architectureFilter.size + salesforceFilter.size + jiraFilter.size > 0
   const clearFilters = () => {
     setArchitectureFilter(new Set())
@@ -223,6 +236,19 @@ export function ComplaintsPage() {
                 <th>Stato Salesforce</th>
                 <th>ID Jira</th>
                 <th>Stato Jira</th>
+                <th aria-sort={newestFirst ? 'descending' : 'ascending'}>
+                  <button
+                    className="sort-btn"
+                    title={
+                      newestFirst
+                        ? 'Dal più nuovo al più vecchio: clicca per invertire'
+                        : 'Dal più vecchio al più nuovo: clicca per invertire'
+                    }
+                    onClick={() => setNewestFirst((v) => !v)}
+                  >
+                    Creato su Jira {newestFirst ? '▼' : '▲'}
+                  </button>
+                </th>
                 <th>Architettura</th>
                 <th>Sito Cliente</th>
               </tr>
@@ -258,6 +284,7 @@ export function ComplaintsPage() {
                       <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>
                     )}
                   </td>
+                  <td>{formatIsoDate(c.jira_created) ?? <span className="muted">-</span>}</td>
                   <td>{c.architecture ?? <span className="muted">-</span>}</td>
                   {/* key: campo non controllato, va ricreato quando il valore salvato cambia. */}
                   <td className="editable-cell" style={{ minWidth: 190 }} key={c.customer_site ?? ''}>
@@ -280,7 +307,7 @@ export function ComplaintsPage() {
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={8} className="muted">
                     {isLoading
                       ? 'Caricamento...'
                       : all.length === 0

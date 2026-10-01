@@ -497,6 +497,18 @@ tr.phase-current input { background: #e6eefc; }
 .link-btn { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
 .complaints-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+/* Intestazione cliccabile per l'ordinamento: stesso aspetto delle altre th. */
+.sort-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  color: var(--primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sort-btn:hover { text-decoration: underline; }
 .complaints-table .sf-status { width: auto; font-weight: 600; }
 .complaints-table .sf-status--open { color: var(--warning); }
 .complaints-table .sf-status--closed { color: var(--success); }
