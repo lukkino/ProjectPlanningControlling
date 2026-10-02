@@ -152,7 +152,7 @@ export const api = {
   },
   complaints: {
     list: () => request<Complaint[]>('/complaints'),
-    update: (id: number, data: Partial<Pick<Complaint, 'salesforce_status' | 'customer_site'>>) =>
+    update: (id: number, data: Partial<Pick<Complaint, 'salesforce_status' | 'architecture' | 'customer_site'>>) =>
       put<Complaint>(`/complaints/${id}`, data),
     sync: () => post<SyncResult>('/complaints/sync'),
     getSettings: () => request<ComplaintsSettings>('/complaints/settings'),

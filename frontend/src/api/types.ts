@@ -334,9 +334,13 @@ export type Complaint = {
   summary: string | null
   jira_status: string | null
   jira_created: string | null
+  // Data di chiusura su Jira (stato Done, Rejected...); null se ancora aperto.
+  jira_resolved: string | null
   labels: string | null
   // Label di architettura (Legacy/NA5/NA6/NA7); piu' d'una separate da ", ".
   architecture: string | null
+  // true = impostata a mano, la sync non la ricalcola dalle label Jira.
+  architecture_manual: boolean
   salesforce_case_number: string | null
   salesforce_case_id: string | null
   // Non esiste in Jira: gestito a mano, la sync non lo tocca.

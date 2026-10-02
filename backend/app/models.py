@@ -425,10 +425,16 @@ class Complaint(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Data di chiusura su Jira (vedi jira_client.fetch_complaints): None
+    # finche' il complaint e' aperto, o se viene riaperto. Usata dai KPI.
+    jira_resolved: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Label Jira separate da ";" (come BacklogItem.labels).
     labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Label di architettura (Legacy/NA5/NA6/NA7); piu' d'una separate da ", ".
     architecture: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # True se l'architettura e' stata impostata a mano (label mancante o
+    # sbagliata su Jira): la sync non la ricalcola piu' dalle label.
+    architecture_manual: Mapped[bool] = mapped_column(Boolean, default=False)
     # Numero del case Salesforce come lo vede l'utente (campo Jira "Source
     # Note", es. "00076665") e id tecnico del record ("Salesforce Case ID",
     # es. "500Vj00000atnMqIAI"), valorizzato solo sui case piu' recenti.

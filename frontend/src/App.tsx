@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BacklogPage } from './pages/BacklogPage'
+import { ComplaintsKpiPage } from './pages/ComplaintsKpiPage'
+import { ComplaintsLayout } from './pages/ComplaintsLayout'
 import { ComplaintsPage } from './pages/ComplaintsPage'
 import { ConfigurationPage } from './pages/ConfigurationPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -16,7 +18,7 @@ import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi']
 
 export default function App() {
   const location = useLocation()
@@ -34,7 +36,10 @@ export default function App() {
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/dashboard" element={<OverviewDashboardPage />} />
-          <Route path="/complaints" element={<ComplaintsPage />} />
+          <Route path="/complaints" element={<ComplaintsLayout />}>
+            <Route index element={<ComplaintsPage />} />
+            <Route path="kpi" element={<ComplaintsKpiPage />} />
+          </Route>
           <Route path="/settings" element={<ConfigurationPage />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/increments" element={<IncrementsPage />} />

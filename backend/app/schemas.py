@@ -598,8 +598,10 @@ class Complaint(BaseModel):
     summary: str | None = None
     jira_status: str | None = None
     jira_created: dt.date | None = None
+    jira_resolved: dt.date | None = None
     labels: str | None = None
     architecture: str | None = None
+    architecture_manual: bool = False
     salesforce_case_number: str | None = None
     salesforce_case_id: str | None = None
     salesforce_status: Literal["Aperto", "Chiuso"] = "Aperto"
@@ -610,7 +612,9 @@ class Complaint(BaseModel):
 
 class ComplaintUpdate(BaseModel):
     salesforce_status: Literal["Aperto", "Chiuso"] | None = None
-    # Stringa vuota/None = torna al valore ricavato dalle label Jira.
+    # Stringa vuota/None = torna al valore ricavato dalle label Jira (vale
+    # sia per l'architettura sia per il sito).
+    architecture: Literal["Legacy", "NA5", "NA6", "NA7", ""] | None = None
     customer_site: str | None = None
 
 

@@ -529,6 +529,7 @@ class ComplaintIssue:
         status: str,
         labels: list[str],
         created: dt.date | None,
+        resolved: dt.date | None,
         source_note: str | None,
         salesforce_case_id: str | None,
     ):
@@ -537,6 +538,9 @@ class ComplaintIssue:
         self.status = status
         self.labels = labels
         self.created = created
+        # Data di chiusura: valorizzata solo se l'issue e' in uno stato
+        # "chiuso" (categoria Jira "done": Done, Rejected...).
+        self.resolved = resolved
         # Campo custom Jira "Source Note" (customfield_10189): per i
         # complaint contiene il numero del case Salesforce (es. "00076665").
         self.source_note = source_note
@@ -559,7 +563,16 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
     base_url = base_url.rstrip("/")
     SOURCE_NOTE_FIELD = "customfield_10189"
     SALESFORCE_CASE_ID_FIELD = "customfield_10286"
-    fields = ["summary", "status", "labels", "created", SOURCE_NOTE_FIELD, SALESFORCE_CASE_ID_FIELD]
+    fields = [
+        "summary",
+        "status",
+        "labels",
+        "created",
+        "resolutiondate",
+        "statuscategorychangedate",
+        SOURCE_NOTE_FIELD,
+        SALESFORCE_CASE_ID_FIELD,
+    ]
     results: list[ComplaintIssue] = []
     next_page_token: str | None = None
 
@@ -581,13 +594,22 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
                 for raw in data.get("issues", []):
                     f = raw.get("fields") or {}
                     created = f.get("created")
+                    status = f.get("status") or {}
+                    # Chiusura: la data di risoluzione se il workflow la
+                    # valorizza, altrimenti quella dell'ultimo cambio di
+                    # categoria di stato (per un'issue chiusa e' il passaggio
+                    # a "done"). Senza changelog, quindi nessuna chiamata in piu'.
+                    resolved = None
+                    if (status.get("statusCategory") or {}).get("key") == "done":
+                        resolved = f.get("resolutiondate") or f.get("statuscategorychangedate")
                     results.append(
                         ComplaintIssue(
                             key=raw.get("key", ""),
                             summary=f.get("summary", ""),
-                            status=(f.get("status") or {}).get("name", ""),
+                            status=status.get("name", ""),
                             labels=f.get("labels") or [],
                             created=_parse_jira_datetime(created).date() if created else None,
+                            resolved=_parse_jira_datetime(resolved).date() if resolved else None,
                             source_note=f.get(SOURCE_NOTE_FIELD),
                             salesforce_case_id=f.get(SALESFORCE_CASE_ID_FIELD),
                         )

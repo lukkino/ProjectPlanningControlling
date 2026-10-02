@@ -2,27 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { Complaint, SalesforceStatus } from '../api/types'
-import { formatIsoDate, parseBackendDateTime } from '../lib/dates'
+import { ARCHITECTURES, NO_ARCHITECTURE, architecturesOf } from '../lib/complaints'
+import { formatIsoDate } from '../lib/dates'
 
-// Le quattro architetture (label Jira) in ordine fisso; i complaint senza
-// nessuna di queste label finiscono sotto NO_ARCHITECTURE.
-const ARCHITECTURES = ['Legacy', 'NA5', 'NA6', 'NA7']
-const NO_ARCHITECTURE = 'N/D'
+// Voce del menu Architettura che annulla la correzione manuale.
+const RESET_TO_JIRA = '__jira__'
 const SALESFORCE_STATUSES: SalesforceStatus[] = ['Aperto', 'Chiuso']
 // Ordine dei pulsanti dello Stato Jira: quello del workflow, non alfabetico.
 // Stati non previsti qui finiscono in coda.
 const JIRA_STATUS_ORDER = ['To Do', 'Analysis', 'Confirmed', 'In Progress', 'On hold', 'Done', 'Rejected']
 
 const JIRA_BADGE_CLASS: Record<string, string> = { Done: 'done', Rejected: 'todo', 'To Do': 'todo' }
-
-const architecturesOf = (c: Complaint) => (c.architecture ? c.architecture.split(', ') : [NO_ARCHITECTURE])
-
-function formatDateTime(value: string | null): string | null {
-  if (!value) return null
-  const d = parseBackendDateTime(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
-}
 
 type FilterGroupProps = {
   label: string
@@ -112,19 +102,13 @@ export function ComplaintsPage() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['complaints'] })
 
-  const sync = useMutation({ mutationFn: api.complaints.sync, onSuccess: invalidate })
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<Complaint, 'salesforce_status' | 'customer_site'>> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<Complaint, 'salesforce_status' | 'architecture' | 'customer_site'>> }) =>
       api.complaints.update(id, data),
     onSuccess: invalidate,
   })
 
   const all = complaints ?? []
-  // La sync valorizza lo stesso timestamp su ogni complaint.
-  const lastSyncedAt = all.reduce<string | null>(
-    (latest, c) => (c.last_synced_at && (!latest || c.last_synced_at > latest) ? c.last_synced_at : latest),
-    null,
-  )
 
   const architectureCounts = countBy(all, architecturesOf)
   const salesforceCounts = countBy(all, (c) => [c.salesforce_status])
@@ -166,29 +150,9 @@ export function ComplaintsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1>Complaints</h1>
-          <div className="sub">
-            Bug Jira nati da un case Salesforce · Ultima sync: {formatDateTime(lastSyncedAt) ?? 'mai sincronizzato'}
-          </div>
-        </div>
-        <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={sync.isPending}>
-          {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
-        </button>
-      </div>
-
       <div className="card">
         <JqlSettings />
 
-        {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
-        {sync.isSuccess && (
-          <p className="muted" style={{ marginTop: 0 }}>
-            Sync completata: {sync.data.created} nuovi complaint, {sync.data.updated} aggiornati
-            {sync.data.removed > 0 && `, ${sync.data.removed} rimossi (non più nella JQL)`} (totale trovati:{' '}
-            {sync.data.total_matched}).
-          </p>
-        )}
         {update.isError && <div className="error-banner">Salvataggio non riuscito: {(update.error as Error).message}</div>}
 
         <div className="filter-bar">
@@ -285,7 +249,31 @@ export function ComplaintsPage() {
                     )}
                   </td>
                   <td>{formatIsoDate(c.jira_created) ?? <span className="muted">-</span>}</td>
-                  <td>{c.architecture ?? <span className="muted">-</span>}</td>
+                  <td className="editable-cell">
+                    <select
+                      value={c.architecture ?? ''}
+                      aria-label={`Architettura di ${c.jira_key}`}
+                      title={
+                        c.architecture_manual
+                          ? 'Impostata a mano: scegli "Valore da Jira" per tornare a quella ricavata dalle label'
+                          : 'Ricavata dalle label Jira: scegli un valore per correggerla'
+                      }
+                      onChange={(e) =>
+                        update.mutate({
+                          id: c.id,
+                          data: { architecture: e.target.value === RESET_TO_JIRA ? '' : e.target.value },
+                        })
+                      }
+                    >
+                      {!c.architecture && <option value="">-</option>}
+                      {/* Valore da Jira fuori elenco (es. due label: "NA5, NA6"). */}
+                      {c.architecture && !ARCHITECTURES.includes(c.architecture) && <option>{c.architecture}</option>}
+                      {ARCHITECTURES.map((a) => (
+                        <option key={a}>{a}</option>
+                      ))}
+                      {c.architecture_manual && <option value={RESET_TO_JIRA}>↺ Valore da Jira</option>}
+                    </select>
+                  </td>
                   {/* key: campo non controllato, va ricreato quando il valore salvato cambia. */}
                   <td className="editable-cell" style={{ minWidth: 190 }} key={c.customer_site ?? ''}>
                     <input

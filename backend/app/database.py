@@ -93,6 +93,15 @@ def run_lightweight_migrations() -> None:
                         {"inc": increment_id, "name": name, "order": order},
                     )
 
+    if "complaints" in table_names:
+        complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
+        if "architecture_manual" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN architecture_manual BOOLEAN DEFAULT 0"))
+        if "jira_resolved" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN jira_resolved DATE"))
+
     if "backlog_items" in table_names:
         backlog_columns = {col["name"] for col in inspector.get_columns("backlog_items")}
         if "progetto_id" not in backlog_columns:

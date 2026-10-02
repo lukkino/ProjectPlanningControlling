@@ -12,7 +12,9 @@ from app.services.jira_client import JiraClientError, fetch_complaints
 router = APIRouter(prefix="/api/complaints", tags=["complaints"])
 
 # Architettura e Sito Cliente non hanno un campo Jira dedicato: sono label
-# dell'issue. L'architettura e' una di queste quattro.
+# dell'issue. L'architettura e' una di queste quattro (stesso elenco di
+# schemas.ComplaintUpdate.architecture); se la label manca o e' sbagliata si
+# imposta a mano dalla pagina (vedi Complaint.architecture_manual).
 ARCHITECTURES = ["Legacy", "NA5", "NA6", "NA7"]
 
 # Il Sito Cliente e' una label "libera" (es. "Careggi", "Policlinico_Milano"),
@@ -141,8 +143,10 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
         complaint.summary = issue.summary
         complaint.jira_status = issue.status
         complaint.jira_created = issue.created
+        complaint.jira_resolved = issue.resolved
         complaint.labels = ";".join(issue.labels)
-        complaint.architecture = _architecture(issue.labels)
+        if not complaint.architecture_manual:
+            complaint.architecture = _architecture(issue.labels)
         complaint.salesforce_case_number = _case_number(issue.source_note, issue.summary)
         complaint.salesforce_case_id = issue.salesforce_case_id
         if not complaint.customer_site_manual:
@@ -169,10 +173,15 @@ def update_complaint(complaint_id: int, payload: schemas.ComplaintUpdate, db: Se
     data = payload.model_dump(exclude_unset=True)
     if data.get("salesforce_status"):
         complaint.salesforce_status = data["salesforce_status"]
+    labels = (complaint.labels or "").split(";")
+    if "architecture" in data:
+        architecture = data["architecture"] or None
+        complaint.architecture_manual = architecture is not None
+        complaint.architecture = architecture or _architecture(labels)
     if "customer_site" in data:
         site = (data["customer_site"] or "").strip()
         complaint.customer_site_manual = bool(site)
-        complaint.customer_site = site or _customer_site((complaint.labels or "").split(";"))
+        complaint.customer_site = site or _customer_site(labels)
     db.commit()
     db.refresh(complaint)
     return complaint
