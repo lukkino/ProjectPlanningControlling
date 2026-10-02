@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -226,14 +227,20 @@ function planVsActualPoints(
     })
 }
 
-const RECENTLY_CLOSED_DAYS = 7
+// Periodi selezionabili nella card delle issue chiuse: finestre mobili
+// all'indietro da oggi, non settimana/mese di calendario.
+const RECENTLY_CLOSED_PERIODS = [
+  { days: 7, label: 'Ultima settimana', title: "nell'ultima settimana" },
+  { days: 14, label: 'Ultime 2 settimane', title: 'nelle ultime 2 settimane' },
+  { days: 30, label: 'Ultimo mese', title: "nell'ultimo mese" },
+]
 
-// Issue in scope chiuse negli ultimi 7 giorni (oggi compreso), dalla piu'
-// recente: Done con Actual finish (dal sync Jira) da 7 giorni fa in poi. Le
-// date sono stringhe ISO yyyy-mm-dd, confrontabili direttamente.
-function recentlyClosedItems(items: BacklogItem[] | undefined): BacklogItem[] {
+// Issue in scope chiuse negli ultimi `days` giorni (oggi compreso), dalla
+// piu' recente: Done con Actual finish (dal sync Jira) da `days` giorni fa in
+// poi. Le date sono stringhe ISO yyyy-mm-dd, confrontabili direttamente.
+function recentlyClosedItems(items: BacklogItem[] | undefined, days: number): BacklogItem[] {
   const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - RECENTLY_CLOSED_DAYS)
+  cutoff.setDate(cutoff.getDate() - days)
   const pad = (n: number) => String(n).padStart(2, '0')
   const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`
   return (items ?? [])
@@ -242,13 +249,40 @@ function recentlyClosedItems(items: BacklogItem[] | undefined): BacklogItem[] {
 }
 
 function RecentlyClosedCard({ items }: { items: BacklogItem[] | undefined }) {
-  const closed = recentlyClosedItems(items)
+  const [period, setPeriod] = useState(RECENTLY_CLOSED_PERIODS[0])
+  const closed = recentlyClosedItems(items, period.days)
   return (
     <div className="card">
-      <h3>Issue chiuse nell'ultima settimana{closed.length > 0 && ` (${closed.length})`}</h3>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 8,
+          marginBottom: 12,
+        }}
+      >
+        <h3 style={{ marginBottom: 0 }}>
+          Issue chiuse {period.title}
+          {closed.length > 0 && ` (${closed.length})`}
+        </h3>
+        <div className="filter-group">
+          {RECENTLY_CLOSED_PERIODS.map((p) => (
+            <button
+              key={p.days}
+              className={`btn filter-btn${p.days === period.days ? ' active' : ''}`}
+              aria-pressed={p.days === period.days}
+              onClick={() => setPeriod(p)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {closed.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>
-          Nessuna issue in scope chiusa negli ultimi {RECENTLY_CLOSED_DAYS} giorni.
+          Nessuna issue in scope chiusa negli ultimi {period.days} giorni.
         </p>
       ) : (
         <div className="table-wrap">
@@ -256,6 +290,7 @@ function RecentlyClosedCard({ items }: { items: BacklogItem[] | undefined }) {
             <thead>
               <tr>
                 <th>ID</th>
+                <th>Tipo</th>
                 <th>Summary</th>
                 <th>Chiusa il</th>
               </tr>
@@ -268,6 +303,7 @@ function RecentlyClosedCard({ items }: { items: BacklogItem[] | undefined }) {
                       {item.jira_key}
                     </a>
                   </td>
+                  <td>{item.issue_type ?? <span className="muted">-</span>}</td>
                   <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
                   <td>{formatIsoDate(item.actual_finish)}</td>
                 </tr>
