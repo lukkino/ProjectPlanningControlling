@@ -30,6 +30,8 @@ const COLOR_ACTUAL_LOGGED = '#eb6834'
 // quello da guardare, la previsione fa da riferimento.
 const COLOR_PLANNED = '#a3acb9'
 const COLOR_ACTUAL = '#2f6fed'
+// Data del code freeze nel grafico del completamento: rosso, la scadenza.
+const COLOR_CODE_FREEZE = '#d3402f'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 
@@ -369,15 +371,33 @@ export function DashboardPage() {
     queryFn: () => api.backlog.list(project.id),
   })
 
-  const chartData = (snapshots ?? []).map((s) => ({
-    date: formatIsoDate(s.snapshot_date) ?? s.snapshot_date,
-    completamento: s.pbi_total ? Math.round(((s.pbi_done ?? 0) / s.pbi_total) * 100) : null,
-  }))
+  const startEpoch = dateStrToEpochDays(project.start_date)
+  const freezeEpoch = dateStrToEpochDays(project.code_freeze_date)
+  // Con inizio e code freeze noti si puo' tracciare l'obiettivo: la data del
+  // code freeze e la linea ideale, dallo 0% all'inizio al 100% al code freeze.
+  const hasPlan = startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch
+
+  // % completamento dagli snapshot di Andamento, su un asse di date vere
+  // (giorni) per poterla confrontare con la linea ideale: in ogni punto,
+  // dove dovremmo essere per arrivare al 100% al code freeze.
+  const completionByEpoch = new Map<number, number | null>()
+  for (const s of snapshots ?? []) {
+    const epoch = dateStrToEpochDays(s.snapshot_date)
+    if (epoch === null) continue
+    completionByEpoch.set(epoch, s.pbi_total ? Math.round(((s.pbi_done ?? 0) / s.pbi_total) * 100) : null)
+  }
+  const chartData = Array.from(new Set([...completionByEpoch.keys(), ...(hasPlan ? [startEpoch, freezeEpoch] : [])]))
+    .sort((a, b) => a - b)
+    .map((epoch) => ({
+      x: epoch,
+      completamento: completionByEpoch.get(epoch) ?? null,
+      ideale: hasPlan
+        ? Math.round(Math.min(Math.max((epoch - startEpoch) / (freezeEpoch - startEpoch), 0), 1) * 1000) / 10
+        : null,
+    }))
 
   // Ore effettive dagli snapshot di Andamento (actual_hours = "Actual
   // (PowerBI)", logged_hours = "Actual logged") nel tempo.
-  const startEpoch = dateStrToEpochDays(project.start_date)
-  const freezeEpoch = dateStrToEpochDays(project.code_freeze_date)
 
   let hoursChartData: { x: number; actualHours: number | null; actualLogged: number | null }[] = []
   if (startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch) {
@@ -431,7 +451,7 @@ export function DashboardPage() {
       <ScopeCard projectId={project.id} scope={project.scope} />
 
       <div className="card">
-        <div className="grid-5">
+        <div className="grid-4">
           <div className="stat">
             <span className="value">{metrics ? pct(metrics.percent_complete) : '—'}</span>
             <span className="label">
@@ -462,13 +482,6 @@ export function DashboardPage() {
                 da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
               </span>
             )}
-          </div>
-          <div className="stat">
-            <span className="value">{metrics?.dev_logged_hours_total ?? 0} h</span>
-            <span className="label">Ore loggate</span>
-            <span className="muted" style={{ fontSize: 11 }}>
-              solo Development (Time Tracking Jira)
-            </span>
           </div>
           <div className="stat">
             <span className={`value ${metrics ? spiTone(metrics.spi) : ''}`}>
@@ -541,22 +554,69 @@ export function DashboardPage() {
 
       <div className="card">
         <h3>Andamento % completamento nel tempo</h3>
-        {chartData.length === 0 ? (
+        {completionByEpoch.size === 0 ? (
           <p className="muted">
             Nessuno snapshot registrato. Aggiungine uno dalla tab "Andamento" per iniziare a tracciare lo storico.
           </p>
         ) : (
-          <div style={{ height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                <YAxis unit="%" tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="completamento" stroke="#2f6fed" strokeWidth={2} dot />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <>
+            {!hasPlan && (
+              <p className="muted" style={{ marginTop: 0 }}>
+                Imposta la data di inizio increment e la data di code freeze (scheda increment) per vedere il code
+                freeze e la linea ideale.
+              </p>
+            )}
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 20, right: 24, left: 8, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="x"
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={formatEpochDaysAsDate}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis unit="%" domain={[0, 100]} tick={{ fontSize: 12 }} />
+                  <Tooltip labelFormatter={(v) => formatEpochDaysAsDate(Number(v))} formatter={(v) => `${v}%`} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {hasPlan && (
+                    <ReferenceLine
+                      x={freezeEpoch}
+                      stroke={COLOR_CODE_FREEZE}
+                      strokeDasharray="4 4"
+                      label={{
+                        value: `Code freeze ${formatEpochDaysAsDate(freezeEpoch)}`,
+                        position: 'insideBottomRight',
+                        fill: COLOR_CODE_FREEZE,
+                        fontSize: 12,
+                      }}
+                    />
+                  )}
+                  {hasPlan && (
+                    <Line
+                      type="linear"
+                      dataKey="ideale"
+                      name="Ideale"
+                      stroke={COLOR_PLANNED}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      dot={false}
+                    />
+                  )}
+                  <Line
+                    type="linear"
+                    dataKey="completamento"
+                    name="Completamento"
+                    stroke={COLOR_ACTUAL}
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                    connectNulls
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
         )}
       </div>
 

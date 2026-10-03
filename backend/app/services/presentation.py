@@ -21,8 +21,8 @@ from io import BytesIO
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData, XyChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_TICK_LABEL_POSITION
-from pptx.enum.dml import MSO_THEME_COLOR
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_MARKER_STYLE, XL_TICK_LABEL_POSITION
+from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
@@ -558,12 +558,6 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
             + ([(snapshot_note, COLOR_MUTED)] if metrics.logged_hours_source == "snapshot" else []),
         ),
         (
-            f"{_num(metrics.dev_logged_hours_total)} h",
-            COLOR_TEXT,
-            "Ore loggate",
-            [("solo Development (Time Tracking Jira)", COLOR_MUTED)],
-        ),
-        (
             f"{metrics.spi:.2f}".replace(".", ",") if metrics.spi is not None else "—",
             status_color,
             "SPI (avanzamento / tempo trascorso)",
@@ -730,6 +724,29 @@ def _phases_slide(deck: _Deck, project: models.Project) -> None:
     )
 
 
+def _date_serial(day: dt.date) -> int:
+    """Data come numero seriale di Excel: l'asse X dei grafici nel tempo."""
+    return (day - EXCEL_EPOCH).days
+
+
+def _date_x_axis(chart, days: list[dt.date]) -> None:
+    """Asse X di date per un grafico a dispersione, dalla prima all'ultima
+    delle date indicate. In un grafico a dispersione "category_axis" e'
+    l'asse X dei valori: le date sono numeri seriali di Excel, mostrati come
+    date."""
+    x_axis = chart.category_axis
+    x_axis.minimum_scale = _date_serial(min(days))
+    x_axis.maximum_scale = _date_serial(max(days))
+    x_axis.tick_labels.number_format = "dd/mm/yyyy"
+    x_axis.tick_labels.number_format_is_linked = False
+    x_axis.has_major_gridlines = True
+    # Senza questo elemento PowerPoint legge i seriali col sistema di date
+    # 1904 e le date escono spostate di 4 anni.
+    chart_space = chart._chartSpace
+    date1904 = chart_space.makeelement(f"{{{chart_space.nsmap['c']}}}date1904", {"val": "0"})
+    chart_space.insert(0, date1904)
+
+
 def _hours_slide(deck: _Deck, project: models.Project) -> None:
     slide, box = deck.add_slide("Ore usate nel tempo")
     start, freeze = project.start_date, project.code_freeze_date
@@ -742,9 +759,7 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
         )
         return
 
-    def serial(day: dt.date) -> int:
-        return (day - EXCEL_EPOCH).days
-
+    serial = _date_serial
     chart_data = XyChartData()
     days: list[dt.date] = [start, freeze]
     for name, attribute in (("Actual (PowerBI) (h)", "actual_hours"), ("Actual logged (dev+test)", "logged_hours")):
@@ -762,19 +777,7 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
     chart = slide.shapes.add_chart(
         XL_CHART_TYPE.XY_SCATTER_LINES, box.left, box.top, box.width, box.height, chart_data
     ).chart
-    # In un grafico a dispersione "category_axis" e' l'asse X dei valori: le
-    # date sono numeri seriali di Excel, mostrati come date.
-    x_axis = chart.category_axis
-    x_axis.minimum_scale = serial(min(days))
-    x_axis.maximum_scale = serial(max(days))
-    x_axis.tick_labels.number_format = "dd/mm/yyyy"
-    x_axis.tick_labels.number_format_is_linked = False
-    x_axis.has_major_gridlines = True
-    # Senza questo elemento PowerPoint legge i seriali col sistema di date
-    # 1904 e le date escono spostate di 4 anni.
-    chart_space = chart._chartSpace
-    date1904 = chart_space.makeelement(f"{{{chart_space.nsmap['c']}}}date1904", {"val": "0"})
-    chart_space.insert(0, date1904)
+    _date_x_axis(chart, days)
     _style_chart(chart, value_axis_title="Ore")
     for series in chart.plots[0].series:
         series.smooth = False
@@ -792,22 +795,47 @@ def _completion_slide(deck: _Deck, project: models.Project) -> None:
             color=COLOR_MUTED,
         )
         return
-    chart_data = CategoryChartData()
-    chart_data.categories = [_date(s.snapshot_date) for s in snapshots]
-    chart_data.add_series(
-        "% completamento", [round((s.pbi_done or 0) / s.pbi_total * 100) if s.pbi_total else None for s in snapshots]
-    )
-    chart = slide.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, box.left, box.top, box.width, box.height, chart_data).chart
-    _style_chart(chart, legend=False)
-    chart.category_axis.tick_labels.number_format = "@"
-    chart.category_axis.tick_labels.number_format_is_linked = False
+    # Come nella Dashboard: % completamento degli snapshot su un asse di date
+    # vere e, se inizio e code freeze sono noti, l'obiettivo - la data del
+    # code freeze e la linea ideale dallo 0% all'inizio al 100% al code freeze.
+    start, freeze = project.start_date, project.code_freeze_date
+    has_plan = start is not None and freeze is not None and freeze > start
+    chart_data = XyChartData()
+    days = [s.snapshot_date for s in snapshots]
+    completion = chart_data.add_series("Completamento")
+    for snapshot in snapshots:
+        if snapshot.pbi_total:
+            completion.add_data_point(
+                _date_serial(snapshot.snapshot_date), round((snapshot.pbi_done or 0) / snapshot.pbi_total * 100)
+            )
+    if has_plan:
+        days += [start, freeze]
+        ideal = chart_data.add_series("Ideale")
+        ideal.add_data_point(_date_serial(start), 0)
+        ideal.add_data_point(_date_serial(freeze), 100)
+        deadline = chart_data.add_series(f"Code freeze {_date(freeze)}")
+        deadline.add_data_point(_date_serial(freeze), 0)
+        deadline.add_data_point(_date_serial(freeze), 100)
+
+    chart = slide.shapes.add_chart(
+        XL_CHART_TYPE.XY_SCATTER_LINES, box.left, box.top, box.width, box.height, chart_data
+    ).chart
+    _date_x_axis(chart, days)
+    _style_chart(chart)
     chart.value_axis.minimum_scale = 0
     chart.value_axis.maximum_scale = 100
     chart.value_axis.tick_labels.number_format = '0"%"'
     chart.value_axis.tick_labels.number_format_is_linked = False
-    series = chart.plots[0].series[0]
-    series.smooth = False
-    series.format.line.width = Pt(2.25)
+    plot_series = list(chart.plots[0].series)
+    for series in plot_series:
+        series.smooth = False
+        series.format.line.width = Pt(2.25)
+    # Linea ideale e code freeze: tratteggiate e senza punti, fanno da
+    # riferimento al dato reale.
+    for series, color in zip(plot_series[1:], (COLOR_PLANNED, COLOR_DANGER)):
+        series.format.line.color.rgb = color
+        series.format.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+        series.marker.style = XL_MARKER_STYLE.NONE
 
 
 def _plan_vs_actual_slides(
