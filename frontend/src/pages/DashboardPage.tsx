@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import type { BacklogItem } from '../api/types'
@@ -248,8 +248,17 @@ function recentlyClosedItems(items: BacklogItem[] | undefined, days: number): Ba
     .sort((a, b) => (b.actual_finish ?? '').localeCompare(a.actual_finish ?? '') || a.priority_order - b.priority_order)
 }
 
-function RecentlyClosedCard({ items }: { items: BacklogItem[] | undefined }) {
-  const [period, setPeriod] = useState(RECENTLY_CLOSED_PERIODS[0])
+type RecentlyClosedPeriod = (typeof RECENTLY_CLOSED_PERIODS)[number]
+
+function RecentlyClosedCard({
+  items,
+  period,
+  setPeriod,
+}: {
+  items: BacklogItem[] | undefined
+  period: RecentlyClosedPeriod
+  setPeriod: (period: RecentlyClosedPeriod) => void
+}) {
   const closed = recentlyClosedItems(items, period.days)
   return (
     <div className="card">
@@ -325,6 +334,15 @@ export function DashboardPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
   })
 
+  // Periodo della card delle issue chiuse: tenuto qui (non nella card)
+  // perche' la presentazione generata usa lo stesso periodo.
+  const [closedPeriod, setClosedPeriod] = useState(RECENTLY_CLOSED_PERIODS[0])
+
+  const presentation = useMutation({
+    mutationFn: () => api.dashboard.presentation(project.id, closedPeriod.days),
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+  })
+
   // Stessa query cache di PhasesCard (query key condivisa): lo stato del
   // progetto e' scelto tra le fasi definite, non un elenco fisso - fasi
   // diverse per processi diversi danno stati diversi.
@@ -383,16 +401,31 @@ export function DashboardPage() {
       <div className="card">
         <div className="page-header" style={{ marginBottom: 0 }}>
           <h3 style={{ margin: 0 }}>Stato increment</h3>
-          <select
-            value={project.status}
-            onChange={(e) => updateStatus.mutate(e.target.value)}
-            disabled={updateStatus.isPending}
-          >
-            {statusOptions.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <select
+              value={project.status}
+              onChange={(e) => updateStatus.mutate(e.target.value)}
+              disabled={updateStatus.isPending}
+            >
+              {statusOptions.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+            <button
+              className="btn btn-primary"
+              title="Scarica una presentazione PowerPoint coi dati di questa dashboard"
+              disabled={presentation.isPending}
+              onClick={() => presentation.mutate()}
+            >
+              {presentation.isPending ? 'Generazione…' : '⬇ Genera presentazione (.pptx)'}
+            </button>
+          </div>
         </div>
+        {presentation.isError && (
+          <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
+            Generazione della presentazione non riuscita: {(presentation.error as Error).message}
+          </div>
+        )}
       </div>
 
       <ScopeCard projectId={project.id} scope={project.scope} />
@@ -456,7 +489,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <RecentlyClosedCard items={backlogItems} />
+      <RecentlyClosedCard items={backlogItems} period={closedPeriod} setPeriod={setClosedPeriod} />
 
       <PhasesCard projectId={project.id} currentStatus={project.status} />
 

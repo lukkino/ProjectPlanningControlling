@@ -167,6 +167,10 @@ export const api = {
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
+    // Presentazione .pptx della Dashboard increment; closedDays e' il periodo
+    // selezionato nella card delle issue chiuse.
+    presentation: (projectId: number, closedDays: number) =>
+      downloadFile(`/projects/${projectId}/dashboard/presentation`, { days: String(closedDays) }),
     overview: (team: Team, period: OverviewPeriod = 'current') =>
       request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
     cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
