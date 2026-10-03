@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
 import type { BacklogItem } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
@@ -81,6 +81,12 @@ function migrateLegacyColumnOrder(order: string[]): string[] {
   return i < 0 ? order : [...rest.slice(0, i + 1), 'duration', ...rest.slice(i + 1)]
 }
 const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
+// Colonne nascoste dal menu "Colonne": come ordine e larghezze, e' una
+// preferenza per-browser valida per tutti gli increment.
+const HIDDEN_COLUMNS_STORAGE_KEY = 'backlog-hidden-columns-v1'
+// Sempre visibile: senza la chiave Jira non si capisce a quale item si
+// riferisce la riga.
+const ALWAYS_VISIBLE_COLUMN_KEYS = new Set(['jira_key'])
 const MIN_COLUMN_WIDTH = 32
 
 // Larghezza in pixel di default per colonna con table-layout:fixed, cosi' la
@@ -196,6 +202,17 @@ export function BacklogPage() {
     onSuccess: invalidate,
   })
 
+  // Esporta Design Input: si sceglie il documento TIH-DI corrente (.xlsx),
+  // il backend vi aggiunge in cima le Story in scope di questo increment e
+  // restituisce il file aggiornato, scaricato subito.
+  const designInputFileRef = useRef<HTMLInputElement>(null)
+  const exportDesignInput = useMutation({
+    mutationFn: (file: File) => api.documents.designInput(project.id, file),
+    onSuccess: (result) => {
+      if (result.added > 0) saveBlob(result.blob, result.filename)
+    },
+  })
+
   // Pianificazione a cascata: partendo dall'item con priorita' piu' alta
   // (che deve gia' avere Start pian./Fine pian. impostati, es. col calcolo
   // automatico da Sizing visto sopra), ogni item successivo riparte dal
@@ -206,28 +223,54 @@ export function BacklogPage() {
   // colonna, vedi render di 'expected_finish'). Gli item non "In Scope" sono
   // esclusi del tutto dalla catena (non contano ne' come ancora ne' come
   // anelli): non fanno parte del piano.
+  const inScopeByPriority = () =>
+    [...(items ?? [])].filter((i) => i.in_scope).sort((a, b) => a.priority_order - b.priority_order)
+
+  // Ripianifica in cascata gli item che seguono sorted[fromIndex], la cui
+  // Fine pian. e' prevFinish.
+  const cascadeAfter = async (sorted: BacklogItem[], fromIndex: number, prevFinish: string) => {
+    for (const item of sorted.slice(fromIndex + 1)) {
+      const planned_start = nextWorkingDay(prevFinish)
+      if (!item.planned_duration_days) {
+        await api.backlog.update(item.id, { planned_start })
+        break
+      }
+      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)!
+      await api.backlog.update(item.id, { planned_start, expected_finish })
+      prevFinish = expected_finish
+    }
+  }
+
   const cascadeSchedule = useMutation({
     mutationFn: async () => {
-      const sorted = [...(items ?? [])].filter((i) => i.in_scope).sort((a, b) => a.priority_order - b.priority_order)
+      const sorted = inScopeByPriority()
       const anchor = sorted[0]
       if (!anchor || !anchor.planned_start || !anchor.expected_finish) {
         throw new Error(
           `Imposta prima Start pian. e Fine pian. per l'item in cima alla lista${anchor ? ` (${anchor.jira_key})` : ''}.`,
         )
       }
-      let prevFinish = anchor.expected_finish
-      for (const item of sorted.slice(1)) {
-        const planned_start = nextWorkingDay(prevFinish)
-        if (!item.planned_duration_days) {
-          await api.backlog.update(item.id, { planned_start })
-          break
-        }
-        const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)!
-        await api.backlog.update(item.id, { planned_start, expected_finish })
-        prevFinish = expected_finish
-      }
+      await cascadeAfter(sorted, 0, anchor.expected_finish)
     },
     onSuccess: invalidate,
+  })
+
+  // Cambio a mano dello Start pian. di un item: la sua Fine pian. si ricalcola
+  // dal Sizing (gg) e, se l'item e' in scope, gli item sotto di lui si
+  // ripianificano in cascata con le stesse regole di cascadeSchedule (quelli
+  // sopra non si toccano). Senza Sizing la Fine pian. non cambia, quindi non
+  // c'e' nulla da propagare.
+  const reschedule = useMutation({
+    mutationFn: async ({ item, planned_start }: { item: BacklogItem; planned_start: string | null }) => {
+      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
+      await api.backlog.update(item.id, expected_finish ? { planned_start, expected_finish } : { planned_start })
+      if (!expected_finish || !item.in_scope) return
+      const sorted = inScopeByPriority()
+      const index = sorted.findIndex((i) => i.id === item.id)
+      if (index !== -1) await cascadeAfter(sorted, index, expected_finish)
+    },
+    // Anche in caso di errore a meta' cascata: gli item gia' aggiornati vanno mostrati.
+    onSettled: invalidate,
   })
 
   const num = (v: string) => (v === '' ? null : Number(v))
@@ -393,18 +436,19 @@ export function BacklogPage() {
       className: 'editable-cell',
       // La Fine pian. si ricalcola da Start pian. + Sizing (gg), in giorni
       // lavorativi (vedi addWorkingDays) - se il sizing non e' ancora
-      // impostato, la Fine pian. resta invariata.
+      // impostato, la Fine pian. resta invariata - e gli item sotto si
+      // ripianificano in cascata (vedi reschedule). Solo se la data e'
+      // davvero cambiata: uscire dal campo senza toccarlo non deve
+      // riscrivere le date degli item successivi. key sul valore come per
+      // Fine pian.: il campo va rimontato quando la cascata lo cambia.
       render: (item) => (
         <input
+          key={item.planned_start ?? ''}
           type="date"
           defaultValue={item.planned_start ?? ''}
           onBlur={(e) => {
             const planned_start = dateOrNull(e.target.value)
-            const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
-            update.mutate({
-              id: item.id,
-              data: expected_finish ? { planned_start, expected_finish } : { planned_start },
-            })
+            if (planned_start !== item.planned_start) reschedule.mutate({ item, planned_start })
           }}
         />
       ),
@@ -543,7 +587,44 @@ export function BacklogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnOrder])
 
-  const orderedColumns = columnOrder.map((key) => columns.find((c) => c.key === key)).filter((c): c is Column => !!c)
+  const allOrderedColumns = columnOrder.map((key) => columns.find((c) => c.key === key)).filter((c): c is Column => !!c)
+
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(HIDDEN_COLUMNS_STORAGE_KEY)
+      if (stored) {
+        return new Set(
+          (JSON.parse(stored) as string[]).filter(
+            (k) => defaultColumnOrder.includes(k) && !ALWAYS_VISIBLE_COLUMN_KEYS.has(k),
+          ),
+        )
+      }
+    } catch {
+      // localStorage non disponibile o dato corrotto: mostra tutte le colonne
+    }
+    return new Set()
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDDEN_COLUMNS_STORAGE_KEY, JSON.stringify([...hiddenColumns]))
+    } catch {
+      // ignora: e' solo una comodita' per-browser, non deve bloccare l'uso
+    }
+  }, [hiddenColumns])
+
+  const toggleColumn = (key: string) => {
+    setHiddenColumns((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
+  }
+
+  // Solo le colonne visibili: tutto cio' che segue (larghezze, colonne
+  // congelate, intestazioni, celle) lavora su questo elenco.
+  const orderedColumns = allOrderedColumns.filter((c) => !hiddenColumns.has(c.key))
 
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try {
@@ -746,6 +827,26 @@ export function BacklogPage() {
           >
             {cascadeSchedule.isPending ? 'Calcolo...' : '📐 Pianificazione a cascata'}
           </button>
+          <button
+            className="btn"
+            title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
+            onClick={() => designInputFileRef.current?.click()}
+            disabled={exportDesignInput.isPending}
+          >
+            {exportDesignInput.isPending ? 'Esportazione...' : '📄 Esporta Design Input'}
+          </button>
+          <input
+            ref={designInputFileRef}
+            type="file"
+            accept=".xlsx"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              // Svuotato subito: scegliere di nuovo lo stesso file deve far ripartire l'esportazione.
+              e.target.value = ''
+              if (file) exportDesignInput.mutate(file)
+            }}
+          />
           <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
             {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
           </button>
@@ -753,6 +854,9 @@ export function BacklogPage() {
       </div>
 
       {cascadeSchedule.isError && <div className="error-banner">{(cascadeSchedule.error as Error).message}</div>}
+      {reschedule.isError && (
+        <div className="error-banner">Ripianificazione non riuscita: {(reschedule.error as Error).message}</div>
+      )}
 
       <div className="stat-chips">
         <div className="stat-chip blue">
@@ -793,6 +897,17 @@ export function BacklogPage() {
         </p>
       )}
 
+      {exportDesignInput.isError && (
+        <div className="error-banner">Esportazione Design Input non riuscita: {(exportDesignInput.error as Error).message}</div>
+      )}
+      {exportDesignInput.isSuccess && (
+        <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
+          {exportDesignInput.data.added > 0
+            ? `Design Input scaricato (${exportDesignInput.data.filename}): ${exportDesignInput.data.added} story aggiunte in cima`
+            : 'Nessuna story da aggiungere al Design Input: file non scaricato'}
+          {exportDesignInput.data.skipped > 0 && ` (${exportDesignInput.data.skipped} già presenti nel documento, non duplicate)`}.
+        </div>
+      )}
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
@@ -832,6 +947,40 @@ export function BacklogPage() {
             ))}
           </div>
         )}
+
+        {view === 'table' && (
+          <div className="column-menu">
+            <button
+              className="btn"
+              aria-expanded={columnMenuOpen}
+              title="Scegli quali colonne mostrare in tabella"
+              onClick={() => setColumnMenuOpen((open) => !open)}
+            >
+              Colonne{hiddenColumns.size > 0 && ` (${hiddenColumns.size} nascoste)`} ▾
+            </button>
+            {columnMenuOpen && (
+              <>
+                <div className="column-menu-backdrop" onClick={() => setColumnMenuOpen(false)} />
+                <div className="column-menu-panel">
+                  {allOrderedColumns.map((col) => (
+                    <label key={col.key}>
+                      <input
+                        type="checkbox"
+                        checked={!hiddenColumns.has(col.key)}
+                        disabled={ALWAYS_VISIBLE_COLUMN_KEYS.has(col.key)}
+                        onChange={() => toggleColumn(col.key)}
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                  <button className="link-btn" disabled={hiddenColumns.size === 0} onClick={() => setHiddenColumns(new Set())}>
+                    Mostra tutte
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {view === 'gantt' && (
@@ -850,8 +999,10 @@ export function BacklogPage() {
       >
         <div style={{ width: tableScrollWidth }} />
       </div>
+      {/* Niente .table-wrap--scroll: la tabella si mostra per intero e in
+          verticale scorre la pagina, non un riquadro interno. */}
       <div
-        className="table-wrap table-wrap--scroll"
+        className="table-wrap"
         ref={tableWrapRef}
         onScroll={() => syncScroll(tableWrapRef, topScrollRef)}
       >

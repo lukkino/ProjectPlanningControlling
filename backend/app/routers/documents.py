@@ -1,11 +1,13 @@
 import json
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.services.design_input import EMPTY_COMPONENTS, DesignInputError, Story, add_stories
 from app.services.document_generator import (
     PPR_DOCUMENT_TYPES,
     generate_ppr_document,
@@ -134,3 +136,43 @@ def download_ppr_document(
         project, doc_type, resolved_version, resolved_text, deliverables_list
     )
     return _xlsx_response(content, filename_stem)
+
+
+@router.post("/api/projects/{project_id}/documents/design-input")
+def add_stories_to_design_input(
+    project_id: int,
+    filename: str = Query("TIH-DI-PTBSYS.xlsx"),
+    workbook: bytes = Body(..., media_type="application/octet-stream"),
+    db: Session = Depends(get_db),
+):
+    """Riceve il documento Design Input corrente (il file .xlsx cosi' com'e',
+    nel corpo della richiesta) e lo restituisce con le Story in scope del
+    backlog di questo increment aggiunte in cima al foglio "Design Input -
+    Stories". Il file non viene salvato sul server."""
+    project = _get_project_or_404(db, project_id)
+    # Dalla piu' recente (numero di issue piu' alto), come nel documento.
+    items = sorted(
+        (i for i in project.backlog_items if i.in_scope and i.issue_type == "Story"),
+        key=lambda i: int(i.jira_key.rsplit("-", 1)[-1]) if i.jira_key.rsplit("-", 1)[-1].isdigit() else 0,
+        reverse=True,
+    )
+    stories = [
+        Story(
+            key=i.jira_key,
+            title=i.summary or "",
+            description=i.description or "",
+            components=i.components or EMPTY_COMPONENTS,
+            labels=", ".join(sorted(label for label in (i.labels or "").split(";") if label)),
+        )
+        for i in items
+    ]
+    try:
+        content, added, skipped = add_stories(workbook, stories, notes=f"Increment {project.code}")
+    except DesignInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-DI-PTBSYS"
+    response = _xlsx_response(content, f"{stem} - {project.code}")
+    response.headers["X-Stories-Added"] = str(added)
+    response.headers["X-Stories-Skipped"] = str(skipped)
+    return response

@@ -22,6 +22,8 @@ export function ProjectIncrementLinkPage() {
       api.increments.update(progettoId, { project_id: projectId }),
     onSuccess: (_saved, { progettoId }) => {
       queryClient.invalidateQueries({ queryKey: ['project', project.id] })
+      // Il budget ore della Dashboard e' la somma dei progetti collegati.
+      queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
       queryClient.invalidateQueries({ queryKey: ['increment', progettoId] })
       queryClient.invalidateQueries({ queryKey: ['increments'] })
     },

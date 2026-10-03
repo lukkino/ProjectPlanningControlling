@@ -269,7 +269,9 @@ tbody tr:hover { background: var(--bg); }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 
-/* Backlog: tabella alta, l'intestazione deve restare visibile scorrendo.
+/* Tabella alta in un riquadro con scroll proprio (Complaints), dove
+   l'intestazione deve restare visibile scorrendo. Il Backlog non la usa
+   piu': si mostra per intero e scorre con la pagina.
    overflow-x:auto da solo farebbe gia' di .table-wrap il contenitore di
    scroll anche in verticale (regola CSS: se un asse non e' "visible",
    l'altro asse "visible" diventa "auto"), ma senza un'altezza massima non
@@ -304,8 +306,9 @@ tbody tr:hover { background: var(--bg); }
      il totale supera lo schermo, e' .table-wrap a farla scorrere. */
 }
 .backlog-table--fixed th {
-  /* sticky (non solo relative): resta visibile scorrendo dentro l'area
-     tabella (vedi .table-wrap--scroll, il contenitore di scroll reale). */
+  /* sticky (non solo relative): serve alle colonne congelate a sinistra
+     nello scroll orizzontale. In verticale la tabella scorre con la pagina
+     (niente .table-wrap--scroll), quindi l'intestazione non resta in vista. */
   position: sticky;
   top: 0;
   z-index: 2;
@@ -477,6 +480,32 @@ tr.phase-current input { background: #e6eefc; }
 }
 .editable-cell input:hover, .editable-cell select:hover { border-color: var(--border); }
 .editable-cell input:focus, .editable-cell select:focus { border-color: var(--primary); outline: none; background: var(--surface); }
+
+/* Backlog: menu a tendina "Colonne" con le checkbox per nascondere/mostrare
+   le colonne della tabella. Il backdrop a tutto schermo lo chiude al click
+   fuori (come la palette colori dell'editor di testo). */
+.column-menu { position: relative; margin-left: auto; }
+.column-menu-backdrop { position: fixed; inset: 0; z-index: 10; }
+.column-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 210px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.column-menu-panel label { display: flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.column-menu-panel .link-btn { align-self: flex-start; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); width: 100%; text-align: left; }
+.column-menu-panel .link-btn:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
 
 /* Complaints: gruppi di pulsanti-filtro (attivo = .btn.active) e tabella
    con intestazione fissa dentro .table-wrap--scroll. */

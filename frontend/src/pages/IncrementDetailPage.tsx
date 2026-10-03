@@ -112,8 +112,9 @@ export function IncrementDetailPage() {
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nell'Andamento sotto): le ore usate
-          vengono dall'ultimo snapshot, o dall'increment collegato se l'Andamento è ancora vuoto.
+          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nello Storico sotto): le ore usate
+          vengono dall'ultimo snapshot e restano a 0 finché lo Storico è vuoto, anche se il progetto è collegato a un
+          increment.
         </p>
       </div>
 

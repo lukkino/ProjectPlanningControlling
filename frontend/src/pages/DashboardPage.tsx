@@ -413,6 +413,17 @@ export function DashboardPage() {
           <div className="stat">
             <span className="value">{metrics?.logged_hours_total ?? 0} h</span>
             <span className="label">Ore usate</span>
+            {metrics?.percent_budget_used != null && (
+              <span
+                style={{ fontSize: 13 }}
+                title={`Budget ore: somma dei budget dei progetti collegati (${project.progetti.map((p) => p.code).join(', ')})`}
+              >
+                <strong style={metrics.percent_budget_used > 1 ? { color: 'var(--danger)' } : undefined}>
+                  {pct(metrics.percent_budget_used)}
+                </strong>{' '}
+                del budget di {metrics.budget_hours_total.toLocaleString('it-IT')} h
+              </span>
+            )}
             {metrics?.logged_hours_source === 'snapshot' && (
               <span className="muted" style={{ fontSize: 11 }}>
                 da snapshot del {formatIsoDate(metrics.last_snapshot_date)}

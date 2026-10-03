@@ -21,6 +21,8 @@ export function SnapshotsPage() {
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
   })
+  // PBI totali/completati (e quindi i rimanenti) contano solo i PBI in scope
+  // e con impatto sul code freeze, come le stat in cima al Backlog.
   const { codefreezeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
 
   const invalidate = () => {
@@ -63,6 +65,7 @@ export function SnapshotsPage() {
               <th>Ore loggate</th>
               <th>PBI totali</th>
               <th>PBI completati</th>
+              <th title="PBI totali meno PBI completati: si aggiorna da solo modificando le due colonne">PBI rimanenti</th>
               <th>Note</th>
               <th />
             </tr>
@@ -105,6 +108,7 @@ export function SnapshotsPage() {
                     onBlur={(e) => update.mutate({ id: s.id, data: { pbi_done: e.target.value ? Number(e.target.value) : null } })}
                   />
                 </td>
+                <td>{s.pbi_total == null ? <span className="muted">-</span> : s.pbi_total - (s.pbi_done ?? 0)}</td>
                 <td className="editable-cell">
                   <input
                     defaultValue={s.note ?? ''}
@@ -120,7 +124,7 @@ export function SnapshotsPage() {
             ))}
             {snapshots?.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   Nessuno snapshot registrato.
                 </td>
               </tr>

@@ -51,6 +51,30 @@ def _team_base_jql(settings: models.AppSettings | None, team: str) -> str:
     return (settings.team_sw_base_jql if settings else None) or ""
 
 
+def _split_budget_lines(
+    increment: models.Increment,
+) -> tuple[list[models.IncrementBudgetLine], list[models.IncrementBudgetLine], dict[int, models.IncrementSnapshotValue]]:
+    """Voci in ore, voci di spesa e valori dell'ultimo snapshot (per id voce)
+    dello Storico di un progetto."""
+    hours_lines = [b for b in increment.budget_lines if b.is_hours]
+    material_lines = [b for b in increment.budget_lines if not b.is_hours]
+    # increment.snapshots e' ordinato per snapshot_date crescente (vedi
+    # models.py), quindi l'ultimo elemento e' la fotografia piu' recente.
+    latest_snapshot = increment.snapshots[-1] if increment.snapshots else None
+    latest_by_line = {v.budget_line_id: v for v in latest_snapshot.values} if latest_snapshot else {}
+    return hours_lines, material_lines, latest_by_line
+
+
+def _budget_hours_total(increment: models.Increment) -> float:
+    """Budget ore di un progetto: dall'ultimo snapshot dello Storico, o il
+    budget stimato finche' lo Storico e' vuoto."""
+    hours_lines, _, latest_by_line = _split_budget_lines(increment)
+    return (
+        sum(latest_by_line[b.id].budget_value for b in hours_lines if b.id in latest_by_line)
+        or increment.estimated_budget_hours
+    )
+
+
 def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetrics:
     items = project.backlog_items
     in_scope_items = [i for i in items if i.in_scope]
@@ -92,6 +116,12 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
     # sull'intero progetto.
     dev_logged_hours_total = sum(i.logged_hours or 0 for i in items)
 
+    # L'increment non ha un budget suo: e' la somma dei budget ore dei
+    # progetti collegati (i budget si sommano verso l'increment, mentre le
+    # ore usate qui sopra restano quelle dell'increment).
+    budget_hours_total = sum(_budget_hours_total(p) or 0 for p in project.progetti)
+    percent_budget_used = (logged_hours_total / budget_hours_total) if budget_hours_total else None
+
     percent_time_elapsed = None
     spi = None
     if project.start_date and project.code_freeze_date:
@@ -109,6 +139,8 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         percent_complete=percent_complete,
         logged_hours_total=logged_hours_total,
         dev_logged_hours_total=dev_logged_hours_total,
+        budget_hours_total=budget_hours_total,
+        percent_budget_used=percent_budget_used,
         percent_time_elapsed=percent_time_elapsed,
         spi=spi,
         completion_source=completion_source,
@@ -126,34 +158,25 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     (rilascio) collegato, se assegnato - un progetto non ha un backlog Jira
     proprio.
 
-    Le ore usate si dividono tra i progetti collegati allo stesso Project
-    quando sono piu' di uno (es. principale + maintenance): Jira non sa
-    quale progetto rendicontare, quindi si preferisce la somma dei valori
-    Actual dell'ultimo snapshot sulle voci is_hours; solo se lo Storico e'
-    ancora vuoto si ricade sul totale Jira del Project collegato
-    (comportamento corretto quando il progetto e' l'unico collegato a quel
-    Project)."""
+    Le ore sono invece sempre e solo sue: le ore usate sono la somma dei
+    valori Actual dell'ultimo snapshot sulle voci is_hours (0 finche' lo
+    Storico e' vuoto), mai quelle del Project collegato - quel totale
+    appartiene agli altri progetti collegati allo stesso Project, e un
+    progetto appena collegato se le ritroverebbe addosso. Le ore dei
+    progetti si possono sommare sul Project, non il contrario. Anche le ore
+    Jira (dev_logged_hours_total) contano solo gli item di backlog
+    attribuiti a questo progetto (BacklogItem.progetto_id)."""
     project_metrics = compute_dashboard_metrics(increment.project) if increment.project else None
+    own_items = [i for i in increment.project.backlog_items if i.progetto_id == increment.id] if increment.project else []
 
-    hours_lines = [b for b in increment.budget_lines if b.is_hours]
-    material_lines = [b for b in increment.budget_lines if not b.is_hours]
+    hours_lines, material_lines, latest_by_line = _split_budget_lines(increment)
 
-    # increment.snapshots e' ordinato per snapshot_date crescente (vedi
-    # models.py), quindi l'ultimo elemento e' la fotografia piu' recente.
-    latest_snapshot = increment.snapshots[-1] if increment.snapshots else None
-    latest_by_line = {v.budget_line_id: v for v in latest_snapshot.values} if latest_snapshot else {}
-
-    budget_hours_total = sum(
-        latest_by_line[b.id].budget_value for b in hours_lines if b.id in latest_by_line
-    ) or increment.estimated_budget_hours
+    budget_hours_total = _budget_hours_total(increment)
     budget_material_total = sum(
         latest_by_line[b.id].budget_value for b in material_lines if b.id in latest_by_line
     ) or increment.estimated_budget_material
 
-    actual_hours_total = sum(latest_by_line[b.id].actual_value for b in hours_lines if b.id in latest_by_line)
-    logged_hours_total = actual_hours_total if latest_snapshot else (
-        project_metrics.logged_hours_total if project_metrics else 0.0
-    )
+    logged_hours_total = sum(latest_by_line[b.id].actual_value for b in hours_lines if b.id in latest_by_line)
 
     actual_material_total = sum(latest_by_line[b.id].actual_value for b in material_lines if b.id in latest_by_line)
 
@@ -177,7 +200,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         budget_material_total=budget_material_total,
         logged_hours_total=logged_hours_total,
         actual_material_total=actual_material_total,
-        dev_logged_hours_total=project_metrics.dev_logged_hours_total if project_metrics else 0.0,
+        dev_logged_hours_total=sum(i.logged_hours or 0 for i in own_items),
         percent_budget_used=(logged_hours_total / budget_hours_total) if budget_hours_total else 0.0,
         percent_material_used=(actual_material_total / budget_material_total) if budget_material_total else 0.0,
         budget_lines=list(increment.budget_lines),

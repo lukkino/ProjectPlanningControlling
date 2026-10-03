@@ -187,6 +187,32 @@ export const api = {
     remove: (id: number) => del(`/forecasting/${id}`),
   },
   documents: {
+    // Invia il documento Design Input corrente (il file .xlsx cosi' com'e',
+    // come corpo binario) e riceve lo stesso file con le Story dell'increment
+    // aggiunte: quante ne sono state aggiunte/saltate arriva negli header.
+    designInput: async (projectId: number, file: File) => {
+      const response = await fetch(
+        `/api/projects/${projectId}/documents/design-input?${new URLSearchParams({ filename: file.name })}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file },
+      )
+      if (!response.ok) {
+        let detail = response.statusText
+        try {
+          const body = await response.json()
+          detail = body.detail ?? detail
+        } catch {
+          // ignore, keep statusText
+        }
+        throw new Error(detail)
+      }
+      const match = (response.headers.get('Content-Disposition') ?? '').match(/filename="?([^"]+)"?/)
+      return {
+        blob: await response.blob(),
+        filename: match ? match[1] : file.name,
+        added: Number(response.headers.get('X-Stories-Added') ?? 0),
+        skipped: Number(response.headers.get('X-Stories-Skipped') ?? 0),
+      }
+    },
     regressionAnalysisMeta: (projectId: number) =>
       request<DocumentRevisionMeta>(`/projects/${projectId}/documents/regression-analysis/meta`),
     regressionAnalysis: (projectId: number, version: number, revisionText: string) =>

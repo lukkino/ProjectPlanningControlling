@@ -381,9 +381,10 @@ class IncrementDetail(Increment):
     """budget_hours_total/logged_hours_total sommano solo le voci di budget
     con is_hours=True (l'Andamento puo' contenere anche voci non-ore, es.
     "Travels"); budget_material_total somma le altre. Le ore usate vengono
-    dall'ultimo IncrementSnapshot, o dal Project (rilascio) collegato se
-    l'Andamento e' ancora vuoto - il progetto non ha un proprio backlog
-    Jira, quindi backlog/% completamento restano presi pari pari da li'."""
+    solo dall'ultimo IncrementSnapshot (0 se l'Andamento e' ancora vuoto),
+    mai dal Project (rilascio) collegato. Il progetto non ha un proprio
+    backlog Jira, quindi backlog/% completamento restano invece presi pari
+    pari da li'."""
 
     project: ProjectListItem | None = None
     backlog_total: int = 0
@@ -436,6 +437,10 @@ class DashboardMetrics(BaseModel):
     percent_complete: float
     logged_hours_total: float
     dev_logged_hours_total: float
+    # Somma dei budget ore dei progetti collegati all'increment (0 se non ce
+    # ne sono) e quota gia' consumata da logged_hours_total (None senza budget).
+    budget_hours_total: float = 0.0
+    percent_budget_used: float | None = None
     percent_time_elapsed: float | None
     spi: float | None
     completion_source: str

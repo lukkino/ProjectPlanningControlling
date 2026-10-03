@@ -212,6 +212,10 @@ export type DashboardMetrics = {
   percent_complete: number
   logged_hours_total: number
   dev_logged_hours_total: number
+  // Somma dei budget ore dei progetti collegati (0 se non ce ne sono) e
+  // quota gia' consumata dalle ore usate (null senza budget).
+  budget_hours_total: number
+  percent_budget_used: number | null
   percent_time_elapsed: number | null
   spi: number | null
   completion_source: 'backlog' | 'snapshot'
