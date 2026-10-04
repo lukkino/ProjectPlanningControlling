@@ -21,7 +21,13 @@ from io import BytesIO
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData, XyChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_MARKER_STYLE, XL_TICK_LABEL_POSITION
+from pptx.enum.chart import (
+    XL_CHART_TYPE,
+    XL_LABEL_POSITION,
+    XL_LEGEND_POSITION,
+    XL_MARKER_STYLE,
+    XL_TICK_LABEL_POSITION,
+)
 from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
@@ -619,7 +625,14 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
         (i for i in project.backlog_items if i.in_scope and i.status == "In Progress"),
         key=lambda i: i.priority_order,
     )
-    # (titolo della sezione, intestazione della colonna data, righe, testo se vuota)
+    # E quelle ancora da iniziare (stato To Do) che contano per il code
+    # freeze: in scope e con impatto sul code freeze, come i PBI totali del
+    # Backlog.
+    to_do = sorted(
+        (i for i in project.backlog_items if i.in_scope and i.included_in_codefreeze and i.status == "To Do"),
+        key=lambda i: i.priority_order,
+    )
+    # (titolo della sezione, intestazione dell'ultima colonna, righe, testo se vuota)
     sections = [
         (
             f"Chiuse {_period_title(days)} ({len(closed)})",
@@ -633,15 +646,21 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
             [[i.jira_key, i.issue_type or "-", i.summary or "-", _date(i.actual_start)] for i in in_progress],
             "Nessuna issue in scope in progress.",
         ),
+        (
+            f"Da fare ({len(to_do)})",
+            "Stato Jira",
+            [[i.jira_key, i.issue_type or "-", i.summary or "-", i.jira_status or "To Do"] for i in to_do],
+            "Nessuna issue in scope ancora da iniziare.",
+        ),
     ]
 
-    title = "Issue chiuse e in progress"
+    title = "Issue chiuse, in progress e da fare"
     heading_height = Inches(0.4)
     header_height = Inches(0.36)
 
     def row_height(row: list[str]) -> int:
         # Le Summary lunghe vanno a capo e alzano la riga.
-        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 85), 4)
+        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 95), 4)
 
     slide, box = deck.add_slide(title)
     slides = [slide]
@@ -800,25 +819,52 @@ def _completion_slide(deck: _Deck, project: models.Project) -> None:
     # code freeze e la linea ideale dallo 0% all'inizio al 100% al code freeze.
     start, freeze = project.start_date, project.code_freeze_date
     has_plan = start is not None and freeze is not None and freeze > start
+    points = [
+        (s.snapshot_date, round((s.pbi_done or 0) / s.pbi_total * 100)) for s in snapshots if s.pbi_total
+    ]
+    # Ultimo rilevamento dell'Andamento: il completamento reale e, sulla
+    # linea ideale, dove dovremmo essere quel giorno.
+    last_day, last_actual = points[-1] if points else (None, None)
+    last_ideal = None
+    if has_plan and last_day is not None:
+        last_ideal = round(min(max((last_day - start).days / (freeze - start).days, 0), 1) * 100)
+
     chart_data = XyChartData()
     days = [s.snapshot_date for s in snapshots]
     completion = chart_data.add_series("Completamento")
-    for snapshot in snapshots:
-        if snapshot.pbi_total:
-            completion.add_data_point(
-                _date_serial(snapshot.snapshot_date), round((snapshot.pbi_done or 0) / snapshot.pbi_total * 100)
-            )
+    for day, percent in points:
+        completion.add_data_point(_date_serial(day), percent)
     if has_plan:
         days += [start, freeze]
         ideal = chart_data.add_series("Ideale")
         ideal.add_data_point(_date_serial(start), 0)
+        # Punto in piu' sulla linea ideale (resta una retta), per poterci
+        # scrivere il valore nel giorno dell'ultimo rilevamento.
+        if last_ideal is not None and start < last_day < freeze:
+            ideal.add_data_point(_date_serial(last_day), last_ideal)
         ideal.add_data_point(_date_serial(freeze), 100)
         deadline = chart_data.add_series(f"Code freeze {_date(freeze)}")
         deadline.add_data_point(_date_serial(freeze), 0)
         deadline.add_data_point(_date_serial(freeze), 100)
 
+    summary_height = 0
+    if last_day is not None:
+        summary = f"Ultimo rilevamento ({_date(last_day)}): completamento reale {last_actual}%"
+        if last_ideal is not None:
+            gap = last_actual - last_ideal
+            summary += f", ideale {last_ideal}% - " + (
+                f"{abs(gap)} punti {'sotto' if gap < 0 else 'sopra'} l'ideale" if gap else "in linea con l'ideale"
+            )
+        summary_height = Inches(0.45)
+        _text(slide, _Box(box.left, box.top, box.width, summary_height), summary + ".", size=14)
+
     chart = slide.shapes.add_chart(
-        XL_CHART_TYPE.XY_SCATTER_LINES, box.left, box.top, box.width, box.height, chart_data
+        XL_CHART_TYPE.XY_SCATTER_LINES,
+        box.left,
+        box.top + summary_height,
+        box.width,
+        box.height - summary_height,
+        chart_data,
     ).chart
     _date_x_axis(chart, days)
     _style_chart(chart)
@@ -836,6 +882,31 @@ def _completion_slide(deck: _Deck, project: models.Project) -> None:
         series.format.line.color.rgb = color
         series.format.line.dash_style = MSO_LINE_DASH_STYLE.DASH
         series.marker.style = XL_MARKER_STYLE.NONE
+
+    # I due valori dell'ultimo rilevamento scritti sul grafico: quello piu'
+    # alto sopra il suo punto, l'altro sotto, cosi' non si sovrappongono.
+    def label(point, text: str, color: RGBColor, position) -> None:
+        data_label = point.data_label
+        data_label.position = position
+        _run(data_label.text_frame.paragraphs[0], text, size=12, bold=True, color=color)
+
+    if last_day is not None:
+        actual_above = last_ideal is None or last_actual >= last_ideal
+        label(
+            plot_series[0].points[len(points) - 1],
+            f"Reale {last_actual}%",
+            COLOR_TEXT,
+            XL_LABEL_POSITION.ABOVE if actual_above else XL_LABEL_POSITION.BELOW,
+        )
+        if last_ideal is not None and start < last_day < freeze:
+            # Di lato e non sopra/sotto: la linea ideale sale verso destra,
+            # un'etichetta centrata sul punto ci finirebbe sopra.
+            label(
+                plot_series[1].points[1],
+                f"Ideale {last_ideal}%",
+                COLOR_MUTED,
+                XL_LABEL_POSITION.RIGHT if actual_above else XL_LABEL_POSITION.LEFT,
+            )
 
 
 def _plan_vs_actual_slides(
