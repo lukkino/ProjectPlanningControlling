@@ -229,7 +229,7 @@ function planVsActualPoints(
     })
 }
 
-// Periodi selezionabili nella card delle issue chiuse: finestre mobili
+// Periodi selezionabili nella card delle issue (sezione delle chiuse): finestre mobili
 // all'indietro da oggi, non settimana/mese di calendario.
 const RECENTLY_CLOSED_PERIODS = [
   { days: 7, label: 'Ultima settimana', title: "nell'ultima settimana" },
@@ -262,6 +262,14 @@ function RecentlyClosedCard({
   setPeriod: (period: RecentlyClosedPeriod) => void
 }) {
   const closed = recentlyClosedItems(items, period.days)
+  // Sotto le chiuse, come nella presentazione: le issue in scope in
+  // lavorazione ora e quelle ancora da iniziare che contano per il code
+  // freeze (in scope e con impatto sul code freeze), nell'ordine del Backlog.
+  const byBacklogOrder = (a: BacklogItem, b: BacklogItem) => a.priority_order - b.priority_order
+  const inProgress = (items ?? []).filter((i) => i.in_scope && i.status === 'In Progress').sort(byBacklogOrder)
+  const toDo = (items ?? [])
+    .filter((i) => i.in_scope && i.included_in_codefreeze && i.status === 'To Do')
+    .sort(byBacklogOrder)
   return (
     <div className="card">
       <div
@@ -291,38 +299,77 @@ function RecentlyClosedCard({
           ))}
         </div>
       </div>
-      {closed.length === 0 ? (
-        <p className="muted" style={{ margin: 0 }}>
-          Nessuna issue in scope chiusa negli ultimi {period.days} giorni.
-        </p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Tipo</th>
-                <th>Summary</th>
-                <th>Chiusa il</th>
-              </tr>
-            </thead>
-            <tbody>
-              {closed.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
-                      {item.jira_key}
-                    </a>
-                  </td>
-                  <td>{item.issue_type ?? <span className="muted">-</span>}</td>
-                  <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
-                  <td>{formatIsoDate(item.actual_finish)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <IssueTable
+        items={closed}
+        lastHeader="Chiusa il"
+        lastValue={(item) => formatIsoDate(item.actual_finish)}
+        emptyMessage={`Nessuna issue in scope chiusa negli ultimi ${period.days} giorni.`}
+      />
+      <h4 style={{ margin: '20px 0 12px' }}>In progress ({inProgress.length})</h4>
+      <IssueTable
+        items={inProgress}
+        lastHeader="Iniziata il"
+        lastValue={(item) => formatIsoDate(item.actual_start)}
+        emptyMessage="Nessuna issue in scope in progress."
+      />
+      <h4 style={{ margin: '20px 0 12px' }}>Da fare ({toDo.length})</h4>
+      <IssueTable
+        items={toDo}
+        lastHeader="Stato Jira"
+        lastValue={(item) => item.jira_status ?? 'To Do'}
+        emptyMessage="Nessuna issue in scope ancora da iniziare."
+      />
+    </div>
+  )
+}
+
+// Tabella di issue della card qui sopra: le tre sezioni (chiuse, in progress,
+// da fare) cambiano solo nell'ultima colonna. Larghezze fisse sulle colonne
+// strette, cosi' le tre tabelle restano allineate tra loro.
+function IssueTable({
+  items,
+  lastHeader,
+  lastValue,
+  emptyMessage,
+}: {
+  items: BacklogItem[]
+  lastHeader: string
+  lastValue: (item: BacklogItem) => string
+  emptyMessage: string
+}) {
+  if (items.length === 0) {
+    return (
+      <p className="muted" style={{ margin: 0 }}>
+        {emptyMessage}
+      </p>
+    )
+  }
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 120 }}>ID</th>
+            <th style={{ width: 120 }}>Tipo</th>
+            <th>Summary</th>
+            <th style={{ width: 150 }}>{lastHeader}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>
+                <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
+                  {item.jira_key}
+                </a>
+              </td>
+              <td>{item.issue_type ?? <span className="muted">-</span>}</td>
+              <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
+              <td>{lastValue(item)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
