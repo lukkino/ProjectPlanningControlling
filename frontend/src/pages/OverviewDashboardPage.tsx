@@ -1,5 +1,5 @@
-import { createContext, useContext, useState } from 'react'
-import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { useIsFetching, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Bar,
@@ -28,6 +28,7 @@ import type {
   DashboardSnapshotTeamData,
   OverviewMetrics,
   OverviewPeriod,
+  Phase,
   Project,
   Team,
 } from '../api/types'
@@ -98,7 +99,127 @@ function buildMonthTicks(minEpoch: number, maxEpoch: number): { epoch: number; l
   return ticks
 }
 
-type Row = { project: Project; startEpoch: number | null; endEpoch: number | null }
+// Fasi increment sotto la barra: due corsie, date pianificate e date
+// effettive, con gli stessi colori del grafico della card Fasi increment
+// (blu pianificata, arancio effettiva).
+const COLOR_PHASE_PLANNED = '#2a78d6'
+const COLOR_PHASE_ACTUAL = '#eb6834'
+const PHASE_LANE_HEIGHT = 18
+// Spazio tra la barra e le corsie: ci stanno le date di inizio/fine.
+const PHASE_LANES_MARGIN_TOP = 24
+// Larghezza media stimata di un carattere dell'etichetta (11px), per capire
+// quali etichette si accavallerebbero.
+const PHASE_LABEL_CHAR_WIDTH = 6.5
+const PHASE_LABEL_OFFSET = 10
+// Larghezza dell'area delle barre prima che sia stata misurata: quella
+// minima del Gantt.
+const FALLBACK_TRACK_WIDTH = 500
+
+type PhaseMark = { id: number; name: string; epoch: number; date: string; title: string }
+type PlacedPhaseMark = PhaseMark & { level: number; flipped: boolean }
+type PhaseLaneLayout = { marks: PlacedPhaseMark[]; levels: number }
+
+// Le fasi che hanno la data richiesta (pianificata o effettiva), nell'ordine
+// delle fasi. Il tooltip riporta sempre entrambe le date, per confrontarle.
+function phaseMarks(phases: Phase[], field: 'planned_date' | 'actual_date'): PhaseMark[] {
+  return phases.flatMap((phase) => {
+    const epoch = dateStrToEpochDays(phase[field])
+    if (epoch === null) return []
+    const title = `${phase.name}: pianificata ${formatIsoDate(phase.planned_date) ?? '—'}, effettiva ${formatIsoDate(phase.actual_date) ?? '—'}`
+    return [{ id: phase.id, name: phase.name, epoch, date: formatEpochDaysAsDate(epoch), title }]
+  })
+}
+
+// Dispone le etichette di una corsia su piu' righe quando fasi ravvicinate
+// si accavallerebbero: ognuna va sulla prima riga in cui c'e' posto.
+// L'etichetta sta a destra del segnalino, a sinistra se uscirebbe dal bordo.
+function layoutPhaseMarks(marks: PhaseMark[], xOf: (epoch: number) => number, maxRight: number): PhaseLaneLayout {
+  const taken: [number, number][][] = []
+  const placed = [...marks]
+    .sort((a, b) => a.epoch - b.epoch)
+    .map((mark) => {
+      const x = xOf(mark.epoch)
+      const textWidth = `${mark.name} ${mark.date}`.length * PHASE_LABEL_CHAR_WIDTH
+      const flipped = x + PHASE_LABEL_OFFSET + textWidth > maxRight && x - PHASE_LABEL_OFFSET - textWidth >= 0
+      const left = flipped ? x - PHASE_LABEL_OFFSET - textWidth : x - 6
+      const right = flipped ? x + 6 : x + PHASE_LABEL_OFFSET + textWidth
+      let level = taken.findIndex((intervals) => intervals.every(([l, r]) => right + 8 <= l || left >= r + 8))
+      if (level === -1) level = taken.push([]) - 1
+      taken[level].push([left, right])
+      return { ...mark, level, flipped }
+    })
+  return { marks: placed, levels: taken.length }
+}
+
+// Segnalino di una fase: rombo vuoto per la data pianificata, pieno per
+// quella effettiva (distinguibili anche senza il colore).
+function PhaseDiamond({ color, filled }: { color: string; filled: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        boxSizing: 'border-box',
+        transform: 'rotate(45deg)',
+        background: filled ? color : 'var(--surface)',
+        border: `2px solid ${color}`,
+      }}
+    />
+  )
+}
+
+function PhaseLane({
+  layout,
+  color,
+  filled,
+  pct,
+}: {
+  layout: PhaseLaneLayout
+  color: string
+  filled: boolean
+  pct: (epoch: number) => number
+}) {
+  return (
+    <div style={{ position: 'relative', height: layout.levels * PHASE_LANE_HEIGHT }}>
+      {layout.marks.map((mark) => (
+        <div
+          key={mark.id}
+          title={mark.title}
+          style={{
+            position: 'absolute',
+            left: `${pct(mark.epoch)}%`,
+            top: mark.level * PHASE_LANE_HEIGHT,
+            height: PHASE_LANE_HEIGHT,
+          }}
+        >
+          <span style={{ position: 'absolute', left: -4, top: (PHASE_LANE_HEIGHT - 8) / 2, lineHeight: 0 }}>
+            <PhaseDiamond color={color} filled={filled} />
+          </span>
+          <span
+            style={{
+              position: 'absolute',
+              ...(mark.flipped ? { right: PHASE_LABEL_OFFSET } : { left: PHASE_LABEL_OFFSET }),
+              lineHeight: `${PHASE_LANE_HEIGHT}px`,
+              fontSize: 11,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {mark.name} <span className="muted">{mark.date}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+type Row = {
+  project: Project
+  startEpoch: number | null
+  endEpoch: number | null
+  plannedPhases: PhaseMark[]
+  actualPhases: PhaseMark[]
+}
 
 // Ordinamento delle righe del Gantt increment: un criterio (o l'ordine
 // manuale, salvato nel database per tutti) piu' la direzione. La scelta del
@@ -1092,6 +1213,27 @@ export function OverviewDashboardPage() {
     onError: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   })
 
+  // Fasi di ogni increment: stessa query (e cache) della card Fasi increment.
+  const phaseQueries = useQueries({
+    queries: (projects ?? []).map((p) => ({
+      queryKey: ['phases', p.id],
+      queryFn: () => api.phases.list(p.id),
+    })),
+  })
+
+  // Larghezza in pixel dell'area delle barre, misurata sull'header dei mesi:
+  // serve a disporre le etichette delle fasi senza accavallarle.
+  const [trackWidth, setTrackWidth] = useState(0)
+  const trackObserver = useRef<ResizeObserver | null>(null)
+  const trackRef = useCallback((el: HTMLDivElement | null) => {
+    trackObserver.current?.disconnect()
+    trackObserver.current = null
+    if (el) {
+      trackObserver.current = new ResizeObserver(([entry]) => setTrackWidth(entry.contentRect.width))
+      trackObserver.current.observe(el)
+    }
+  }, [])
+
   const jiraSection = (
     <>
       <SnapshotPanel selectedId={snapshotId} onSelect={selectSnapshot} />
@@ -1101,13 +1243,22 @@ export function OverviewDashboardPage() {
 
   if (!projects) return <p className="muted">Caricamento...</p>
 
-  const rows: Row[] = projects.map((project) => ({
-    project,
-    startEpoch: dateStrToEpochDays(project.start_date),
-    endEpoch: dateStrToEpochDays(project.planned_finish_date),
-  }))
+  const rows: Row[] = projects.map((project, index) => {
+    const phases = phaseQueries[index]?.data ?? []
+    return {
+      project,
+      startEpoch: dateStrToEpochDays(project.start_date),
+      endEpoch: dateStrToEpochDays(project.planned_finish_date),
+      plannedPhases: phaseMarks(phases, 'planned_date'),
+      actualPhases: phaseMarks(phases, 'actual_date'),
+    }
+  })
 
-  const allEpochs = rows.flatMap((r) => [r.startEpoch, r.endEpoch]).filter((e): e is number => e !== null)
+  // Anche le date delle fasi allargano l'asse: una fase puo' cadere prima
+  // dell'inizio o dopo il Planned finish dell'increment.
+  const allEpochs = rows
+    .flatMap((r) => [r.startEpoch, r.endEpoch, ...[...r.plannedPhases, ...r.actualPhases].map((m) => m.epoch)])
+    .filter((e): e is number => e !== null)
 
   if (allEpochs.length === 0) {
     return (
@@ -1115,7 +1266,8 @@ export function OverviewDashboardPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
           <p className="muted">
-            Nessuna data di inizio/fine impostata su nessun increment: non c'e' ancora niente da mostrare nel Gantt.
+            Nessuna data di inizio/fine o di fase impostata su nessun increment: non c'e' ancora niente da mostrare
+            nel Gantt.
           </p>
         </div>
 
@@ -1128,6 +1280,11 @@ export function OverviewDashboardPage() {
   const domainMax = Math.max(...allEpochs) + 4
   const span = Math.max(1, domainMax - domainMin)
   const pct = (epoch: number) => ((epoch - domainMin) / span) * 100
+  // Posizione in pixel nell'area delle barre; le etichette delle fasi possono
+  // sporgere a destra nel margine lasciato dopo l'ultima data.
+  const layoutWidth = trackWidth || FALLBACK_TRACK_WIDTH
+  const xOf = (epoch: number) => (pct(epoch) / 100) * layoutWidth
+  const maxLabelRight = layoutWidth + 40
 
   const monthTicks = buildMonthTicks(domainMin, domainMax)
   const todayEpoch = toEpochDays(new Date())
@@ -1151,9 +1308,10 @@ export function OverviewDashboardPage() {
         <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
           Panoramica di tutti gli increment: una barra per increment, da Inizio a Planned finish. Quelli "in corso"
-          sono evidenziati. La linea rossa tratteggiata indica la data odierna.
+          sono evidenziati. Sotto ogni barra le fasi dell'increment, col nome: su una corsia le date pianificate,
+          sull'altra quelle effettive. La linea rossa tratteggiata indica la data odierna.
         </p>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12 }}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 14, height: 14, borderRadius: 3, background: COLOR_INACTIVE, display: 'inline-block' }} />
             Increment
@@ -1170,6 +1328,14 @@ export function OverviewDashboardPage() {
               }}
             />
             In corso
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <PhaseDiamond color={COLOR_PHASE_PLANNED} filled={false} />
+            Fase: data pianificata
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <PhaseDiamond color={COLOR_PHASE_ACTUAL} filled />
+            Fase: data effettiva
           </span>
         </div>
       </div>
@@ -1211,7 +1377,7 @@ export function OverviewDashboardPage() {
             {/* Header: tick dei mesi, allineato con le barre sotto */}
             <div style={{ display: 'grid', gridTemplateColumns: `${ROW_LABEL_WIDTH}px 1fr`, gap: 12 }}>
               <div />
-              <div style={{ position: 'relative', height: 22 }}>
+              <div ref={trackRef} style={{ position: 'relative', height: 22 }}>
                 {monthTicks.map((t) => (
                   <span
                     key={t.epoch}
@@ -1232,19 +1398,29 @@ export function OverviewDashboardPage() {
               </div>
             </div>
 
-            {sortedRows.map(({ project, startEpoch, endEpoch }, index) => (
+            {sortedRows.map(({ project, startEpoch, endEpoch, plannedPhases, actualPhases }, index) => {
+              // Corsie delle fasi sotto la barra: prima le pianificate, poi
+              // le effettive; a sinistra l'intestazione di ciascuna.
+              const phaseLanes = [
+                { caption: 'Fasi pianificate', color: COLOR_PHASE_PLANNED, filled: false, marks: plannedPhases },
+                { caption: 'Fasi effettive', color: COLOR_PHASE_ACTUAL, filled: true, marks: actualPhases },
+              ]
+                .filter((lane) => lane.marks.length > 0)
+                .map((lane) => ({ ...lane, layout: layoutPhaseMarks(lane.marks, xOf, maxLabelRight) }))
+              return (
               <div
                 key={project.id}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: `${ROW_LABEL_WIDTH}px 1fr`,
                   gap: 12,
-                  alignItems: 'center',
-                  padding: '20px 0 24px',
+                  alignItems: 'start',
+                  padding: phaseLanes.length > 0 ? '20px 0 12px' : '20px 0 24px',
                   borderTop: '1px solid var(--border)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, minHeight: BAR_HEIGHT }}>
                   {isManual && (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <button
@@ -1278,7 +1454,28 @@ export function OverviewDashboardPage() {
                     </div>
                   </Link>
                 </div>
+                {phaseLanes.length > 0 && (
+                  <div style={{ marginTop: PHASE_LANES_MARGIN_TOP }}>
+                    {phaseLanes.map((lane) => (
+                      <div
+                        key={lane.caption}
+                        className="muted"
+                        style={{
+                          height: lane.layout.levels * PHASE_LANE_HEIGHT,
+                          lineHeight: `${PHASE_LANE_HEIGHT}px`,
+                          fontSize: 11,
+                          textAlign: 'right',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {lane.caption}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </div>
 
+                <div style={{ minWidth: 0 }}>
                 <div style={{ position: 'relative', height: BAR_HEIGHT }}>
                   {/* Griglia mensile di sfondo, per confrontare le righe */}
                   {monthTicks.map((t) => (
@@ -1384,8 +1581,17 @@ export function OverviewDashboardPage() {
                     </span>
                   )}
                 </div>
+                {phaseLanes.length > 0 && (
+                  <div style={{ marginTop: PHASE_LANES_MARGIN_TOP }}>
+                    {phaseLanes.map((lane) => (
+                      <PhaseLane key={lane.caption} layout={lane.layout} color={lane.color} filled={lane.filled} pct={pct} />
+                    ))}
+                  </div>
+                )}
+                </div>
               </div>
-            ))}
+              )
+            })}
 
             {sortedRows.length === 0 && <p className="muted">Nessun increment creato ancora.</p>}
           </div>
