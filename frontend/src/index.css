@@ -291,6 +291,16 @@ tbody tr:hover { background: var(--bg); }
 }
 .forecast-table td input,
 .forecast-table td textarea { width: 100%; }
+.forecast-table td,
+.forecast-table td input,
+.forecast-table td textarea { text-align: center; }
+/* Completion Likelihood: il campo si stringe sul numero, cosi' la coppia
+   "numero %" resta unita e centrata nella cella. */
+.forecast-table td .pct-cell { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.forecast-table td .pct-cell input { width: 7ch; text-align: right; }
+@supports (field-sizing: content) {
+  .forecast-table td .pct-cell input { width: auto; min-width: 2ch; field-sizing: content; }
+}
 
 .backlog-table th,
 .backlog-table td { text-align: center; }

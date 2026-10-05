@@ -243,12 +243,17 @@ export function ForecastingPage() {
                   />
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="number"
-                    step="0.01"
-                    defaultValue={sim.completion_likelihood ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { completion_likelihood: num(e.target.value) } })}
-                  />
+                  <div className="pct-cell">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={100}
+                      defaultValue={sim.completion_likelihood ?? ''}
+                      onBlur={(e) => update.mutate({ id: sim.id, data: { completion_likelihood: num(e.target.value) } })}
+                    />
+                    <span>%</span>
+                  </div>
                 </td>
                 <td className="editable-cell">
                   <input
