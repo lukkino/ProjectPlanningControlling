@@ -15,6 +15,8 @@ const JIRA_STATUS_ORDER = ['To Do', 'Analysis', 'Confirmed', 'In Progress', 'On 
 // Ordinamento per Severity: dalla piu' grave. Valori non previsti qui
 // vengono dopo quelli noti.
 const SEVERITY_ORDER = ['High', 'Medium', 'Low']
+// Voce del filtro Severity per i complaint che non ce l'hanno.
+const NO_SEVERITY = 'N/D'
 const severityRank = (c: Complaint) => {
   const index = SEVERITY_ORDER.indexOf(c.severity ?? '')
   return index === -1 ? SEVERITY_ORDER.length : index
@@ -36,7 +38,10 @@ type FilterGroupProps = {
 }
 
 // Gruppo di pulsanti-filtro: piu' valori attivi nello stesso gruppo si
-// sommano (OR), nessuno attivo = nessun filtro su quel gruppo.
+// sommano (OR). Architettura e Severity partono senza nessun valore attivo
+// (= nessun filtro) e si accende cio' che si vuole vedere; i due gruppi di
+// stato funzionano al contrario: tutti attivi all'inizio, e si spegne cio'
+// che si vuole nascondere.
 function FilterGroup({ label, options, counts, selected, onToggle }: FilterGroupProps) {
   return (
     <div className="filter-group">
@@ -109,8 +114,10 @@ export function ComplaintsPage() {
   const { data: complaints, isLoading } = useQuery({ queryKey: ['complaints'], queryFn: api.complaints.list })
 
   const [architectureFilter, setArchitectureFilter] = useState<Set<string>>(new Set())
-  const [salesforceFilter, setSalesforceFilter] = useState<Set<string>>(new Set())
-  const [jiraFilter, setJiraFilter] = useState<Set<string>>(new Set())
+  // Stati nascosti (pulsante spento): vuoto = si vedono tutti.
+  const [salesforceHidden, setSalesforceHidden] = useState<Set<string>>(new Set())
+  const [jiraHidden, setJiraHidden] = useState<Set<string>>(new Set())
+  const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
   // Clic sull'intestazione: inverte il verso se la tabella e' gia' ordinata
   // su quella colonna, altrimenti ordina su quella (dal piu' nuovo / dalla
@@ -130,6 +137,7 @@ export function ComplaintsPage() {
   const architectureCounts = countBy(all, architecturesOf)
   const salesforceCounts = countBy(all, (c) => [c.salesforce_status])
   const jiraCounts = countBy(all, (c) => [c.jira_status ?? ''])
+  const severityCounts = countBy(all, (c) => [c.severity ?? NO_SEVERITY])
 
   const architectureOptions = architectureCounts.has(NO_ARCHITECTURE) ? [...ARCHITECTURES, NO_ARCHITECTURE] : ARCHITECTURES
   const jiraOptions = [...jiraCounts.keys()]
@@ -139,6 +147,14 @@ export function ComplaintsPage() {
       const ib = JIRA_STATUS_ORDER.indexOf(b)
       return (ia === -1 ? JIRA_STATUS_ORDER.length : ia) - (ib === -1 ? JIRA_STATUS_ORDER.length : ib) || a.localeCompare(b)
     })
+
+  // Dalla piu' grave; eventuali valori non previsti dopo quelli noti e N/D,
+  // se serve, per ultimo.
+  const severityOptions = [
+    ...SEVERITY_ORDER,
+    ...[...severityCounts.keys()].filter((s) => !SEVERITY_ORDER.includes(s) && s !== NO_SEVERITY).sort(),
+    ...(severityCounts.has(NO_SEVERITY) ? [NO_SEVERITY] : []),
+  ]
 
   // Ordinamento per data di creazione Jira (stringhe ISO yyyy-mm-dd,
   // confrontabili direttamente); a parita' di data per numero di issue, nello
@@ -151,8 +167,9 @@ export function ComplaintsPage() {
     .filter(
       (c) =>
         (architectureFilter.size === 0 || architecturesOf(c).some((a) => architectureFilter.has(a))) &&
-        (salesforceFilter.size === 0 || salesforceFilter.has(c.salesforce_status)) &&
-        (jiraFilter.size === 0 || jiraFilter.has(c.jira_status ?? '')),
+        !salesforceHidden.has(c.salesforce_status) &&
+        !jiraHidden.has(c.jira_status ?? '') &&
+        (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)),
     )
     .sort((a, b) => {
       if (sort.key === 'severity' && a.severity !== b.severity) {
@@ -165,11 +182,12 @@ export function ComplaintsPage() {
         (a.jira_created.localeCompare(b.jira_created) || a.jira_key.localeCompare(b.jira_key, undefined, { numeric: true }))
       )
     })
-  const filtersActive = architectureFilter.size + salesforceFilter.size + jiraFilter.size > 0
+  const filtersActive = architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size > 0
   const clearFilters = () => {
     setArchitectureFilter(new Set())
-    setSalesforceFilter(new Set())
-    setJiraFilter(new Set())
+    setSalesforceHidden(new Set())
+    setJiraHidden(new Set())
+    setSeverityFilter(new Set())
   }
 
   return (
@@ -191,15 +209,22 @@ export function ComplaintsPage() {
             label="Stato Salesforce"
             options={SALESFORCE_STATUSES}
             counts={salesforceCounts}
-            selected={salesforceFilter}
-            onToggle={(v) => setSalesforceFilter((s) => toggled(s, v))}
+            selected={new Set(SALESFORCE_STATUSES.filter((s) => !salesforceHidden.has(s)))}
+            onToggle={(v) => setSalesforceHidden((s) => toggled(s, v))}
           />
           <FilterGroup
             label="Stato Jira"
             options={jiraOptions}
             counts={jiraCounts}
-            selected={jiraFilter}
-            onToggle={(v) => setJiraFilter((s) => toggled(s, v))}
+            selected={new Set(jiraOptions.filter((s) => !jiraHidden.has(s)))}
+            onToggle={(v) => setJiraHidden((s) => toggled(s, v))}
+          />
+          <FilterGroup
+            label="Severity"
+            options={severityOptions}
+            counts={severityCounts}
+            selected={severityFilter}
+            onToggle={(v) => setSeverityFilter((s) => toggled(s, v))}
           />
         </div>
 
