@@ -1,0 +1,52 @@
+nellavviaProposta: Increment sopra Project (non ancora implementata)
+============================================================
+
+Ruolo dei due livelli:
+
+- Increment = "cosa esce e quando": codice (es. PTBSYS-03-004), contenuto
+  (l'insieme degli item Jira che stanno per essere rilasciati, unione dei
+  backlog dei progetti collegati), data di rilascio. Nessun dato contabile
+  proprio (niente budget/ore inseriti a mano sull'Increment: sono sempre
+  calcolati sommando i progetti collegati, per non andare fuori sync).
+
+- Project (uno o piu' sotto lo stesso Increment) = "chi/dove si
+  rendiconta": budget, ore, spese - resta l'unita' di sync Jira e di
+  reporting, esattamente come oggi. Le ore restano sempre rendicontate sul
+  singolo progetto (es. PTIH-PTB4 o PTIH-MA26), mai sull'Increment
+  direttamente.
+
+Modello dati:
+
+- Nuova entita' Increment: code, name/label opzionale, release date.
+- Project riceve un campo increment_id (FK a Increment, nullable).
+  Relazione: 1 Increment -> N Project, ogni Project appartiene al massimo
+  a 1 Increment (i progetti come MA26 sono dedicati a un solo increment,
+  non condivisi tra piu' increment nel tempo - confermato dall'utente).
+- BacklogItem NON cambia: resta agganciato solo a project_id. Non serve
+  taggare i singoli item Jira con l'increment.
+
+Cosa NON cambia:
+- Sync Jira, budget, snapshot, forecasting restano tutti project-scoped,
+  invariati.
+
+Cosa si aggiunge:
+- Vista di dettaglio Increment: header con codice + data di rilascio, poi
+  il backlog aggregato (unione degli item dei progetti collegati, per
+  avere il quadro completo del contenuto), e un riepilogo ore/spese
+  sommato dai progetti collegati (somma dei dashboard metrics gia'
+  calcolati per singolo progetto - nessuna nuova sincronizzazione).
+- document_generator.py: _increment_code() oggi estrae l'increment via
+  regex dal nome del progetto (INCREMENT_RE) - con l'entita' esplicita
+  diventa project.increment.code, piu' robusto.
+
+Migrazione:
+- Creare la tabella increments e la colonna projects.increment_id
+  (nullable).
+- Backfill automatico: per ogni progetto esistente, creare un Increment
+  1:1 estraendo il codice con la regex attuale dal nome - cosi' il
+  comportamento di oggi resta identico senza inserimento manuale; da li'
+  in poi si possono far convergere piu' progetti (es. PTB4 + MA26) sotto
+  lo stesso Increment quando serve.
+
+Prossimo passo: implementare schema, migrazione e vista Increment in UI
+quando deciso.

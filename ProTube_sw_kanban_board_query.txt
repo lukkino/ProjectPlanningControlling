@@ -1,0 +1,1 @@
+project in (PTBSYS, PTBSW, PTBS, TS, INTS, PAS, PCIS, PTBDP, PDP, HUBM, PLD, QMS, TPD, PTHUB, PSDA) AND issuetype in (Activity, Task, Bug, Story, Epic) AND labels not in (Board_Redesign, "PTB_Master_HW&SW", to_be_refined) AND (labels in (planned) OR (labels in (analysis) AND status in ("To Do", Analysis)) OR issuetype in (Epic) OR labels in (action_item)) ORDER BY Rank ASC
