@@ -337,6 +337,8 @@ export type Complaint = {
   jira_key: string
   summary: string | null
   jira_status: string | null
+  // Campo Jira "Severity" (High/Medium/Low); null se non valorizzato.
+  severity: string | null
   jira_created: string | null
   // Data di chiusura su Jira (stato Done, Rejected...); null se ancora aperto.
   jira_resolved: string | null

@@ -532,6 +532,7 @@ class ComplaintIssue:
         resolved: dt.date | None,
         source_note: str | None,
         salesforce_case_id: str | None,
+        severity: str | None,
     ):
         self.key = key
         self.summary = summary
@@ -548,6 +549,9 @@ class ComplaintIssue:
         # tecnico del record Salesforce, presente solo sui case creati
         # dall'integrazione automatica.
         self.salesforce_case_id = salesforce_case_id
+        # Campo custom Jira "Severity" (customfield_10185): menu a tendina
+        # High/Medium/Low.
+        self.severity = severity
 
 
 def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> list[ComplaintIssue]:
@@ -563,6 +567,7 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
     base_url = base_url.rstrip("/")
     SOURCE_NOTE_FIELD = "customfield_10189"
     SALESFORCE_CASE_ID_FIELD = "customfield_10286"
+    SEVERITY_FIELD = "customfield_10185"
     fields = [
         "summary",
         "status",
@@ -572,6 +577,7 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
         "statuscategorychangedate",
         SOURCE_NOTE_FIELD,
         SALESFORCE_CASE_ID_FIELD,
+        SEVERITY_FIELD,
     ]
     results: list[ComplaintIssue] = []
     next_page_token: str | None = None
@@ -612,6 +618,7 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
                             resolved=_parse_jira_datetime(resolved).date() if resolved else None,
                             source_note=f.get(SOURCE_NOTE_FIELD),
                             salesforce_case_id=f.get(SALESFORCE_CASE_ID_FIELD),
+                            severity=(f.get(SEVERITY_FIELD) or {}).get("value"),
                         )
                     )
 

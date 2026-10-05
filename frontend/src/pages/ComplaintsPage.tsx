@@ -12,6 +12,19 @@ const SALESFORCE_STATUSES: SalesforceStatus[] = ['Aperto', 'Chiuso']
 // Stati non previsti qui finiscono in coda.
 const JIRA_STATUS_ORDER = ['To Do', 'Analysis', 'Confirmed', 'In Progress', 'On hold', 'Done', 'Rejected']
 
+// Ordinamento per Severity: dalla piu' grave. Valori non previsti qui
+// vengono dopo quelli noti.
+const SEVERITY_ORDER = ['High', 'Medium', 'Low']
+const severityRank = (c: Complaint) => {
+  const index = SEVERITY_ORDER.indexOf(c.severity ?? '')
+  return index === -1 ? SEVERITY_ORDER.length : index
+}
+
+// Colonna su cui e' ordinata la tabella: desc = dal piu' nuovo (data) o
+// dalla piu' grave (Severity).
+type SortKey = 'created' | 'severity'
+type Sort = { key: SortKey; desc: boolean }
+
 const JIRA_BADGE_CLASS: Record<string, string> = { Done: 'done', Rejected: 'todo', 'To Do': 'todo' }
 
 type FilterGroupProps = {
@@ -98,7 +111,11 @@ export function ComplaintsPage() {
   const [architectureFilter, setArchitectureFilter] = useState<Set<string>>(new Set())
   const [salesforceFilter, setSalesforceFilter] = useState<Set<string>>(new Set())
   const [jiraFilter, setJiraFilter] = useState<Set<string>>(new Set())
-  const [newestFirst, setNewestFirst] = useState(true)
+  const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
+  // Clic sull'intestazione: inverte il verso se la tabella e' gia' ordinata
+  // su quella colonna, altrimenti ordina su quella (dal piu' nuovo / dalla
+  // piu' grave).
+  const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: true }))
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['complaints'] })
 
@@ -126,7 +143,10 @@ export function ComplaintsPage() {
   // Ordinamento per data di creazione Jira (stringhe ISO yyyy-mm-dd,
   // confrontabili direttamente); a parita' di data per numero di issue, nello
   // stesso verso. I complaint senza data restano sempre in fondo.
-  const direction = newestFirst ? -1 : 1
+  // Ordinando per Severity, quelli senza Severity restano sempre in fondo e a
+  // parita' di Severity vale la data, dal piu' nuovo.
+  const direction = sort.key === 'severity' || sort.desc ? -1 : 1
+  const severityDirection = sort.desc ? 1 : -1
   const visible = all
     .filter(
       (c) =>
@@ -135,6 +155,10 @@ export function ComplaintsPage() {
         (jiraFilter.size === 0 || jiraFilter.has(c.jira_status ?? '')),
     )
     .sort((a, b) => {
+      if (sort.key === 'severity' && a.severity !== b.severity) {
+        if (!a.severity || !b.severity) return (a.severity ? 0 : 1) - (b.severity ? 0 : 1)
+        return severityDirection * (severityRank(a) - severityRank(b) || a.severity.localeCompare(b.severity))
+      }
       if (!a.jira_created || !b.jira_created) return (a.jira_created ? 0 : 1) - (b.jira_created ? 0 : 1)
       return (
         direction *
@@ -200,17 +224,34 @@ export function ComplaintsPage() {
                 <th>Stato Salesforce</th>
                 <th>ID Jira</th>
                 <th>Stato Jira</th>
-                <th aria-sort={newestFirst ? 'descending' : 'ascending'}>
+                <th aria-sort={sort.key !== 'severity' ? undefined : sort.desc ? 'descending' : 'ascending'}>
                   <button
                     className="sort-btn"
                     title={
-                      newestFirst
-                        ? 'Dal più nuovo al più vecchio: clicca per invertire'
-                        : 'Dal più vecchio al più nuovo: clicca per invertire'
+                      sort.key !== 'severity'
+                        ? 'Clicca per ordinare per Severity, dalla più grave'
+                        : sort.desc
+                          ? 'Dalla più grave alla meno grave: clicca per invertire'
+                          : 'Dalla meno grave alla più grave: clicca per invertire'
                     }
-                    onClick={() => setNewestFirst((v) => !v)}
+                    onClick={() => sortBy('severity')}
                   >
-                    Creato su Jira {newestFirst ? '▼' : '▲'}
+                    Severity{sort.key === 'severity' && (sort.desc ? ' ▼' : ' ▲')}
+                  </button>
+                </th>
+                <th aria-sort={sort.key !== 'created' ? undefined : sort.desc ? 'descending' : 'ascending'}>
+                  <button
+                    className="sort-btn"
+                    title={
+                      sort.key !== 'created'
+                        ? 'Clicca per ordinare per data di creazione, dal più nuovo'
+                        : sort.desc
+                          ? 'Dal più nuovo al più vecchio: clicca per invertire'
+                          : 'Dal più vecchio al più nuovo: clicca per invertire'
+                    }
+                    onClick={() => sortBy('created')}
+                  >
+                    Creato su Jira{sort.key === 'created' && (sort.desc ? ' ▼' : ' ▲')}
                   </button>
                 </th>
                 <th>Architettura</th>
@@ -247,6 +288,9 @@ export function ComplaintsPage() {
                     {c.jira_status && (
                       <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>
                     )}
+                  </td>
+                  <td style={c.severity === 'High' ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                    {c.severity ?? <span className="muted">-</span>}
                   </td>
                   <td>{formatIsoDate(c.jira_created) ?? <span className="muted">-</span>}</td>
                   <td className="editable-cell">
@@ -295,7 +339,7 @@ export function ComplaintsPage() {
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={9} className="muted">
                     {isLoading
                       ? 'Caricamento...'
                       : all.length === 0

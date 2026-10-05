@@ -101,6 +101,9 @@ def run_lightweight_migrations() -> None:
         if "jira_resolved" not in complaint_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE complaints ADD COLUMN jira_resolved DATE"))
+        if "severity" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN severity VARCHAR(64)"))
 
     if "backlog_items" in table_names:
         backlog_columns = {col["name"] for col in inspector.get_columns("backlog_items")}

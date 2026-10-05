@@ -142,6 +142,7 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
             updated += 1
         complaint.summary = issue.summary
         complaint.jira_status = issue.status
+        complaint.severity = issue.severity
         complaint.jira_created = issue.created
         complaint.jira_resolved = issue.resolved
         complaint.labels = ";".join(issue.labels)

@@ -602,6 +602,7 @@ class Complaint(BaseModel):
     jira_key: str
     summary: str | None = None
     jira_status: str | None = None
+    severity: str | None = None
     jira_created: dt.date | None = None
     jira_resolved: dt.date | None = None
     labels: str | None = None
