@@ -476,7 +476,14 @@ def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[J
                     key = raw.get("key", "")
                     issue_type = (f.get("issuetype") or {}).get("name", "")
                     time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
+                    status = (f.get("status") or {}).get("name", "")
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
+                    # La Fine eff. vale solo se l'issue e' Done adesso: una
+                    # issue riaperta (passata da Done e tornata in
+                    # lavorazione) ha ancora la vecchia chiusura nel
+                    # changelog, ma non e' conclusa.
+                    if status != DONE_STATUS:
+                        actual_finish = None
                     parent = f.get("parent") or {}
                     implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
                     components = ", ".join(c.get("name", "") for c in (f.get("components") or [])) or None
@@ -485,7 +492,7 @@ def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[J
                             key=key,
                             issue_type=issue_type,
                             summary=f.get("summary", ""),
-                            status=(f.get("status") or {}).get("name", ""),
+                            status=status,
                             labels=f.get("labels") or [],
                             logged_hours=(time_spent_seconds / 3600) if time_spent_seconds is not None else None,
                             actual_start=actual_start,
