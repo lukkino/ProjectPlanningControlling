@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
 
@@ -84,13 +84,9 @@ type Props = {
 export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
-  // righe). Calendario e specchio sono fuori dall'area con scroll
-  // verticale (.gantt-outer), quindi restano sempre visibili scorrendo in
-  // basso - se il calendario fosse dentro l'elemento con overflow-x:auto,
-  // il browser forza anche il suo overflow-y a diventare "auto" (regola
-  // dell'overflow CSS quando un solo asse e' 'visible'), rompendo la
-  // costrizione verticale del contenitore esterno: e' esattamente il bug
-  // per cui il calendario spariva scorrendo in basso.
+  // righe). Calendario e specchio stanno sopra le righe, fuori da
+  // .gantt-outer; in verticale il Gantt non ha scroll proprio (come la
+  // tabella del Backlog, si mostra per intero e scorre con la pagina).
   const wrapRef = useRef<HTMLDivElement>(null)
   const topScrollRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -119,7 +115,27 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
     }
   }
 
-  if (allDays.length === 0) {
+  // "Oggi" entra sempre nel range (serve anche da fine provvisoria per la
+  // barra degli item In Progress ancora senza Fine eff., vedi sotto), cosi'
+  // resta sempre visibile invece di sparire quando tutte le date degli item
+  // sono lontane da adesso.
+  const todayDay = toEpochDays(new Date())
+  const minDay = Math.min(...allDays, todayDay) - 2
+  const maxDay = Math.max(...allDays, todayDay) + 2
+
+  // All'apertura del Gantt la vista e' centrata su oggi, invece di partire
+  // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
+  // mostrare: dopo, lo scroll resta dove l'ha lasciato l'utente (calendario
+  // e barra "specchio" seguono da soli, via onScroll).
+  const hasDates = allDays.length > 0
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    wrap.scrollLeft = (todayDay - minDay + 0.5) * DAY_WIDTH - wrap.clientWidth / 2
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDates])
+
+  if (!hasDates) {
     return (
       <p className="muted">
         Nessun item ha una data (pianificata o effettiva) impostata: aggiungile nelle colonne Start/Fine per vederle
@@ -128,13 +144,6 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
     )
   }
 
-  // "Oggi" entra sempre nel range (serve anche da fine provvisoria per la
-  // barra degli item In Progress ancora senza Fine eff., vedi sotto), cosi'
-  // resta sempre visibile invece di sparire quando tutte le date degli item
-  // sono lontane da adesso.
-  const todayDay = toEpochDays(new Date())
-  const minDay = Math.min(...allDays, todayDay) - 2
-  const maxDay = Math.max(...allDays, todayDay) + 2
   const chartWidth = (maxDay - minDay + 1) * DAY_WIDTH
   const dayToX = (day: number) => (day - minDay) * DAY_WIDTH
   const ticks = buildWeekTicks(minDay, maxDay)
@@ -171,7 +180,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
 
       {/* Calendario: fuori da .gantt-outer (vedi commento sopra), scroll
           orizzontale solo via JS (nessuna scrollbar propria, overflow
-          hidden) in modo da restare sempre visibile scorrendo in basso. */}
+          hidden). */}
       <div style={{ display: 'flex' }}>
         <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
         <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -258,9 +267,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
         </div>
       </div>
       {/* Colonna ID: fuori dall'area di scroll orizzontale (gantt-timeline-col
-          sotto), resta quindi sempre visibile scorrendo a destra. Scorre in
-          verticale insieme alla timeline perche' entrambe vivono dentro lo
-          stesso .gantt-outer con overflow-y unico. */}
+          sotto), resta quindi sempre visibile scorrendo a destra. */}
       <div className="gantt-outer">
         <div className="gantt-labels-col" style={{ width: LABEL_COLUMN_WIDTH }}>
           {items.map((item) => (

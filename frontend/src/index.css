@@ -351,18 +351,17 @@ tbody tr:hover .sticky-col { background: var(--bg); }
 
 /* Vista Gantt del Backlog (alternativa alla tabella, vedi BacklogGanttChart):
    colonna ID a larghezza fissa e timeline scrollabile in orizzontale sono
-   due colonne fianco a fianco DENTRO lo stesso contenitore con lo scroll
-   verticale unico (.gantt-outer) - cosi' scorrono in verticale insieme
-   senza bisogno di sincronizzarle via JS, e la colonna ID resta visibile
-   scorrendo in orizzontale semplicemente perche' e' fuori dall'area che
-   scrolla in orizzontale (niente position:sticky, che dentro un flex item
-   puo' comportarsi in modo incoerente tra browser). */
+   due colonne fianco a fianco DENTRO lo stesso contenitore (.gantt-outer):
+   la colonna ID resta visibile scorrendo in orizzontale semplicemente
+   perche' e' fuori dall'area che scrolla in orizzontale (niente
+   position:sticky, che dentro un flex item puo' comportarsi in modo
+   incoerente tra browser). In verticale nessuno scroll proprio: come la
+   tabella del Backlog, il Gantt si mostra per intero e scorre con la
+   pagina. */
 .gantt-outer {
   display: flex;
   align-items: flex-start;
   overflow-x: hidden;
-  overflow-y: auto;
-  max-height: 65vh;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
