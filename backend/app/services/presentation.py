@@ -29,7 +29,7 @@ from pptx.enum.chart import (
     XL_TICK_LABEL_POSITION,
 )
 from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR
-from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
@@ -63,6 +63,11 @@ COLOR_WARNING = RGBColor(0xC9, 0x7A, 0x12)
 COLOR_DANGER = RGBColor(0xD3, 0x40, 0x2F)
 COLOR_PLANNED = RGBColor(0xA3, 0xAC, 0xB9)
 COLOR_GRID = RGBColor(0xE2, 0xE5, 0xEA)
+# Fasi nella timeline: data pianificata e data effettiva, come nel Gantt
+# della Dashboard generale (OverviewDashboardPage).
+COLOR_PHASE_PLANNED = RGBColor(0x2A, 0x78, 0xD6)
+COLOR_PHASE_ACTUAL = RGBColor(0xEB, 0x68, 0x34)
+MONTH_NAMES = ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
 # Evidenziatore (giallo chiaro) delle voci dello Scope in lavorazione.
 COLOR_HIGHLIGHT = "FFE98A"
 
@@ -743,6 +748,157 @@ def _phases_slide(deck: _Deck, project: models.Project) -> None:
     )
 
 
+def _month_start(day: dt.date, months: int = 0) -> dt.date:
+    """Primo giorno del mese di day, spostato di months mesi."""
+    index = day.year * 12 + day.month - 1 + months
+    return dt.date(index // 12, index % 12 + 1, 1)
+
+
+def _timeline_slide(deck: _Deck, project: models.Project) -> None:
+    """Gantt delle fasi: una riga per fase, con le sue date e, sull'asse del
+    tempo, un rombo vuoto alla data pianificata e uno pieno a quella
+    effettiva (come nel Gantt della Dashboard generale). In cima la barra
+    dell'increment, dall'inizio al Planned finish."""
+    slide, box = deck.add_slide("Timeline increment")
+    phases = list(project.phases)
+    start, finish = project.start_date, project.planned_finish_date
+    days = [d for d in (start, finish) if d is not None]
+    days += [d for p in phases for d in (p.planned_date, p.actual_date) if d is not None]
+    if not days:
+        _text(
+            slide,
+            box,
+            "Nessuna data da mostrare: servono le date delle fasi o le date di inizio e Planned finish dell'increment.",
+            color=COLOR_MUTED,
+        )
+        return
+
+    # L'asse va a mesi interi, dal mese della prima data a quello dell'ultima.
+    axis_start = _month_start(min(days))
+    axis_end = _month_start(max(days), 1)
+    span = (axis_end - axis_start).days
+    month_count = (axis_end.year - axis_start.year) * 12 + axis_end.month - axis_start.month
+
+    date_width = Inches(1.15)
+    name_width = int(box.width * 0.2)
+    chart_left = box.left + name_width + 2 * date_width + Inches(0.2)
+    # A destra resta mezzo rombo di margine, per una data a fine asse.
+    chart_width = box.left + box.width - chart_left - Inches(0.15)
+    header_height = Inches(0.4)
+    legend_height = Inches(0.45)
+    has_increment_row = start is not None or finish is not None
+    row_count = len(phases) + (1 if has_increment_row else 0)
+    row_height = min(Inches(0.5), int((box.height - header_height - legend_height) / row_count))
+    font_size = 12 if row_height >= Inches(0.34) else 10 if row_height >= Inches(0.26) else 8
+    rows_top = box.top + header_height
+    rows_bottom = rows_top + row_height * row_count
+
+    def x_of(day: dt.date) -> int:
+        return chart_left + int(chart_width * (day - axis_start).days / span)
+
+    def line(x1: int, y1: int, x2: int, y2: int, color: RGBColor, width: float = 0.75, dashed: bool = False) -> None:
+        connector = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, y1, x2, y2)
+        connector.line.color.rgb = color
+        connector.line.width = Pt(width)
+        if dashed:
+            connector.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+
+    def cell(left: int, top: int, width: int, height: int, text: str, **style) -> None:
+        _text(slide, _Box(left, top, width, height), text, **style).vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    def diamond(x: int, y: int, size: int, color: RGBColor, filled: bool) -> None:
+        mark = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, x - size // 2, y - size // 2, size, size)
+        mark.fill.solid()
+        mark.fill.fore_color.rgb = color if filled else RGBColor(0xFF, 0xFF, 0xFF)
+        mark.line.color.rgb = color
+        mark.line.width = Pt(1.5)
+        mark.shadow.inherit = False
+
+    # Intestazione: colonne delle date nei colori dei rispettivi rombi, e i
+    # mesi sull'asse (uno ogni tanti quando sono troppi per starci tutti).
+    planned_left = box.left + name_width
+    actual_left = planned_left + date_width
+    cell(box.left, box.top, name_width, header_height, "Fase", size=11, bold=True, color=COLOR_MUTED)
+    cell(planned_left, box.top, date_width, header_height, "Pianificata", size=11, bold=True, color=COLOR_PHASE_PLANNED)
+    cell(actual_left, box.top, date_width, header_height, "Effettiva", size=11, bold=True, color=COLOR_PHASE_ACTUAL)
+    month_step = math.ceil(month_count / 12)
+    for n in range(0, month_count + 1, month_step):
+        month = _month_start(axis_start, n)
+        x = x_of(min(month, axis_end))
+        line(x, rows_top, x, rows_bottom, COLOR_GRID)
+        if n < month_count:
+            label_width = x_of(min(_month_start(month, month_step), axis_end)) - x
+            cell(
+                x + Inches(0.04),
+                box.top,
+                max(label_width, Inches(0.7)),
+                header_height,
+                f"{MONTH_NAMES[month.month - 1]} {month:%y}",
+                size=10,
+                color=COLOR_MUTED,
+            )
+    for n in range(row_count + 1):
+        y = rows_top + n * row_height
+        line(box.left, y, box.left + box.width, y, COLOR_GRID)
+
+    today = dt.date.today()
+    show_today = axis_start <= today <= axis_end
+    if show_today:
+        line(x_of(today), rows_top, x_of(today), rows_bottom, COLOR_DANGER, width=1.25, dashed=True)
+
+    mark_size = min(Inches(0.2), int(row_height * 0.62))
+    top = rows_top
+    if has_increment_row:
+        cell(box.left, top, name_width, row_height, "Increment", size=font_size, bold=True)
+        cell(planned_left, top, 2 * date_width, row_height, f"{_date(start)} – {_date(finish)}", size=font_size)
+        if start is not None and finish is not None and finish >= start:
+            bar_height = int(row_height * 0.4)
+            bar = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                x_of(start),
+                top + (row_height - bar_height) // 2,
+                max(x_of(finish) - x_of(start), Inches(0.03)),
+                bar_height,
+            )
+            bar.fill.solid()
+            bar.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
+            bar.line.fill.background()
+            bar.shadow.inherit = False
+        top += row_height
+    for phase in phases:
+        is_current = phase.name == project.status
+        middle = top + row_height // 2
+        cell(box.left, top, name_width, row_height, phase.name, size=font_size, bold=is_current)
+        cell(planned_left, top, date_width, row_height, _date(phase.planned_date), size=font_size, bold=is_current)
+        cell(actual_left, top, date_width, row_height, _date(phase.actual_date), size=font_size, bold=is_current)
+        if phase.planned_date is not None and phase.actual_date is not None and phase.planned_date != phase.actual_date:
+            # Il tratto tra le due date: lo scostamento della fase.
+            line(x_of(phase.planned_date), middle, x_of(phase.actual_date), middle, COLOR_PLANNED, width=1.5)
+        if phase.planned_date is not None:
+            diamond(x_of(phase.planned_date), middle, mark_size, COLOR_PHASE_PLANNED, filled=False)
+        if phase.actual_date is not None:
+            # Piu' piccolo: se cade nello stesso giorno della data pianificata
+            # resta dentro il rombo vuoto, e si vedono entrambi.
+            diamond(x_of(phase.actual_date), middle, int(mark_size * 0.7), COLOR_PHASE_ACTUAL, filled=True)
+        top += row_height
+
+    # Legenda, sotto le righe.
+    legend_top = rows_bottom + Inches(0.1)
+    legend_middle = legend_top + Inches(0.15)
+    x = box.left + Inches(0.1)
+    legend = [("Data pianificata", COLOR_PHASE_PLANNED, False), ("Data effettiva", COLOR_PHASE_ACTUAL, True)]
+    for label, color, filled in legend:
+        diamond(x, legend_middle, Inches(0.16) if not filled else Inches(0.12), color, filled)
+        cell(x + Inches(0.18), legend_top, Inches(1.7), Inches(0.3), label, size=10, color=COLOR_MUTED)
+        x += Inches(1.9)
+    if show_today:
+        line(x - Inches(0.1), legend_middle, x + Inches(0.2), legend_middle, COLOR_DANGER, width=1.25, dashed=True)
+        cell(x + Inches(0.3), legend_top, Inches(1.8), Inches(0.3), f"Oggi ({_date(today)})", size=10, color=COLOR_MUTED)
+        x += Inches(2.1)
+    if any(p.name == project.status for p in phases):
+        cell(x, legend_top, Inches(2.5), Inches(0.3), "In grassetto la fase corrente", size=10, color=COLOR_MUTED)
+
+
 def _date_serial(day: dt.date) -> int:
     """Data come numero seriale di Excel: l'asse X dei grafici nel tempo."""
     return (day - EXCEL_EPOCH).days
@@ -1012,6 +1168,7 @@ def generate_dashboard_presentation(project: models.Project, closed_days: int = 
     _kpi_slide(deck, project)
     _recently_closed_slides(deck, project, closed_days)
     _phases_slide(deck, project)
+    _timeline_slide(deck, project)
     _hours_slide(deck, project)
     _completion_slide(deck, project)
     _plan_vs_actual_slides(
