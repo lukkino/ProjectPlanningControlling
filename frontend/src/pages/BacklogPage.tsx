@@ -483,8 +483,13 @@ export function BacklogPage() {
       key: 'actual_start',
       label: 'Start eff.',
       className: 'editable-cell',
+      // Date effettive e Ore loggate: su queste Jira e' la fonte di verita',
+      // la sync le sovrascrive anche se modificate a mano. key sul valore
+      // (come Fine pian.): il campo non controllato va rimontato, altrimenti
+      // dopo la sync continuerebbe a mostrare il valore digitato.
       render: (item) => (
         <input
+          key={item.actual_start ?? ''}
           type="date"
           defaultValue={item.actual_start ?? ''}
           onBlur={(e) => update.mutate({ id: item.id, data: { actual_start: dateOrNull(e.target.value) } })}
@@ -497,6 +502,7 @@ export function BacklogPage() {
       className: 'editable-cell',
       render: (item) => (
         <input
+          key={item.actual_finish ?? ''}
           type="date"
           defaultValue={item.actual_finish ?? ''}
           onBlur={(e) => update.mutate({ id: item.id, data: { actual_finish: dateOrNull(e.target.value) } })}
@@ -509,6 +515,7 @@ export function BacklogPage() {
       className: 'editable-cell',
       render: (item) => (
         <input
+          key={item.logged_hours ?? ''}
           type="number"
           defaultValue={item.logged_hours ?? ''}
           onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
