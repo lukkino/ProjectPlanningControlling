@@ -365,6 +365,12 @@ tbody tr:hover .sticky-col { background: var(--bg); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* Calendario (mesi e settimane) e barra di scroll "specchio": restano in
+   cima alla finestra mentre la pagina scorre lungo le righe del Gantt.
+   Funziona perche' nessun antenato ha un overflow proprio (lo scroll e'
+   quello della pagina); sfondo pieno, altrimenti le righe si vedrebbero
+   passare sotto le date. */
+.gantt-sticky-header { position: sticky; top: 0; z-index: 3; background: var(--surface); }
 .gantt-labels-col { flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); }
 .gantt-label-row {
   display: flex;

@@ -86,7 +86,8 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
   // righe). Calendario e specchio stanno sopra le righe, fuori da
   // .gantt-outer; in verticale il Gantt non ha scroll proprio (come la
-  // tabella del Backlog, si mostra per intero e scorre con la pagina).
+  // tabella del Backlog, si mostra per intero e scorre con la pagina), ma
+  // calendario e specchio restano agganciati in alto (.gantt-sticky-header).
   const wrapRef = useRef<HTMLDivElement>(null)
   const topScrollRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -178,92 +179,96 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
         </span>
       </div>
 
-      {/* Calendario: fuori da .gantt-outer (vedi commento sopra), scroll
-          orizzontale solo via JS (nessuna scrollbar propria, overflow
-          hidden). */}
-      <div style={{ display: 'flex' }}>
-        <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
-        <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-          <div style={{ width: chartWidth, height: HEADER_HEIGHT, position: 'relative' }}>
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: MONTH_BAND_HEIGHT,
-                borderBottom: '1px solid var(--border)',
-              }}
-            >
-              {monthBands.map((band) => (
-                <div
-                  key={band.day}
-                  className="muted"
-                  style={{
-                    position: 'absolute',
-                    left: dayToX(band.day),
-                    width: band.width,
-                    top: 0,
-                    height: '100%',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    borderLeft: '1px solid var(--border)',
-                    paddingLeft: 3,
-                  }}
-                >
-                  {band.label}
-                </div>
-              ))}
-            </div>
-            <div
-              style={{
-                position: 'absolute',
-                top: MONTH_BAND_HEIGHT,
-                left: 0,
-                right: 0,
-                height: WEEK_ROW_HEIGHT,
-                borderBottom: '1px solid var(--border)',
-              }}
-            >
-              {ticks.map((t) => (
-                <div
-                  key={t.day}
-                  className="muted"
-                  style={{
-                    position: 'absolute',
-                    left: dayToX(t.day) + 3,
-                    top: 4,
-                    fontSize: 11,
-                    whiteSpace: 'nowrap',
-                    borderLeft: '1px solid var(--border)',
-                    paddingLeft: 3,
-                  }}
-                >
-                  {t.label}
-                </div>
-              ))}
+      {/* Calendario e barra "specchio": fuori da .gantt-outer (vedi commento
+          sopra) e agganciati in cima alla finestra scorrendo la pagina, cosi'
+          le date restano visibili anche sulle ultime righe. Il calendario
+          scorre in orizzontale solo via JS (nessuna scrollbar propria,
+          overflow hidden). */}
+      <div className="gantt-sticky-header">
+        <div style={{ display: 'flex' }}>
+          <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
+          <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ width: chartWidth, height: HEADER_HEIGHT, position: 'relative' }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: MONTH_BAND_HEIGHT,
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                {monthBands.map((band) => (
+                  <div
+                    key={band.day}
+                    className="muted"
+                    style={{
+                      position: 'absolute',
+                      left: dayToX(band.day),
+                      width: band.width,
+                      top: 0,
+                      height: '100%',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      borderLeft: '1px solid var(--border)',
+                      paddingLeft: 3,
+                    }}
+                  >
+                    {band.label}
+                  </div>
+                ))}
+              </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: MONTH_BAND_HEIGHT,
+                  left: 0,
+                  right: 0,
+                  height: WEEK_ROW_HEIGHT,
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                {ticks.map((t) => (
+                  <div
+                    key={t.day}
+                    className="muted"
+                    style={{
+                      position: 'absolute',
+                      left: dayToX(t.day) + 3,
+                      top: 4,
+                      fontSize: 11,
+                      whiteSpace: 'nowrap',
+                      borderLeft: '1px solid var(--border)',
+                      paddingLeft: 3,
+                    }}
+                  >
+                    {t.label}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Spacer della stessa larghezza della colonna ID, cosi' la barra
-          "specchio" sotto si allinea esattamente sopra la timeline vera. */}
-      <div style={{ display: 'flex' }}>
-        <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
-        <div
-          className="table-scroll-mirror"
-          ref={topScrollRef}
-          onScroll={() => {
-            syncScroll(topScrollRef, wrapRef)
-            mirrorHeaderScroll(topScrollRef)
-          }}
-          style={{ flex: 1, minWidth: 0 }}
-        >
-          <div style={{ width: chartWidth }} />
+        {/* Spacer della stessa larghezza della colonna ID, cosi' la barra
+            "specchio" sotto si allinea esattamente sopra la timeline vera. */}
+        <div style={{ display: 'flex' }}>
+          <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
+          <div
+            className="table-scroll-mirror"
+            ref={topScrollRef}
+            onScroll={() => {
+              syncScroll(topScrollRef, wrapRef)
+              mirrorHeaderScroll(topScrollRef)
+            }}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            <div style={{ width: chartWidth }} />
+          </div>
         </div>
       </div>
       {/* Colonna ID: fuori dall'area di scroll orizzontale (gantt-timeline-col
