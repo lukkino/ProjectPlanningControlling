@@ -120,6 +120,9 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
 }
 const HANDLE_COLUMN_WIDTH = 30
 const SELECT_COLUMN_WIDTH = 30
+// Numero di riga (1..N): posizione nell'elenco visibile, non un dato
+// dell'item - spostando o filtrando gli item la numerazione resta 1..N.
+const ROW_NUMBER_COLUMN_WIDTH = 36
 const DELETE_COLUMN_WIDTH = 36
 
 // Colonne "congelate" a sinistra durante lo scroll orizzontale, cosi' si
@@ -669,7 +672,7 @@ export function BacklogPage() {
   // somma delle colonne congelate che la precedono nell'ordine attuale (che puo'
   // cambiare per drag&drop delle intestazioni o resize).
   const stickyLeftByKey: Record<string, number> = {}
-  let stickyCursor = SELECT_COLUMN_WIDTH + HANDLE_COLUMN_WIDTH
+  let stickyCursor = ROW_NUMBER_COLUMN_WIDTH + SELECT_COLUMN_WIDTH + HANDLE_COLUMN_WIDTH
   for (const col of orderedColumns) {
     if (!STICKY_COLUMN_KEYS.has(col.key)) continue
     stickyLeftByKey[col.key] = stickyCursor
@@ -679,6 +682,7 @@ export function BacklogPage() {
   // Larghezza totale della tabella (colgroup), per dimensionare lo spacer
   // dentro la barra di scroll "specchio" sopra la tabella.
   const tableScrollWidth =
+    ROW_NUMBER_COLUMN_WIDTH +
     SELECT_COLUMN_WIDTH +
     HANDLE_COLUMN_WIDTH +
     orderedColumns.reduce((sum, col) => sum + (columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80), 0) +
@@ -1182,6 +1186,7 @@ export function BacklogPage() {
       >
         <table className="backlog-table backlog-table--fixed">
           <colgroup>
+            <col style={{ width: ROW_NUMBER_COLUMN_WIDTH }} />
             <col style={{ width: SELECT_COLUMN_WIDTH }} />
             <col style={{ width: HANDLE_COLUMN_WIDTH }} />
             {orderedColumns.map((col) => (
@@ -1191,7 +1196,14 @@ export function BacklogPage() {
           </colgroup>
           <thead>
             <tr>
-              <th className="sticky-col-header" style={{ left: 0, textAlign: 'center' }}>
+              <th
+                className="sticky-col-header"
+                style={{ left: 0, textAlign: 'right' }}
+                title="Numero di riga nell'elenco visibile: non è legato all'item"
+              >
+                #
+              </th>
+              <th className="sticky-col-header" style={{ left: ROW_NUMBER_COLUMN_WIDTH, textAlign: 'center' }}>
                 <input
                   type="checkbox"
                   title="Seleziona tutti gli item visibili"
@@ -1202,7 +1214,7 @@ export function BacklogPage() {
                   onChange={() => setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleIds))}
                 />
               </th>
-              <th className="sticky-col-header" style={{ left: SELECT_COLUMN_WIDTH }} />
+              <th className="sticky-col-header" style={{ left: ROW_NUMBER_COLUMN_WIDTH + SELECT_COLUMN_WIDTH }} />
               {orderedColumns.map((col) => (
                 <th
                   key={col.key}
@@ -1236,7 +1248,7 @@ export function BacklogPage() {
             </tr>
           </thead>
           <tbody>
-            {displayItems.map((item) => (
+            {displayItems.map((item, rowIndex) => (
               <Fragment key={item.id}>
               <tr
                 className={forecastHighlightIds.has(item.id) ? 'forecast-highlight' : undefined}
@@ -1244,7 +1256,10 @@ export function BacklogPage() {
                 onDrop={() => handleDrop(item.id)}
                 style={draggedId === item.id ? { opacity: 0.4 } : undefined}
               >
-                <td className="sticky-col" style={{ left: 0, textAlign: 'center' }}>
+                <td className="sticky-col muted text-right" style={{ left: 0 }}>
+                  {rowIndex + 1}
+                </td>
+                <td className="sticky-col" style={{ left: ROW_NUMBER_COLUMN_WIDTH, textAlign: 'center' }}>
                   <input
                     type="checkbox"
                     title="Seleziona per le azioni in blocco"
@@ -1261,7 +1276,7 @@ export function BacklogPage() {
                   }}
                   onDragEnd={() => setDraggedId(null)}
                   className="drag-handle sticky-col"
-                  style={{ left: SELECT_COLUMN_WIDTH }}
+                  style={{ left: ROW_NUMBER_COLUMN_WIDTH + SELECT_COLUMN_WIDTH }}
                   title="Trascina per riordinare"
                 >
                   ⠿
@@ -1287,14 +1302,14 @@ export function BacklogPage() {
               </tr>
               {item.id === forecastCutoffId && (
                 <tr className="forecast-cutoff-label-row">
-                  <td colSpan={orderedColumns.length + 3}>{forecastCutoffLabel}</td>
+                  <td colSpan={orderedColumns.length + 4}>{forecastCutoffLabel}</td>
                 </tr>
               )}
               </Fragment>
             ))}
             {displayItems.length === 0 && (
               <tr>
-                <td colSpan={orderedColumns.length + 3} className="muted">
+                <td colSpan={orderedColumns.length + 4} className="muted">
                   Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
                 </td>
               </tr>
