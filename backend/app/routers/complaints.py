@@ -1,7 +1,12 @@
 import datetime as dt
 import re
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -39,6 +44,22 @@ NON_SITE_LABELS = {
     "TSB",
     "Transportation",
 }
+
+JIRA_BROWSE_URL = "https://inpeco.atlassian.net/browse/"
+
+# Colonne dell'export Excel: le stesse della tabella della pagina, nello
+# stesso ordine (intestazione, larghezza della colonna).
+EXPORT_COLUMNS = [
+    ("ID Salesforce", 15),
+    ("Summary", 80),
+    ("Stato Salesforce", 18),
+    ("ID Jira", 15),
+    ("Stato Jira", 15),
+    ("Severity", 12),
+    ("Creato su Jira", 16),
+    ("Architettura", 15),
+    ("Sito Cliente", 28),
+]
 
 # Il numero del case Salesforce e' anche in testa al summary ("[76665]...").
 _SUMMARY_CASE_RE = re.compile(r"^\s*\[(\d+)\]")
@@ -84,11 +105,67 @@ def list_complaints(db: Session = Depends(get_db)):
     )
 
 
-# Dichiarate prima di "/{complaint_id}": altrimenti "settings" e "sync"
-# verrebbero lette come id.
+# Dichiarate prima di "/{complaint_id}": altrimenti "settings", "export" e
+# "sync" verrebbero lette come id.
 @router.get("/settings", response_model=schemas.ComplaintsSettings)
 def get_complaints_settings(db: Session = Depends(get_db)):
     return schemas.ComplaintsSettings(base_jql=_base_jql(_settings_row(db)))
+
+
+@router.get("/export")
+def export_complaints(db: Session = Depends(get_db)):
+    """Tutti i complaint in un foglio Excel (indipendentemente dai filtri
+    attivi nella pagina), dal piu' nuovo, con le intestazioni filtrabili."""
+    complaints = (
+        db.query(models.Complaint)
+        .order_by(models.Complaint.jira_created.desc(), models.Complaint.jira_key.desc())
+        .all()
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Complaints"
+    sheet.append([header for header, _ in EXPORT_COLUMNS])
+    for c in complaints:
+        sheet.append(
+            [
+                c.salesforce_case_number,
+                c.summary,
+                c.salesforce_status,
+                c.jira_key,
+                c.jira_status,
+                c.severity,
+                c.jira_created,
+                c.architecture,
+                c.customer_site,
+            ]
+        )
+
+    for index, (_, width) in enumerate(EXPORT_COLUMNS, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+        header = sheet.cell(row=1, column=index)
+        header.font = Font(bold=True, color="FFFFFF")
+        header.fill = PatternFill("solid", fgColor="2F6FED")
+        header.alignment = Alignment(vertical="center")
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=cell.column == 2)
+        key = row[3]
+        key.hyperlink = f"{JIRA_BROWSE_URL}{key.value}"
+        key.font = Font(color="0563C1", underline="single")
+        row[6].number_format = "DD/MM/YYYY"
+    # Filtro automatico su tutte le colonne, con l'intestazione bloccata in
+    # alto scorrendo le righe.
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.freeze_panes = "A2"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    filename = f"Complaints {dt.datetime.now():%Y-%m-%d %H%M}.xlsx"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.put("/settings", response_model=schemas.ComplaintsSettings)

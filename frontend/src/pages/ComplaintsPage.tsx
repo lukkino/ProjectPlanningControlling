@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
 import type { Complaint, SalesforceStatus } from '../api/types'
 import { ARCHITECTURES, NO_ARCHITECTURE, architecturesOf } from '../lib/complaints'
 import { formatIsoDate } from '../lib/dates'
@@ -132,6 +132,11 @@ export function ComplaintsPage() {
     onSuccess: invalidate,
   })
 
+  const exportExcel = useMutation({
+    mutationFn: api.complaints.exportExcel,
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+  })
+
   const all = complaints ?? []
 
   const architectureCounts = countBy(all, architecturesOf)
@@ -228,17 +233,30 @@ export function ComplaintsPage() {
           />
         </div>
 
-        <p className="muted" style={{ fontSize: 13 }}>
-          {visible.length} di {all.length} complaint
-          {filtersActive && (
-            <>
-              {' · '}
-              <button className="link-btn" onClick={clearFilters}>
-                Azzera filtri
-              </button>
-            </>
-          )}
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <p className="muted" style={{ fontSize: 13 }}>
+            {visible.length} di {all.length} complaint
+            {filtersActive && (
+              <>
+                {' · '}
+                <button className="link-btn" onClick={clearFilters}>
+                  Azzera filtri
+                </button>
+              </>
+            )}
+          </p>
+          <button
+            className="btn"
+            title="Scarica tutti i complaint in un file Excel con le intestazioni filtrabili (i filtri qui sopra non contano)"
+            disabled={exportExcel.isPending || all.length === 0}
+            onClick={() => exportExcel.mutate()}
+          >
+            {exportExcel.isPending ? 'Esportazione…' : '⬇ Esporta in Excel (.xlsx)'}
+          </button>
+        </div>
+        {exportExcel.isError && (
+          <div className="error-banner">Esportazione non riuscita: {(exportExcel.error as Error).message}</div>
+        )}
 
         <div className="table-wrap table-wrap--scroll">
           <table className="complaints-table">
