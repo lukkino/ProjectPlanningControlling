@@ -17,6 +17,11 @@ const JIRA_STATUS_ORDER = ['To Do', 'Analysis', 'Confirmed', 'In Progress', 'On 
 const SEVERITY_ORDER = ['High', 'Medium', 'Low']
 // Voce del filtro Severity per i complaint che non ce l'hanno.
 const NO_SEVERITY = 'N/D'
+// Voce del filtro Fix Version per i complaint che non ce l'hanno.
+const NO_FIX_VERSION = 'N/D'
+// Le fix version di un complaint (su Jira possono essere piu' d'una, qui
+// separate da ", "): conta per ognuna, nei conteggi e nel filtro.
+const fixVersionsOf = (c: Complaint) => (c.fix_versions ? c.fix_versions.split(', ') : [NO_FIX_VERSION])
 const severityRank = (c: Complaint) => {
   const index = SEVERITY_ORDER.indexOf(c.severity ?? '')
   return index === -1 ? SEVERITY_ORDER.length : index
@@ -38,8 +43,8 @@ type FilterGroupProps = {
 }
 
 // Gruppo di pulsanti-filtro: piu' valori attivi nello stesso gruppo si
-// sommano (OR). Architettura e Severity partono senza nessun valore attivo
-// (= nessun filtro) e si accende cio' che si vuole vedere; i due gruppi di
+// sommano (OR). Architettura, Fix Version e Severity partono senza nessun
+// valore attivo (= nessun filtro) e si accende cio' che si vuole vedere; i due gruppi di
 // stato funzionano al contrario: tutti attivi all'inizio, e si spegne cio'
 // che si vuole nascondere.
 function FilterGroup({ label, options, counts, selected, onToggle }: FilterGroupProps) {
@@ -118,6 +123,7 @@ export function ComplaintsPage() {
   const [salesforceHidden, setSalesforceHidden] = useState<Set<string>>(new Set())
   const [jiraHidden, setJiraHidden] = useState<Set<string>>(new Set())
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
+  const [fixVersionFilter, setFixVersionFilter] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
   // Clic sull'intestazione: inverte il verso se la tabella e' gia' ordinata
   // su quella colonna, altrimenti ordina su quella (dal piu' nuovo / dalla
@@ -143,6 +149,7 @@ export function ComplaintsPage() {
   const salesforceCounts = countBy(all, (c) => [c.salesforce_status])
   const jiraCounts = countBy(all, (c) => [c.jira_status ?? ''])
   const severityCounts = countBy(all, (c) => [c.severity ?? NO_SEVERITY])
+  const fixVersionCounts = countBy(all, fixVersionsOf)
 
   const architectureOptions = architectureCounts.has(NO_ARCHITECTURE) ? [...ARCHITECTURES, NO_ARCHITECTURE] : ARCHITECTURES
   const jiraOptions = [...jiraCounts.keys()]
@@ -161,6 +168,15 @@ export function ComplaintsPage() {
     ...(severityCounts.has(NO_SEVERITY) ? [NO_SEVERITY] : []),
   ]
 
+  // In ordine di nome (quindi di release: "PTBSYS-02-017" prima di
+  // "PTBSYS-03-003"), con N/D per ultimo.
+  const fixVersionOptions = [
+    ...[...fixVersionCounts.keys()]
+      .filter((v) => v !== NO_FIX_VERSION)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    ...(fixVersionCounts.has(NO_FIX_VERSION) ? [NO_FIX_VERSION] : []),
+  ]
+
   // Ordinamento per data di creazione Jira (stringhe ISO yyyy-mm-dd,
   // confrontabili direttamente); a parita' di data per numero di issue, nello
   // stesso verso. I complaint senza data restano sempre in fondo.
@@ -174,7 +190,8 @@ export function ComplaintsPage() {
         (architectureFilter.size === 0 || architecturesOf(c).some((a) => architectureFilter.has(a))) &&
         !salesforceHidden.has(c.salesforce_status) &&
         !jiraHidden.has(c.jira_status ?? '') &&
-        (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)),
+        (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)) &&
+        (fixVersionFilter.size === 0 || fixVersionsOf(c).some((v) => fixVersionFilter.has(v))),
     )
     .sort((a, b) => {
       if (sort.key === 'severity' && a.severity !== b.severity) {
@@ -187,12 +204,14 @@ export function ComplaintsPage() {
         (a.jira_created.localeCompare(b.jira_created) || a.jira_key.localeCompare(b.jira_key, undefined, { numeric: true }))
       )
     })
-  const filtersActive = architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size > 0
+  const filtersActive =
+    architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size + fixVersionFilter.size > 0
   const clearFilters = () => {
     setArchitectureFilter(new Set())
     setSalesforceHidden(new Set())
     setJiraHidden(new Set())
     setSeverityFilter(new Set())
+    setFixVersionFilter(new Set())
   }
 
   return (
@@ -230,6 +249,13 @@ export function ComplaintsPage() {
             counts={severityCounts}
             selected={severityFilter}
             onToggle={(v) => setSeverityFilter((s) => toggled(s, v))}
+          />
+          <FilterGroup
+            label="Fix Version"
+            options={fixVersionOptions}
+            counts={fixVersionCounts}
+            selected={fixVersionFilter}
+            onToggle={(v) => setFixVersionFilter((s) => toggled(s, v))}
           />
         </div>
 
