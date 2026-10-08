@@ -540,11 +540,14 @@ class ComplaintIssue:
         source_note: str | None,
         salesforce_case_id: str | None,
         severity: str | None,
+        fix_versions: list[str],
     ):
         self.key = key
         self.summary = summary
         self.status = status
         self.labels = labels
+        # Campo Jira "Fix versions": i nomi delle versioni, nell'ordine di Jira.
+        self.fix_versions = fix_versions
         self.created = created
         # Data di chiusura: valorizzata solo se l'issue e' in uno stato
         # "chiuso" (categoria Jira "done": Done, Rejected...).
@@ -579,6 +582,7 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
         "summary",
         "status",
         "labels",
+        "fixVersions",
         "created",
         "resolutiondate",
         "statuscategorychangedate",
@@ -626,6 +630,7 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
                             source_note=f.get(SOURCE_NOTE_FIELD),
                             salesforce_case_id=f.get(SALESFORCE_CASE_ID_FIELD),
                             severity=(f.get(SEVERITY_FIELD) or {}).get("value"),
+                            fix_versions=[v["name"] for v in (f.get("fixVersions") or []) if v.get("name")],
                         )
                     )
 

@@ -55,6 +55,7 @@ EXPORT_COLUMNS = [
     ("Stato Salesforce", 18),
     ("ID Jira", 15),
     ("Stato Jira", 15),
+    ("Fix Version", 28),
     ("Severity", 12),
     ("Creato su Jira", 16),
     ("Architettura", 15),
@@ -133,6 +134,7 @@ def export_complaints(db: Session = Depends(get_db)):
                 c.salesforce_status,
                 c.jira_key,
                 c.jira_status,
+                c.fix_versions,
                 c.severity,
                 c.jira_created,
                 c.architecture,
@@ -152,7 +154,7 @@ def export_complaints(db: Session = Depends(get_db)):
         key = row[3]
         key.hyperlink = f"{JIRA_BROWSE_URL}{key.value}"
         key.font = Font(color="0563C1", underline="single")
-        row[6].number_format = "DD/MM/YYYY"
+        row[7].number_format = "DD/MM/YYYY"
     # Filtro automatico su tutte le colonne, con l'intestazione bloccata in
     # alto scorrendo le righe.
     sheet.auto_filter.ref = sheet.dimensions
@@ -219,6 +221,7 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
             updated += 1
         complaint.summary = issue.summary
         complaint.jira_status = issue.status
+        complaint.fix_versions = ", ".join(issue.fix_versions) or None
         complaint.severity = issue.severity
         complaint.jira_created = issue.created
         complaint.jira_resolved = issue.resolved

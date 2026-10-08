@@ -267,6 +267,7 @@ export function ComplaintsPage() {
                 <th>Stato Salesforce</th>
                 <th>ID Jira</th>
                 <th>Stato Jira</th>
+                <th>Fix Version</th>
                 <th aria-sort={sort.key !== 'severity' ? undefined : sort.desc ? 'descending' : 'ascending'}>
                   <button
                     className="sort-btn"
@@ -332,6 +333,7 @@ export function ComplaintsPage() {
                       <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>
                     )}
                   </td>
+                  <td>{c.fix_versions ?? <span className="muted">-</span>}</td>
                   <td style={c.severity === 'High' ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
                     {c.severity ?? <span className="muted">-</span>}
                   </td>
@@ -382,7 +384,7 @@ export function ComplaintsPage() {
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="muted">
+                  <td colSpan={10} className="muted">
                     {isLoading
                       ? 'Caricamento...'
                       : all.length === 0

@@ -412,8 +412,8 @@ class Complaint(Base):
     """Un complaint: un Bug Jira nato da un case Salesforce, sincronizzato
     dalla JQL base dell'area Complaints (non appartiene a un Project).
 
-    Da Jira (sovrascritti a ogni sync): summary, stato, severity, label, numero e id
-    del case Salesforce. Architettura e Sito Cliente non hanno un campo Jira
+    Da Jira (sovrascritti a ogni sync): summary, stato, fix version, severity,
+    label, numero e id del case Salesforce. Architettura e Sito Cliente non hanno un campo Jira
     dedicato: sono ricavati dalle label (vedi routers/complaints.py). Lo
     stato Salesforce non esiste in Jira: e' gestito a mano qui e la sync non
     lo tocca."""
@@ -424,6 +424,9 @@ class Complaint(Base):
     jira_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Campo Jira "Fix versions": nomi delle versioni, piu' d'una separate da
+    # ", "; None se non valorizzato.
+    fix_versions: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Campo Jira "Severity" (High/Medium/Low); None se non valorizzato.
     severity: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

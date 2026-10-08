@@ -337,6 +337,9 @@ export type Complaint = {
   jira_key: string
   summary: string | null
   jira_status: string | null
+  // Campo Jira "Fix versions": piu' d'una separate da ", "; null se non
+  // valorizzato.
+  fix_versions: string | null
   // Campo Jira "Severity" (High/Medium/Low); null se non valorizzato.
   severity: string | null
   jira_created: string | null
