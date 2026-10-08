@@ -371,6 +371,11 @@ tbody tr:hover .sticky-col { background: var(--bg); }
    quello della pagina); sfondo pieno, altrimenti le righe si vedrebbero
    passare sotto le date. */
 .gantt-sticky-header { position: sticky; top: 0; z-index: 3; background: var(--surface); }
+/* Calendario e righe si trascinano col mouse per scorrere in orizzontale
+   (vedi dragHandlers in BacklogGanttChart): niente selezione del testo
+   mentre si trascina. */
+.gantt-draggable { cursor: grab; user-select: none; }
+.gantt-draggable--dragging { cursor: grabbing; }
 .gantt-labels-col { flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); }
 .gantt-label-row {
   display: flex;

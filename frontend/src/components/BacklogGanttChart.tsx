@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
 
@@ -108,6 +108,34 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
     if (headerScrollRef.current && source.current) headerScrollRef.current.scrollLeft = source.current.scrollLeft
   }
 
+  // Trascinamento col mouse (tasto sinistro premuto) su calendario o righe:
+  // sposta il Gantt a destra/sinistra, come con la barra di scroll. Solo
+  // mouse: col tocco lo scorrimento e' gia' quello nativo. I gestori stanno
+  // sul contenuto e non sull'elemento che scrolla, cosi' un clic sulla sua
+  // barra di scroll non avvia un trascinamento.
+  const dragRef = useRef<{ startX: number; startScroll: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const endDrag = () => {
+    dragRef.current = null
+    setDragging(false)
+  }
+  const dragHandlers = {
+    onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !wrapRef.current) return
+      dragRef.current = { startX: e.clientX, startScroll: wrapRef.current.scrollLeft }
+      // Il trascinamento continua anche se il puntatore esce dal Gantt.
+      e.currentTarget.setPointerCapture(e.pointerId)
+      setDragging(true)
+    },
+    onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current
+      if (drag && wrapRef.current) wrapRef.current.scrollLeft = drag.startScroll - (e.clientX - drag.startX)
+    },
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+  }
+  const dragClassName = dragging ? 'gantt-draggable gantt-draggable--dragging' : 'gantt-draggable'
+
   const allDays: number[] = []
   for (const item of items) {
     for (const field of [item.planned_start, item.expected_finish, item.actual_start, item.actual_finish]) {
@@ -188,7 +216,11 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
         <div style={{ display: 'flex' }}>
           <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
           <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ width: chartWidth, height: HEADER_HEIGHT, position: 'relative' }}>
+            <div
+              className={dragClassName}
+              {...dragHandlers}
+              style={{ width: chartWidth, height: HEADER_HEIGHT, position: 'relative' }}
+            >
               <div
                 style={{
                   position: 'absolute',
@@ -296,7 +328,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
             mirrorHeaderScroll(wrapRef)
           }}
         >
-          <div style={{ width: chartWidth }}>
+          <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth }}>
             {items.map((item) => {
               const pStart = dateStrToEpochDays(item.planned_start)
               const pEnd = dateStrToEpochDays(item.expected_finish)
