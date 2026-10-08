@@ -119,6 +119,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   notes: 160,
 }
 const HANDLE_COLUMN_WIDTH = 30
+const SELECT_COLUMN_WIDTH = 30
 const DELETE_COLUMN_WIDTH = 36
 
 // Colonne "congelate" a sinistra durante lo scroll orizzontale, cosi' si
@@ -144,6 +145,9 @@ export function BacklogPage() {
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
   const [draggedCol, setDraggedCol] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false)
+  const [bulkSizing, setBulkSizing] = useState('')
 
   // Barra di scroll orizzontale "specchio" sopra la tabella (vedi CSS
   // .table-scroll-mirror): tiene la stessa scrollLeft di .table-wrap, cosi'
@@ -199,6 +203,14 @@ export function BacklogPage() {
   })
   const sync = useMutation({
     mutationFn: () => api.backlog.sync(project.id),
+    onSuccess: invalidate,
+  })
+  // Azioni in blocco sugli item selezionati: una sola chiamata, tutto o
+  // niente lato backend (vedi routers/backlog.py::bulk_update_backlog_items).
+  const bulkUpdate = useMutation({
+    mutationFn: async (updates: (Partial<BacklogItem> & { id: number })[]) => {
+      if (updates.length > 0) await api.backlog.bulkUpdate(project.id, updates)
+    },
     onSuccess: invalidate,
   })
 
@@ -372,6 +384,7 @@ export function BacklogPage() {
       // cosi' le due date restano coerenti con il nuovo sizing.
       render: (item) => (
         <input
+          key={item.planned_duration_days ?? ''}
           type="number"
           defaultValue={item.planned_duration_days ?? ''}
           onBlur={(e) => {
@@ -652,11 +665,11 @@ export function BacklogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnWidths])
 
-  // "left" di ogni colonna congelata = larghezza della maniglia + somma
-  // delle colonne congelate che la precedono nell'ordine attuale (che puo'
+  // "left" di ogni colonna congelata = larghezza di selezione e maniglia +
+  // somma delle colonne congelate che la precedono nell'ordine attuale (che puo'
   // cambiare per drag&drop delle intestazioni o resize).
   const stickyLeftByKey: Record<string, number> = {}
-  let stickyCursor = HANDLE_COLUMN_WIDTH
+  let stickyCursor = SELECT_COLUMN_WIDTH + HANDLE_COLUMN_WIDTH
   for (const col of orderedColumns) {
     if (!STICKY_COLUMN_KEYS.has(col.key)) continue
     stickyLeftByKey[col.key] = stickyCursor
@@ -666,6 +679,7 @@ export function BacklogPage() {
   // Larghezza totale della tabella (colgroup), per dimensionare lo spacer
   // dentro la barra di scroll "specchio" sopra la tabella.
   const tableScrollWidth =
+    SELECT_COLUMN_WIDTH +
     HANDLE_COLUMN_WIDTH +
     orderedColumns.reduce((sum, col) => sum + (columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80), 0) +
     DELETE_COLUMN_WIDTH
@@ -790,6 +804,77 @@ export function BacklogPage() {
     else newOrder = 1
 
     update.mutate({ id: moved.id, data: { priority_order: newOrder } })
+  }
+
+  // Selezione per le azioni in blocco: contano solo gli item selezionati E
+  // visibili con i filtri attivi, nell'ordine di priorita' del backlog (non
+  // in quello di un eventuale "Ordina per stato").
+  const visibleIds = new Set(displayItems.map((i) => i.id))
+  const selectedItems = (items ?? []).filter((i) => selectedIds.has(i.id) && visibleIds.has(i.id))
+  const allVisibleSelected = displayItems.length > 0 && selectedItems.length === displayItems.length
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  }
+
+  // priority_order da salvare perche' il backlog risulti nell'ordine dato
+  // (tutti gli item, non solo quelli visibili): si riusano i valori gia'
+  // presenti, cosi' cambia solo chi si sposta davvero. Con valori duplicati
+  // l'ordine attuale non e' univoco, quindi si rinumera tutto da 1.
+  const reorderUpdates = (ordered: BacklogItem[]) => {
+    const slots = (items ?? []).map((i) => i.priority_order)
+    const unique = slots.every((v, i) => i === 0 || v > slots[i - 1])
+    return ordered
+      .map((item, i) => ({ item, priority_order: unique ? slots[i] : i + 1 }))
+      .filter(({ item, priority_order }) => item.priority_order !== priority_order)
+      .map(({ item, priority_order }) => ({ id: item.id, priority_order }))
+  }
+
+  const runBulk = (updates: (Partial<BacklogItem> & { id: number })[]) => {
+    setBulkMenuOpen(false)
+    bulkUpdate.mutate(updates)
+  }
+
+  const moveSelectedToTop = () => {
+    const moved = new Set(selectedItems.map((i) => i.id))
+    runBulk(reorderUpdates([...selectedItems, ...(items ?? []).filter((i) => !moved.has(i.id))]))
+  }
+
+  // Nella finestra di forecast entrano solo item in scope, inclusi nel
+  // codefreeze e non Done (vedi forecastCandidates): gli altri selezionati
+  // restano dove sono. La finestra ha forecastTarget posti: i selezionati
+  // occupano gli ultimi, subito sopra la linea di taglio, e gli item che li
+  // occupavano scendono sotto. Gli item che non sono candidati non cambiano
+  // posizione.
+  const forecastCandidateIds = new Set(forecastCandidates.map((i) => i.id))
+  const forecastMovable = selectedItems.filter((i) => forecastCandidateIds.has(i.id))
+  const moveSelectedIntoForecast = () => {
+    if (!forecastTarget) return
+    const moved = new Set(forecastMovable.map((i) => i.id))
+    const rest = forecastCandidates.filter((i) => !moved.has(i.id))
+    const keep = Math.max(0, forecastTarget - forecastMovable.length)
+    const candidates = [...rest.slice(0, keep), ...forecastMovable, ...rest.slice(keep)]
+    let next = 0
+    runBulk(reorderUpdates((items ?? []).map((i) => (forecastCandidateIds.has(i.id) ? candidates[next++] : i))))
+  }
+
+  // Stesso Sizing (gg) per tutti i selezionati; come sulla singola cella, chi
+  // ha gia' uno Start pian. si vede ricalcolare anche la Fine pian.
+  const bulkSizingValue = Number(bulkSizing)
+  const applyBulkSizing = () => {
+    runBulk(
+      selectedItems.map((item) => {
+        const expected_finish = addWorkingDays(item.planned_start, bulkSizingValue)
+        return expected_finish
+          ? { id: item.id, planned_duration_days: bulkSizingValue, expected_finish }
+          : { id: item.id, planned_duration_days: bulkSizingValue }
+      }),
+    )
+    setBulkSizing('')
   }
 
   return (
@@ -999,6 +1084,88 @@ export function BacklogPage() {
 
       {view === 'table' && (
       <>
+      {bulkUpdate.isError && (
+        <div className="error-banner">
+          Azione in blocco non riuscita, nessun item modificato: {(bulkUpdate.error as Error).message}
+        </div>
+      )}
+      {selectedItems.length > 0 && (
+        <div className="bulk-bar">
+          <strong>
+            {selectedItems.length} {selectedItems.length === 1 ? 'item selezionato' : 'item selezionati'}
+          </strong>
+          <div className="column-menu">
+            <button
+              className="btn btn-primary"
+              aria-expanded={bulkMenuOpen}
+              disabled={bulkUpdate.isPending}
+              onClick={() => setBulkMenuOpen((open) => !open)}
+            >
+              {bulkUpdate.isPending ? 'Salvataggio...' : 'Azioni ▾'}
+            </button>
+            {bulkMenuOpen && (
+              <>
+                <div className="column-menu-backdrop" onClick={() => setBulkMenuOpen(false)} />
+                <div className="column-menu-panel">
+                  <span className="bulk-menu-label">Sposta</span>
+                  <button className="btn" onClick={moveSelectedToTop}>
+                    ⤒ Metti in cima alla lista
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={!forecastTarget || forecastMovable.length === 0}
+                    title={
+                      !forecastTarget
+                        ? 'Nessuna finestra di forecast: serve una simulazione di Forecasting'
+                        : forecastMovable.length < selectedItems.length
+                          ? `Solo ${forecastMovable.length} dei ${selectedItems.length} selezionati possono entrare nella finestra: gli altri sono Done, non in scope o non inclusi nel codefreeze`
+                          : 'Sposta i selezionati negli ultimi posti della finestra, subito sopra la linea di taglio'
+                    }
+                    onClick={moveSelectedIntoForecast}
+                  >
+                    ⤓ Metti dentro la finestra di forecast
+                  </button>
+                  <span className="bulk-menu-label">Modifica</span>
+                  <div className="bulk-menu-row">
+                    <span>Sizing (gg)</span>
+                    <input type="number" min={0} value={bulkSizing} onChange={(e) => setBulkSizing(e.target.value)} />
+                    <button className="btn" disabled={!(bulkSizingValue > 0)} onClick={applyBulkSizing}>
+                      Applica
+                    </button>
+                  </div>
+                  <div className="bulk-menu-row">
+                    <span>In Scope</span>
+                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, in_scope: true })))}>
+                      Sì
+                    </button>
+                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, in_scope: false })))}>
+                      No
+                    </button>
+                  </div>
+                  <div className="bulk-menu-row">
+                    <span>Incluso in codefreeze</span>
+                    <button
+                      className="btn"
+                      onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, included_in_codefreeze: true })))}
+                    >
+                      Sì
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, included_in_codefreeze: false })))}
+                    >
+                      No
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <button className="btn" onClick={() => setSelectedIds(new Set())}>
+            Deseleziona
+          </button>
+        </div>
+      )}
       <div
         className="table-scroll-mirror"
         ref={topScrollRef}
@@ -1015,6 +1182,7 @@ export function BacklogPage() {
       >
         <table className="backlog-table backlog-table--fixed">
           <colgroup>
+            <col style={{ width: SELECT_COLUMN_WIDTH }} />
             <col style={{ width: HANDLE_COLUMN_WIDTH }} />
             {orderedColumns.map((col) => (
               <col key={col.key} style={{ width: columnWidths[col.key] ?? DEFAULT_COLUMN_WIDTH[col.key] ?? 80 }} />
@@ -1023,7 +1191,18 @@ export function BacklogPage() {
           </colgroup>
           <thead>
             <tr>
-              <th className="sticky-col-header" style={{ left: 0 }} />
+              <th className="sticky-col-header" style={{ left: 0, textAlign: 'center' }}>
+                <input
+                  type="checkbox"
+                  title="Seleziona tutti gli item visibili"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selectedItems.length > 0 && !allVisibleSelected
+                  }}
+                  onChange={() => setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleIds))}
+                />
+              </th>
+              <th className="sticky-col-header" style={{ left: SELECT_COLUMN_WIDTH }} />
               {orderedColumns.map((col) => (
                 <th
                   key={col.key}
@@ -1065,6 +1244,14 @@ export function BacklogPage() {
                 onDrop={() => handleDrop(item.id)}
                 style={draggedId === item.id ? { opacity: 0.4 } : undefined}
               >
+                <td className="sticky-col" style={{ left: 0, textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    title="Seleziona per le azioni in blocco"
+                    checked={selectedIds.has(item.id)}
+                    onChange={() => toggleSelected(item.id)}
+                  />
+                </td>
                 <td
                   draggable
                   onDragStart={(e) => {
@@ -1074,7 +1261,7 @@ export function BacklogPage() {
                   }}
                   onDragEnd={() => setDraggedId(null)}
                   className="drag-handle sticky-col"
-                  style={{ left: 0 }}
+                  style={{ left: SELECT_COLUMN_WIDTH }}
                   title="Trascina per riordinare"
                 >
                   ⠿
@@ -1100,14 +1287,14 @@ export function BacklogPage() {
               </tr>
               {item.id === forecastCutoffId && (
                 <tr className="forecast-cutoff-label-row">
-                  <td colSpan={orderedColumns.length + 2}>{forecastCutoffLabel}</td>
+                  <td colSpan={orderedColumns.length + 3}>{forecastCutoffLabel}</td>
                 </tr>
               )}
               </Fragment>
             ))}
             {displayItems.length === 0 && (
               <tr>
-                <td colSpan={orderedColumns.length + 2} className="muted">
+                <td colSpan={orderedColumns.length + 3} className="muted">
                   Nessun item nel backlog. Sincronizza da Jira o aggiungine uno manualmente.
                 </td>
               </tr>

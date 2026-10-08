@@ -147,6 +147,8 @@ export const api = {
     create: (projectId: number, data: Partial<BacklogItem>) =>
       post<BacklogItem>(`/projects/${projectId}/backlog`, data),
     update: (id: number, data: Partial<BacklogItem>) => put<BacklogItem>(`/backlog/${id}`, data),
+    bulkUpdate: (projectId: number, data: (Partial<BacklogItem> & { id: number })[]) =>
+      put<BacklogItem[]>(`/projects/${projectId}/backlog/bulk`, data),
     remove: (id: number) => del(`/backlog/${id}`),
     sync: (projectId: number) => post<SyncResult>(`/projects/${projectId}/backlog/sync`),
   },

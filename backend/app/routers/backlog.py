@@ -47,6 +47,33 @@ def create_backlog_item(project_id: int, payload: schemas.BacklogItemCreate, db:
     return item
 
 
+@router.put("/api/projects/{project_id}/backlog/bulk", response_model=list[schemas.BacklogItem])
+def bulk_update_backlog_items(
+    project_id: int, payload: list[schemas.BacklogItemBulkUpdate], db: Session = Depends(get_db)
+):
+    """Aggiorna piu' item in una sola chiamata (azioni in blocco del Backlog:
+    riordino, sizing, in scope, codefreeze). Tutto o niente: se anche un solo
+    id non appartiene a questo progetto non viene salvato nulla."""
+    _get_project_or_404(db, project_id)
+    ids = [entry.id for entry in payload]
+    by_id = {
+        item.id: item
+        for item in db.query(models.BacklogItem).filter(
+            models.BacklogItem.project_id == project_id, models.BacklogItem.id.in_(ids)
+        )
+    }
+    missing = sorted(set(ids) - set(by_id))
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Backlog item non trovati in questo progetto: {missing}")
+
+    for entry in payload:
+        item = by_id[entry.id]
+        for field, value in entry.model_dump(exclude_unset=True, exclude={"id"}).items():
+            setattr(item, field, value)
+    db.commit()
+    return [by_id[item_id] for item_id in dict.fromkeys(ids)]
+
+
 @router.put("/api/backlog/{item_id}", response_model=schemas.BacklogItem)
 def update_backlog_item(item_id: int, payload: schemas.BacklogItemUpdate, db: Session = Depends(get_db)):
     item = _get_item_or_404(db, item_id)

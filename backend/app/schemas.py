@@ -183,6 +183,10 @@ class BacklogItemUpdate(BaseModel):
     progetto_id: int | None = None
 
 
+class BacklogItemBulkUpdate(BacklogItemUpdate):
+    id: int
+
+
 class BacklogItem(BacklogItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
