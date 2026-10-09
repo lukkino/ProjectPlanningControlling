@@ -98,7 +98,6 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   summary: 220,
   parent: 110,
   issue_type: 70,
-  jira_status: 80,
   in_scope: 60,
   included_in_codefreeze: 80,
   status: 70,
@@ -142,6 +141,7 @@ export function BacklogPage() {
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
+  const [hideDone, setHideDone] = useState(false)
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   // Gantt: di default solo gli item dentro la finestra di forecast.
@@ -342,7 +342,6 @@ export function BacklogPage() {
         ),
     },
     { key: 'issue_type', label: 'Tipo', render: (item) => item.issue_type ?? '—' },
-    { key: 'jira_status', label: 'Stato Jira', render: (item) => item.jira_status ?? '—' },
     {
       key: 'in_scope',
       label: 'In Scope',
@@ -780,6 +779,7 @@ export function BacklogPage() {
     (i) =>
       (!onlyInScope || i.in_scope) &&
       (!onlyCodefreeze || i.included_in_codefreeze) &&
+      (!hideDone || i.status !== 'Done') &&
       (!i.issue_type || !hiddenTypes.has(i.issue_type)),
   )
 
@@ -1032,6 +1032,11 @@ export function BacklogPage() {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyCodefreeze} onChange={(e) => setOnlyCodefreeze(e.target.checked)} />
           Mostra solo item "Incluso in codefreeze"
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} />
+          Nascondi item "Done"
         </label>
 
         <label
