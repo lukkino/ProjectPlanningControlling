@@ -144,6 +144,8 @@ export function BacklogPage() {
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
+  // Gantt: di default solo gli item dentro la finestra di forecast.
+  const [ganttOnlyForecast, setGanttOnlyForecast] = useState(true)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
@@ -1044,6 +1046,25 @@ export function BacklogPage() {
           </div>
         )}
 
+        {view === 'gantt' && (
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            title={
+              forecastTarget != null
+                ? `I primi ${forecastTarget} PBI non ancora Done, in scope e inclusi nel codefreeze: gli stessi evidenziati in verde in tabella`
+                : 'Nessuna finestra di forecast: serve una simulazione di Forecasting. Il Gantt mostra tutti gli item.'
+            }
+          >
+            <input
+              type="checkbox"
+              checked={ganttOnlyForecast && forecastTarget != null}
+              disabled={forecastTarget == null}
+              onChange={(e) => setGanttOnlyForecast(e.target.checked)}
+            />
+            Mostra solo item nella finestra di forecast
+          </label>
+        )}
+
         {view === 'table' && (
           <div className="column-menu">
             <button
@@ -1081,7 +1102,11 @@ export function BacklogPage() {
 
       {view === 'gantt' && (
         <BacklogGanttChart
-          items={displayItems}
+          items={
+            ganttOnlyForecast && forecastTarget != null
+              ? displayItems.filter((i) => forecastHighlightIds.has(i.id))
+              : displayItems
+          }
           jiraBrowseUrl={project.jira_jql ? 'https://inpeco.atlassian.net/browse/' : null}
         />
       )}
