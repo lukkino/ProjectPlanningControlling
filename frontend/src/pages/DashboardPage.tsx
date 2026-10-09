@@ -189,12 +189,25 @@ function PlanVsActualCard({
                 <Tooltip content={<PlanVsActualTooltip labels={labels} />} cursor={{ fill: 'var(--bg)' }} />
                 <Legend
                   wrapperStyle={{ fontSize: 12 }}
-                  payload={[
-                    { value: labels.planned, type: 'square', color: COLOR_PLANNED },
-                    { value: labels.actual, type: 'square', color: COLOR_ACTUAL },
-                    { value: 'Scostamento oltre la previsione', type: 'square', color: 'var(--danger)' },
-                    { value: 'Scostamento entro la previsione', type: 'square', color: 'var(--success)' },
-                  ]}
+                  // Voci scritte a mano (content): lo Scostamento ha due
+                  // colori, uno per segno, che la legenda automatica - una
+                  // voce per serie - non puo' mostrare. Recharts 3 non
+                  // accetta piu' la prop "payload" per farlo.
+                  content={() => (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 14px' }}>
+                      {[
+                        { value: labels.planned, color: COLOR_PLANNED },
+                        { value: labels.actual, color: COLOR_ACTUAL },
+                        { value: 'Scostamento oltre la previsione', color: 'var(--danger)' },
+                        { value: 'Scostamento entro la previsione', color: 'var(--success)' },
+                      ].map((entry) => (
+                        <span key={entry.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ width: 10, height: 10, background: entry.color, flexShrink: 0 }} />
+                          {entry.value}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 />
                 <ReferenceLine y={0} stroke="var(--text-muted)" />
                 <Bar dataKey="planned" name={labels.planned} fill={COLOR_PLANNED} radius={[3, 3, 0, 0]} maxBarSize={22} />
@@ -334,7 +347,7 @@ function IssueTable({
 }: {
   items: BacklogItem[]
   lastHeader: string
-  lastValue: (item: BacklogItem) => string
+  lastValue: (item: BacklogItem) => string | null
   emptyMessage: string
 }) {
   if (items.length === 0) {
@@ -365,7 +378,7 @@ function IssueTable({
               </td>
               <td>{item.issue_type ?? <span className="muted">-</span>}</td>
               <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
-              <td>{lastValue(item)}</td>
+              <td>{lastValue(item) ?? <span className="muted">-</span>}</td>
             </tr>
           ))}
         </tbody>

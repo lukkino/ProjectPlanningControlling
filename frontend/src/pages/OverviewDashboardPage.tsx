@@ -473,7 +473,7 @@ function DoneDonut({ data, title, rangeLabel }: { data: OverviewMetrics | undefi
                     <Cell key={d.issue_type} fill={d.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number, name: string) => [value, name]} />
+                <Tooltip formatter={(value, name) => [value, name]} />
               </PieChart>
             </ResponsiveContainer>
             {/* Totale al centro della ciambella, sovrapposto al grafico. */}

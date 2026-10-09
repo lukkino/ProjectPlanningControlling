@@ -26,7 +26,7 @@ export function ProjectIncrementLinkPage() {
   // projectId null = scollega. previousProjectId: l'increment a cui era
   // collegato prima, se diverso da questo, che lo perde.
   const setLink = useMutation({
-    mutationFn: ({ target, projectId }: { target: LinkTarget; projectId: number | null; progettoId: number; previousProjectId?: number | null }) =>
+    mutationFn: ({ target, projectId }: { target: LinkTarget; projectId: number | null; progettoId: number; previousProjectId?: number | null }): Promise<unknown> =>
       target.kind === 'progetto'
         ? api.increments.update(target.id, { project_id: projectId })
         : api.subProjects.update(target.id, { project_id: projectId }),
