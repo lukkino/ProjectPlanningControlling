@@ -43,8 +43,8 @@ type FilterGroupProps = {
 }
 
 // Gruppo di pulsanti-filtro: piu' valori attivi nello stesso gruppo si
-// sommano (OR). Architettura, Fix Version e Severity partono senza nessun
-// valore attivo (= nessun filtro) e si accende cio' che si vuole vedere; i due gruppi di
+// sommano (OR). Architettura e Severity partono senza nessun valore attivo
+// (= nessun filtro) e si accende cio' che si vuole vedere; i due gruppi di
 // stato funzionano al contrario: tutti attivi all'inizio, e si spegne cio'
 // che si vuole nascondere.
 function FilterGroup({ label, options, counts, selected, onToggle }: FilterGroupProps) {
@@ -61,6 +61,44 @@ function FilterGroup({ label, options, counts, selected, onToggle }: FilterGroup
           {option} <span className="muted">{counts.get(option) ?? 0}</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+// Stesso filtro di FilterGroup (nessun valore scelto = nessun filtro, piu'
+// valori si sommano) ma in un menu a tendina con le checkbox: per i gruppi
+// con molti valori (Fix Version), che a pulsanti occuperebbero piu' righe.
+function FilterMenu({ label, options, counts, selected, onToggle, onClear }: FilterGroupProps & { onClear: () => void }) {
+  const [open, setOpen] = useState(false)
+  const summary = selected.size === 0 ? 'Tutte' : selected.size === 1 ? [...selected][0] : `${selected.size} selezionate`
+  return (
+    <div className="filter-group">
+      <span className="filter-group-label">{label}</span>
+      <div className="column-menu filter-menu">
+        <button
+          className={`btn filter-btn${selected.size > 0 ? ' active' : ''}`}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {summary} ▾
+        </button>
+        {open && (
+          <>
+            <div className="column-menu-backdrop" onClick={() => setOpen(false)} />
+            <div className="column-menu-panel">
+              {options.map((option) => (
+                <label key={option}>
+                  <input type="checkbox" checked={selected.has(option)} onChange={() => onToggle(option)} />
+                  {option} <span className="muted">{counts.get(option) ?? 0}</span>
+                </label>
+              ))}
+              <button className="link-btn" disabled={selected.size === 0} onClick={onClear}>
+                Mostra tutte
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -250,12 +288,13 @@ export function ComplaintsPage() {
             selected={severityFilter}
             onToggle={(v) => setSeverityFilter((s) => toggled(s, v))}
           />
-          <FilterGroup
+          <FilterMenu
             label="Fix Version"
             options={fixVersionOptions}
             counts={fixVersionCounts}
             selected={fixVersionFilter}
             onToggle={(v) => setFixVersionFilter((s) => toggled(s, v))}
+            onClear={() => setFixVersionFilter(new Set())}
           />
         </div>
 

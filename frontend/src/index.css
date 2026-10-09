@@ -569,6 +569,11 @@ tr.phase-current input { background: #e6eefc; }
 .filter-btn .muted { font-size: 11px; }
 .filter-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 .filter-btn.active .muted { color: #dbe6ff; }
+/* Filtro in un menu a tendina (FilterMenu): lo stesso pannello del menu
+   "Colonne" del Backlog, ma allineato a sinistra sotto il suo pulsante
+   invece che al bordo destro. */
+.filter-menu { margin-left: 0; }
+.filter-menu .column-menu-panel { right: auto; left: 0; }
 .link-btn { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
 .complaints-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
