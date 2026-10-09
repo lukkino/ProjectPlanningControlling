@@ -516,7 +516,10 @@ export function DashboardPage() {
             {metrics?.percent_budget_used != null && (
               <span
                 style={{ fontSize: 13 }}
-                title={`Budget ore: somma dei budget dei progetti collegati (${project.progetti.map((p) => p.code).join(', ')})`}
+                title={`Budget ore: somma dei budget dei progetti e sotto-progetti collegati (${[
+                  ...project.progetti.map((p) => p.code),
+                  ...project.sub_projects.map((s) => `${s.increment_code} › ${s.name}`),
+                ].join(', ')})`}
               >
                 <strong style={metrics.percent_budget_used > 1 ? { color: 'var(--danger)' } : undefined}>
                   {pct(metrics.percent_budget_used)}

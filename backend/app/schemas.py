@@ -71,6 +71,16 @@ class IncrementSnapshotValueUpdate(BaseModel):
     actual_value: float | None = None
 
 
+class IncrementSnapshotSubValue(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    sub_project_id: int
+    actual_hours: float
+
+
+class IncrementSnapshotSubValueUpdate(BaseModel):
+    actual_hours: float = Field(ge=0)
+
+
 class IncrementSnapshotBase(BaseModel):
     snapshot_date: dt.date
     note: str | None = None
@@ -90,6 +100,8 @@ class IncrementSnapshot(IncrementSnapshotBase):
     id: int
     increment_id: int
     values: list[IncrementSnapshotValue] = []
+    # Actual ore dei sotto-progetti del progetto: solo quelli gia' inseriti.
+    sub_values: list[IncrementSnapshotSubValue] = []
 
 
 # ---------- Calcolatore ore progetto ----------
@@ -367,11 +379,39 @@ class IncrementUpdate(BaseModel):
     project_id: int | None = None
 
 
+class SubProjectCreate(BaseModel):
+    name: str
+    budget_hours: float = 0
+    order: int = 0
+
+
+class SubProjectUpdate(BaseModel):
+    name: str | None = None
+    budget_hours: float | None = None
+    # None esplicito = scollega il sotto-progetto dal rilascio.
+    project_id: int | None = None
+
+
+class SubProject(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    increment_id: int
+    # Codice del progetto di cui fa parte (es. "PTIH-MA26").
+    increment_code: str
+    name: str
+    budget_hours: float = 0
+    # Ore usate: l'Actual nell'ultimo snapshot dello Storico del progetto.
+    actual_hours: float = 0
+    project_id: int | None = None
+    order: int = 0
+
+
 class Increment(IncrementBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: dt.datetime
     updated_at: dt.datetime
+    sub_projects: list[SubProject] = []
 
 
 class ProjectDetail(ProjectListItem):
@@ -379,6 +419,9 @@ class ProjectDetail(ProjectListItem):
     # Progetti (budget/rendicontazione) collegati a questo rilascio: un
     # rilascio puo' averne piu' di uno (vedi Increment.project_id).
     progetti: list[Increment] = []
+    # Sotto-progetti collegati a questo rilascio, di progetti non collegati
+    # per intero.
+    sub_projects: list[SubProject] = []
 
 
 class IncrementDetail(Increment):

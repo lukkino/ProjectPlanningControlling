@@ -6,6 +6,7 @@ import { HoursCalculatorCard } from '../components/HoursCalculatorCard'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { RichText } from '../components/ScopeCard'
+import { SubProjectsCard } from '../components/SubProjectsCard'
 import { formatIsoDate } from '../lib/dates'
 
 export function IncrementDetailPage() {
@@ -34,7 +35,9 @@ export function IncrementDetailPage() {
 
   // Collega/scollega questo progetto a un increment GIA' ESISTENTE: e' solo
   // un update del campo project_id sul progetto, nessun nuovo increment
-  // viene creato. Un progetto appartiene al massimo a un increment.
+  // viene creato. Un progetto appartiene al massimo a un increment - per
+  // intero: in alternativa si collegano i suoi sotto-progetti, ognuno a un
+  // increment (vedi SubProjectsCard).
   const setProject = useMutation({
     mutationFn: (projectId: number | null) => api.increments.update(id, { project_id: projectId }),
     onSuccess: (_saved, projectId) => {
@@ -46,6 +49,8 @@ export function IncrementDetailPage() {
   })
 
   if (isLoading || !increment) return <p className="muted">Caricamento...</p>
+
+  const linkedSubProjects = increment.sub_projects.filter((s) => s.project_id !== null)
 
   const handleAttach = () => {
     if (!pickedProjectId) return
@@ -118,7 +123,7 @@ export function IncrementDetailPage() {
         </p>
       </div>
 
-      <IncrementHistoryCard incrementId={increment.id} />
+      <IncrementHistoryCard incrementId={increment.id} subProjects={increment.sub_projects} />
 
       <HoursCalculatorCard
         incrementId={increment.id}
@@ -126,10 +131,22 @@ export function IncrementDetailPage() {
         projectEndDate={increment.end_date}
       />
 
+      <SubProjectsCard increment={increment} />
+
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Increment collegato</h3>
+        {setProject.isError && (
+          <div className="error-banner">Collegamento non riuscito: {(setProject.error as Error).message}</div>
+        )}
 
-        {!increment.project && (
+        {!increment.project && linkedSubProjects.length > 0 && (
+          <p className="muted" style={{ margin: 0 }}>
+            Questo progetto è collegato tramite i suoi sotto-progetti (vedi sopra): per collegarlo per intero a un
+            increment, scollega prima i sotto-progetti.
+          </p>
+        )}
+
+        {!increment.project && linkedSubProjects.length === 0 && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={pickedProjectId} onChange={(e) => setPickedProjectId(e.target.value)} style={{ flex: 1 }}>
               <option value="">Collega un increment già creato...</option>

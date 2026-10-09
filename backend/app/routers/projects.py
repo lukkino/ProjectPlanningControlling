@@ -78,6 +78,8 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     # Project (rilascio) a cui essere collegata.
     for progetto in project.progetti:
         progetto.project_id = None
+    for sub_project in project.sub_projects:
+        sub_project.project_id = None
     db.delete(project)
     db.commit()
 

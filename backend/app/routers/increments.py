@@ -96,7 +96,17 @@ def get_increment(increment_id: int, db: Session = Depends(get_db)):
 @router.put("/{increment_id}", response_model=schemas.Increment)
 def update_increment(increment_id: int, payload: schemas.IncrementUpdate, db: Session = Depends(get_db)):
     increment = _get_increment_or_404(db, increment_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # Un progetto si collega per intero oppure tramite i sotto-progetti.
+    if data.get("project_id") is not None and any(s.project_id is not None for s in increment.sub_projects):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Il progetto {increment.code} ha sotto-progetti già collegati a un increment: "
+                "scollegali prima di collegare il progetto intero."
+            ),
+        )
+    for field, value in data.items():
         setattr(increment, field, value)
     db.commit()
     db.refresh(increment)
@@ -107,6 +117,58 @@ def update_increment(increment_id: int, payload: schemas.IncrementUpdate, db: Se
 def delete_increment(increment_id: int, db: Session = Depends(get_db)):
     increment = _get_increment_or_404(db, increment_id)
     db.delete(increment)
+    db.commit()
+
+
+# ---------- Sotto-progetti ----------
+
+def _get_sub_project_or_404(db: Session, sub_project_id: int) -> models.SubProject:
+    sub_project = db.get(models.SubProject, sub_project_id)
+    if sub_project is None:
+        raise HTTPException(status_code=404, detail="Sotto-progetto non trovato")
+    return sub_project
+
+
+@router.post("/{increment_id}/sub-projects", response_model=schemas.SubProject, status_code=201)
+def create_sub_project(increment_id: int, payload: schemas.SubProjectCreate, db: Session = Depends(get_db)):
+    _get_increment_or_404(db, increment_id)
+    sub_project = models.SubProject(increment_id=increment_id, **payload.model_dump())
+    db.add(sub_project)
+    db.commit()
+    db.refresh(sub_project)
+    return sub_project
+
+
+@router.put("/sub-projects/{sub_project_id}", response_model=schemas.SubProject)
+def update_sub_project(sub_project_id: int, payload: schemas.SubProjectUpdate, db: Session = Depends(get_db)):
+    sub_project = _get_sub_project_or_404(db, sub_project_id)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("project_id") is not None:
+        if db.get(models.Project, data["project_id"]) is None:
+            raise HTTPException(status_code=404, detail="Increment non trovato")
+        # Un progetto si collega per intero oppure tramite i sotto-progetti.
+        if sub_project.increment.project_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Il progetto {sub_project.increment.code} è già collegato per intero a un increment: "
+                    "scollegalo prima di collegare un suo sotto-progetto."
+                ),
+            )
+    for field, value in data.items():
+        # Nome e budget non sono annullabili: un valore vuoto non li cambia.
+        if value is None and field != "project_id":
+            continue
+        setattr(sub_project, field, value)
+    db.commit()
+    db.refresh(sub_project)
+    return sub_project
+
+
+@router.delete("/sub-projects/{sub_project_id}", status_code=204)
+def delete_sub_project(sub_project_id: int, db: Session = Depends(get_db)):
+    sub_project = _get_sub_project_or_404(db, sub_project_id)
+    db.delete(sub_project)
     db.commit()
 
 
@@ -203,6 +265,15 @@ def create_snapshot(increment_id: int, payload: schemas.IncrementSnapshotCreate,
                 actual_value=prev_value.actual_value if prev_value else 0,
             )
         )
+    # Lo stesso per l'Actual ore dei sotto-progetti, cumulativo anche lui.
+    for prev_sub_value in previous.sub_values if previous else []:
+        db.add(
+            models.IncrementSnapshotSubValue(
+                snapshot_id=snapshot.id,
+                sub_project_id=prev_sub_value.sub_project_id,
+                actual_hours=prev_sub_value.actual_hours,
+            )
+        )
 
     db.commit()
     db.refresh(snapshot)
@@ -231,6 +302,31 @@ def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValue
     value = _get_snapshot_value_or_404(db, value_id)
     for field, val in payload.model_dump(exclude_unset=True).items():
         setattr(value, field, val)
+    db.commit()
+    db.refresh(value)
+    return value
+
+
+@router.put(
+    "/snapshots/{snapshot_id}/sub-projects/{sub_project_id}", response_model=schemas.IncrementSnapshotSubValue
+)
+def set_snapshot_sub_project_hours(
+    snapshot_id: int,
+    sub_project_id: int,
+    payload: schemas.IncrementSnapshotSubValueUpdate,
+    db: Session = Depends(get_db),
+):
+    """Actual ore di un sotto-progetto in uno snapshot: crea il valore se
+    non c'e' ancora (le righe nascono solo quando servono)."""
+    snapshot = _get_snapshot_or_404(db, snapshot_id)
+    sub_project = _get_sub_project_or_404(db, sub_project_id)
+    if sub_project.increment_id != snapshot.increment_id:
+        raise HTTPException(status_code=400, detail="Il sotto-progetto non appartiene al progetto di questo snapshot")
+    value = next((v for v in snapshot.sub_values if v.sub_project_id == sub_project_id), None)
+    if value is None:
+        value = models.IncrementSnapshotSubValue(snapshot_id=snapshot_id, sub_project_id=sub_project_id)
+        db.add(value)
+    value.actual_hours = payload.actual_hours
     db.commit()
     db.refresh(value)
     return value

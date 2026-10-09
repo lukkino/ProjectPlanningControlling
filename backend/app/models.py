@@ -29,6 +29,8 @@ class Increment(Base):
     estimated_budget_material: Mapped[float] = mapped_column(Float, default=0)
     # Project (rilascio/"Increment" in UI) su cui questo progetto rendiconta
     # le ore, se assegnato: un progetto appartiene al massimo a un Project.
+    # Resta vuoto se il progetto e' collegato tramite i suoi sotto-progetti
+    # (vedi SubProject).
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     # "Calcolatore ore progetto": periodo su cui calcolare le ore disponibili
     # (se vuoto la UI usa start_date/end_date del progetto) e giorni di
@@ -50,6 +52,52 @@ class Increment(Base):
     snapshots: Mapped[list["IncrementSnapshot"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementSnapshot.snapshot_date"
     )
+    sub_projects: Mapped[list["SubProject"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="SubProject.order"
+    )
+
+
+class SubProject(Base):
+    """Un sotto-progetto di un progetto (Increment), con un suo budget ore:
+    serve ai progetti che non vanno per intero su un solo rilascio, come una
+    maintenance divisa tra piu' rilasci (es. "PTIH-MA26" con un
+    sotto-progetto per il rilascio 03-003 e uno per lo 03-004). Ogni
+    sotto-progetto si collega a un Project (rilascio) per conto suo.
+
+    Un progetto si collega o per intero (Increment.project_id) o tramite i
+    suoi sotto-progetti, mai in entrambi i modi: il vincolo e' applicato in
+    routers/increments.py."""
+
+    __tablename__ = "sub_projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    budget_hours: Mapped[float] = mapped_column(Float, default=0)
+    # Project (rilascio/"Increment" in UI) su cui questo sotto-progetto
+    # rendiconta le ore, se assegnato.
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="sub_projects")
+    project: Mapped["Project | None"] = relationship(back_populates="sub_projects")
+    # cascade lato ORM, come per IncrementBudgetLine.snapshot_values.
+    snapshot_values: Mapped[list["IncrementSnapshotSubValue"]] = relationship(
+        back_populates="sub_project", cascade="all, delete-orphan"
+    )
+
+    @property
+    def increment_code(self) -> str:
+        return self.increment.code
+
+    @property
+    def actual_hours(self) -> float:
+        """Ore usate: l'Actual di questo sotto-progetto nell'ultimo snapshot
+        dello Storico del progetto (0 se non c'e' o non e' stato inserito)."""
+        snapshots = self.increment.snapshots
+        if not snapshots:
+            return 0.0
+        return next((v.actual_hours for v in snapshots[-1].sub_values if v.sub_project_id == self.id), 0.0)
 
 
 class Project(Base):
@@ -105,6 +153,9 @@ class Project(Base):
         back_populates="project", cascade="all, delete-orphan", order_by="ForecastSimulation.id"
     )
     progetti: Mapped[list["Increment"]] = relationship(back_populates="project", order_by="Increment.code")
+    # Sotto-progetti collegati a questo rilascio (di progetti non collegati
+    # per intero, vedi SubProject).
+    sub_projects: Mapped[list["SubProject"]] = relationship(back_populates="project", order_by="SubProject.id")
 
 
 class Phase(Base):
@@ -192,6 +243,27 @@ class IncrementSnapshot(Base):
     values: Mapped[list["IncrementSnapshotValue"]] = relationship(
         back_populates="snapshot", cascade="all, delete-orphan"
     )
+    sub_values: Mapped[list["IncrementSnapshotSubValue"]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+
+
+class IncrementSnapshotSubValue(Base):
+    """Actual ore di un sotto-progetto in uno snapshot dello Storico del suo
+    progetto: cumulativo ad oggi come gli altri valori dello snapshot. Il
+    budget invece sta sul sotto-progetto (SubProject.budget_hours). La riga
+    esiste solo da quando il valore viene inserito (o ereditato dallo
+    snapshot precedente): se manca vale 0."""
+
+    __tablename__ = "increment_snapshot_sub_values"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("increment_snapshots.id", ondelete="CASCADE"))
+    sub_project_id: Mapped[int] = mapped_column(ForeignKey("sub_projects.id", ondelete="CASCADE"))
+    actual_hours: Mapped[float] = mapped_column(Float, default=0)
+
+    snapshot: Mapped["IncrementSnapshot"] = relationship(back_populates="sub_values")
+    sub_project: Mapped["SubProject"] = relationship(back_populates="snapshot_values")
 
 
 class IncrementSnapshotValue(Base):

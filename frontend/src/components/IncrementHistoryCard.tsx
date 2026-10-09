@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
-import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue } from '../api/types'
+import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue, SubProject } from '../api/types'
 import { formatIsoDate } from '../lib/dates'
 
-type Props = { incrementId: number }
+// subProjects: i sotto-progetti del progetto, di cui ogni snapshot raccoglie
+// anche l'Actual ore.
+type Props = { incrementId: number; subProjects: SubProject[] }
 
 // Stesso blu/arancio gia' usato altrove nell'app per confrontare due serie
 // (es. DashboardPage): qui budget vs actual (dell'ultimo snapshot).
@@ -36,7 +38,7 @@ function parseCurrencyInput(text: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-export function IncrementHistoryCard({ incrementId }: Props) {
+export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   const [showAll, setShowAll] = useState(false)
   const queryClient = useQueryClient()
   const { data: lines } = useQuery({
@@ -93,7 +95,14 @@ export function IncrementHistoryCard({ incrementId }: Props) {
     onSuccess: invalidate,
   })
 
+  const setSubHours = useMutation({
+    mutationFn: ({ snapshotId, subProjectId, hours }: { snapshotId: number; subProjectId: number; hours: number }) =>
+      api.incrementSnapshots.setSubProjectHours(snapshotId, subProjectId, hours),
+    onSuccess: invalidate,
+  })
+
   const error =
+    setSubHours.error ??
     updateLine.error ??
     addLine.error ??
     removeLine.error ??
@@ -148,6 +157,16 @@ export function IncrementHistoryCard({ incrementId }: Props) {
             const prev = idxAsc > 0 ? (snapshotsAsc ?? [])[idxAsc - 1] : null
             const prevByLine = new Map((prev?.values ?? []).map((v) => [v.budget_line_id, v]))
             const valueByLine = new Map(snap.values.map((v) => [v.budget_line_id, v]))
+            const subHours = new Map(snap.sub_values.map((v) => [v.sub_project_id, v.actual_hours]))
+            const prevSubHours = new Map((prev?.sub_values ?? []).map((v) => [v.sub_project_id, v.actual_hours]))
+            // Ore del progetto in questo snapshot (voci in ore) e quante di
+            // queste sono attribuite ai sotto-progetti.
+            const projectHours = (lines ?? [])
+              .filter((l) => l.is_hours)
+              .reduce((sum, l) => sum + (valueByLine.get(l.id)?.actual_value ?? 0), 0)
+            const subHoursTotal = subProjects.reduce((sum, s) => sum + (subHours.get(s.id) ?? 0), 0)
+            const subHoursGap = Math.round((projectHours - subHoursTotal) * 100) / 100
+            const subHoursMatch = subHoursGap === 0
 
             return (
               <div key={snap.id} className="table-wrap" style={{ marginBottom: 14 }}>
@@ -282,6 +301,75 @@ export function IncrementHistoryCard({ incrementId }: Props) {
                         </tr>
                       )
                     })}
+                    {/* Actual ore dei sotto-progetti: stesse colonne delle
+                        voci, col budget (fisso, del sotto-progetto) in sola
+                        lettura. */}
+                    {subProjects.length > 0 && (
+                      <tr>
+                        <th colSpan={6}>Sotto-progetti (ore)</th>
+                      </tr>
+                    )}
+                    {subProjects.map((sub) => {
+                      const hours = subHours.get(sub.id) ?? 0
+                      const diff = hours - (prevSubHours.get(sub.id) ?? 0)
+                      const pctUsed = sub.budget_hours ? (hours / sub.budget_hours) * 100 : null
+                      return (
+                        // key: campo non controllato, va ricreato quando il valore salvato cambia.
+                        <tr key={`sub-${sub.id}-${hours}`}>
+                          <td style={{ whiteSpace: 'normal' }}>{sub.name}</td>
+                          <td>{formatValue(sub.budget_hours, true)}</td>
+                          <td className="editable-cell">
+                            <input
+                              type="number"
+                              min={0}
+                              defaultValue={hours}
+                              aria-label={`Actual ore di ${sub.name}`}
+                              onBlur={(e) => {
+                                const value = Math.max(0, Number(e.target.value) || 0)
+                                if (value !== hours)
+                                  setSubHours.mutate({ snapshotId: snap.id, subProjectId: sub.id, hours: value })
+                              }}
+                            />
+                          </td>
+                          <td>{formatDiff(diff, true)}</td>
+                          <td
+                            style={{
+                              fontWeight: 600,
+                              color: pctUsed === null ? undefined : pctUsed > 100 ? 'var(--danger)' : 'var(--success)',
+                            }}
+                          >
+                            {pctUsed === null ? '—' : `${pctUsed.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+                          </td>
+                          <td />
+                        </tr>
+                      )
+                    })}
+                    {subProjects.length > 0 && (
+                      <tr>
+                        <td colSpan={2} style={{ fontWeight: 600 }}>
+                          Totale sotto-progetti
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{formatValue(subHoursTotal, true)}</td>
+                        {/* Controllo: la somma deve coincidere con l'Actual
+                            ore complessivo del progetto in questo snapshot. */}
+                        <td
+                          colSpan={3}
+                          style={{
+                            whiteSpace: 'normal',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: subHoursMatch ? 'var(--success)' : 'var(--danger)',
+                          }}
+                        >
+                          {subHoursMatch
+                            ? `✓ coincide con l'Actual ore del progetto`
+                            : `⚠ non coincide con l'Actual ore del progetto (${formatValue(projectHours, true)}): ` +
+                              (subHoursGap > 0
+                                ? `mancano ${formatValue(subHoursGap, true)} h`
+                                : `${formatValue(-subHoursGap, true)} h di troppo`)}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

@@ -26,6 +26,7 @@ import type {
   Project,
   ProjectDetail,
   Snapshot,
+  SubProject,
   SyncResult,
   Team,
   TestConnectionResult,
@@ -106,6 +107,13 @@ export const api = {
     update: (id: number, data: Partial<Increment>) => put<Increment>(`/increments/${id}`, data),
     remove: (id: number) => del(`/increments/${id}`),
   },
+  subProjects: {
+    create: (incrementId: number, data: Pick<SubProject, 'name' | 'budget_hours' | 'order'>) =>
+      post<SubProject>(`/increments/${incrementId}/sub-projects`, data),
+    update: (id: number, data: Partial<Pick<SubProject, 'name' | 'budget_hours' | 'project_id'>>) =>
+      put<SubProject>(`/increments/sub-projects/${id}`, data),
+    remove: (id: number) => del(`/increments/sub-projects/${id}`),
+  },
   phases: {
     list: (projectId: number) => request<Phase[]>(`/projects/${projectId}/phases`),
     create: (projectId: number, data: Partial<Phase>) => post<Phase>(`/projects/${projectId}/phases`, data),
@@ -127,6 +135,11 @@ export const api = {
     update: (id: number, data: Partial<IncrementSnapshot>) =>
       put<IncrementSnapshot>(`/increments/snapshots/${id}`, data),
     remove: (id: number) => del(`/increments/snapshots/${id}`),
+    setSubProjectHours: (snapshotId: number, subProjectId: number, actualHours: number) =>
+      put<{ sub_project_id: number; actual_hours: number }>(
+        `/increments/snapshots/${snapshotId}/sub-projects/${subProjectId}`,
+        { actual_hours: actualHours },
+      ),
   },
   incrementSnapshotValues: {
     update: (id: number, data: Partial<IncrementSnapshotValue>) =>

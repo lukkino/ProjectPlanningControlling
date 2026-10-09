@@ -293,6 +293,14 @@ export function BacklogPage() {
   const num = (v: string) => (v === '' ? null : Number(v))
   const dateOrNull = (v: string) => v || null
 
+  // Progetti a cui si possono attribuire le ore di un item: quelli collegati
+  // per intero e quelli di cui e' collegato un sotto-progetto (una volta
+  // sola, anche con piu' sotto-progetti dello stesso progetto).
+  const linkedProgetti = [
+    ...project.progetti.map((p) => ({ id: p.id, code: p.code })),
+    ...project.sub_projects.map((s) => ({ id: s.increment_id, code: s.increment_code })),
+  ].filter((p, index, all) => all.findIndex((other) => other.id === p.id) === index)
+
   const columns: Column[] = [
     {
       key: 'jira_key',
@@ -553,8 +561,8 @@ export function BacklogPage() {
       label: 'Progetto',
       className: 'editable-cell',
       // Progetto su cui rendicontare le ore di questo item: solo tra quelli
-      // collegati a questo increment (project.progetti), scelto a mano - mai
-      // toccato dal sync.
+      // collegati a questo increment, per intero (project.progetti) o
+      // tramite un sotto-progetto, scelto a mano - mai toccato dal sync.
       render: (item) => (
         <select
           value={item.progetto_id ?? ''}
@@ -563,7 +571,7 @@ export function BacklogPage() {
           }
         >
           <option value="">—</option>
-          {project.progetti.map((p) => (
+          {linkedProgetti.map((p) => (
             <option key={p.id} value={p.id}>
               {p.code}
             </option>

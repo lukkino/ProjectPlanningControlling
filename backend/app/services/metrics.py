@@ -118,8 +118,11 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
     # L'increment non ha un budget suo: e' la somma dei budget ore dei
     # progetti collegati (i budget si sommano verso l'increment, mentre le
-    # ore usate qui sopra restano quelle dell'increment).
-    budget_hours_total = sum(_budget_hours_total(p) or 0 for p in project.progetti)
+    # ore usate qui sopra restano quelle dell'increment). Di un progetto
+    # collegato tramite un sotto-progetto conta solo il budget di quello.
+    budget_hours_total = sum(_budget_hours_total(p) or 0 for p in project.progetti) + sum(
+        s.budget_hours or 0 for s in project.sub_projects
+    )
     percent_budget_used = (logged_hours_total / budget_hours_total) if budget_hours_total else None
 
     percent_time_elapsed = None
@@ -165,9 +168,12 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     progetto appena collegato se le ritroverebbe addosso. Le ore dei
     progetti si possono sommare sul Project, non il contrario. Anche le ore
     Jira (dev_logged_hours_total) contano solo gli item di backlog
-    attribuiti a questo progetto (BacklogItem.progetto_id)."""
+    attribuiti a questo progetto (BacklogItem.progetto_id), su tutti i
+    Project a cui e' collegato: quello del progetto intero oppure quelli dei
+    suoi sotto-progetti."""
     project_metrics = compute_dashboard_metrics(increment.project) if increment.project else None
-    own_items = [i for i in increment.project.backlog_items if i.progetto_id == increment.id] if increment.project else []
+    linked_projects = {p.id: p for p in [increment.project, *(s.project for s in increment.sub_projects)] if p}
+    own_items = [i for p in linked_projects.values() for i in p.backlog_items if i.progetto_id == increment.id]
 
     hours_lines, material_lines, latest_by_line = _split_budget_lines(increment)
 
@@ -191,6 +197,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         project_id=increment.project_id,
         created_at=increment.created_at,
         updated_at=increment.updated_at,
+        sub_projects=list(increment.sub_projects),
         project=increment.project,
         backlog_total=project_metrics.backlog_total if project_metrics else 0,
         backlog_in_scope=project_metrics.backlog_in_scope if project_metrics else 0,

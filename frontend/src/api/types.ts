@@ -29,6 +29,9 @@ export type IncrementSnapshot = {
   snapshot_date: string
   note: string | null
   values: IncrementSnapshotValue[]
+  // Actual ore dei sotto-progetti del progetto (cumulativo ad oggi): solo
+  // quelli gia' inseriti, chi manca vale 0.
+  sub_values: { sub_project_id: number; actual_hours: number }[]
 }
 
 // Calcolatore ore progetto: una tipologia di risorsa ("DEV") con quante
@@ -149,6 +152,23 @@ export type Project = {
   updated_at: string
 }
 
+// Sotto-progetto di un progetto, con un suo budget ore: si collega a un
+// increment per conto suo, per i progetti che non vanno per intero su un
+// solo increment (es. una maintenance divisa tra piu' increment).
+export type SubProject = {
+  id: number
+  increment_id: number
+  // Codice del progetto di cui fa parte (es. "PTIH-MA26").
+  increment_code: string
+  name: string
+  budget_hours: number
+  // Ore usate: l'Actual nell'ultimo snapshot dello Storico del progetto.
+  actual_hours: number
+  // Increment (Project) su cui rendiconta le ore, se collegato.
+  project_id: number | null
+  order: number
+}
+
 export type Increment = {
   id: number
   code: string
@@ -157,9 +177,12 @@ export type Increment = {
   end_date: string | null
   estimated_budget_hours: number
   estimated_budget_material: number
+  // Increment (Project) a cui il progetto e' collegato per intero; null
+  // anche quando e' collegato tramite i sotto-progetti.
   project_id: number | null
   created_at: string
   updated_at: string
+  sub_projects: SubProject[]
 }
 
 export type ProjectDetail = Project & {
@@ -167,6 +190,9 @@ export type ProjectDetail = Project & {
   // Progetti (budget/rendicontazione) collegati a questo rilascio: un
   // rilascio puo' averne piu' di uno (vedi Increment.project_id).
   progetti: Increment[]
+  // Sotto-progetti collegati a questo rilascio, di progetti non collegati
+  // per intero.
+  sub_projects: SubProject[]
 }
 
 export type IncrementDetail = Increment & {
