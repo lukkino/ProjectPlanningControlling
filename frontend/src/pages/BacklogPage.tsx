@@ -118,7 +118,7 @@ export function BacklogPage() {
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
-  const [hideDone, setHideDone] = useState(false)
+  const [hideDone, setHideDone] = useState(true)
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   // Gantt: di default solo gli item dentro la finestra di forecast.
