@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { api, saveBlob } from '../api/client'
 import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
@@ -7,6 +7,8 @@ import { useProjectContext } from './useProjectContext'
 
 const DOCUMENT_TYPES = ['Story', 'Bug']
 
+// Una sottosezione della pagina per ogni review, ognuna con il proprio
+// documento PPR e gli altri documenti che servono per quella review.
 const PPR_TYPES: { docType: string; label: string }[] = [
   { docType: 'planning', label: 'Planning Review' },
   { docType: 'execution', label: 'Execution Review' },
@@ -213,6 +215,61 @@ function PprDownloadButton({
   )
 }
 
+// Esporta Design Input: si sceglie il documento TIH-DI corrente (.xlsx),
+// il backend vi aggiunge in cima le Story in scope di questo increment e
+// restituisce il file aggiornato, scaricato subito.
+function DesignInputExportButton({ projectId, projectCode }: { projectId: number; projectCode: string }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const exportDesignInput = useMutation({
+    mutationFn: (file: File) => api.documents.designInput(projectId, file),
+    onSuccess: (result) => {
+      if (result.added > 0) saveBlob(result.blob, result.filename)
+    },
+  })
+
+  return (
+    <>
+      <button
+        className="btn btn-primary"
+        title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${projectCode}" nella colonna Notes`}
+        onClick={() => fileRef.current?.click()}
+        disabled={exportDesignInput.isPending}
+      >
+        {exportDesignInput.isPending ? 'Esportazione...' : '📄 Esporta Design Input'}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".xlsx"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          // Svuotato subito: scegliere di nuovo lo stesso file deve far ripartire l'esportazione.
+          e.target.value = ''
+          if (file) exportDesignInput.mutate(file)
+        }}
+      />
+      {/* flexBasis 100%: i messaggi vanno a capo sotto i pulsanti della sottosezione. */}
+      {exportDesignInput.isError && (
+        <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
+          Esportazione Design Input non riuscita: {(exportDesignInput.error as Error).message}
+        </div>
+      )}
+      {exportDesignInput.isSuccess && (
+        <div
+          className="error-banner"
+          style={{ flexBasis: '100%', marginBottom: 0, background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}
+        >
+          {exportDesignInput.data.added > 0
+            ? `Design Input scaricato (${exportDesignInput.data.filename}): ${exportDesignInput.data.added} story aggiunte in cima`
+            : 'Nessuna story da aggiungere al Design Input: file non scaricato'}
+          {exportDesignInput.data.skipped > 0 && ` (${exportDesignInput.data.skipped} già presenti nel documento, non duplicate)`}.
+        </div>
+      )}
+    </>
+  )
+}
+
 function parseImplementedBy(json: string | null): ImplementedByTask[] {
   if (!json) return []
   try {
@@ -323,35 +380,38 @@ export function DocumentsPage() {
         {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
       </div>
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Genera documenti</h3>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Compila Cover e foglio dati dei template Excel ufficiali con i dati di questo increment.
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <DocumentDownloadButton
-            label="Regression Analysis"
-            loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
-            download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
-          />
-          <DocumentDownloadButton
-            label="Release Report"
-            loadMeta={() => api.documents.releaseReportMeta(project.id)}
-            download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}
-          />
+      {PPR_TYPES.map(({ docType, label }, index) => (
+        <div className="card" key={docType}>
+          <h3 style={{ marginTop: 0 }}>{label}</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {index === 0
+              ? 'Documento di review: viene compilata solo la Cover (titolo, firmatari, prima revisione); i fogli di review restano come nel template, da compilare a mano durante la riunione.'
+              : `Documento di review: include anche le review precedenti (${PPR_TYPES.slice(0, index)
+                  .map((t) => t.label)
+                  .join(', ')}). Viene compilata solo la Cover.`}
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <PprDownloadButton projectId={project.id} docType={docType} label={label} />
+            {docType === 'planning' && <DesignInputExportButton projectId={project.id} projectCode={project.code} />}
+            {/* Regression Analysis e Release Report: compilano Cover e foglio
+                dati dei template Excel ufficiali con i dati dell'increment. */}
+            {docType === 'execution' && (
+              <>
+                <DocumentDownloadButton
+                  label="Regression Analysis"
+                  loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
+                  download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
+                />
+                <DocumentDownloadButton
+                  label="Release Report"
+                  loadMeta={() => api.documents.releaseReportMeta(project.id)}
+                  download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}
+                />
+              </>
+            )}
+          </div>
         </div>
-
-        <p className="muted" style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
-          Planning/Execution/Deployment/Release to Market Review: ogni documento include cumulativamente le review dei
-          tipi precedenti. Viene compilata solo la Cover (titolo, firmatari, prima revisione); i fogli di review
-          restano come nel template, da compilare a mano durante la riunione.
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {PPR_TYPES.map(({ docType, label }) => (
-            <PprDownloadButton key={docType} projectId={project.id} docType={docType} label={label} />
-          ))}
-        </div>
-      </div>
+      ))}
 
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, fontSize: 13 }}>

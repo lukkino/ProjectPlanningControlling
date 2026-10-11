@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react'
-import { api, saveBlob } from '../api/client'
+import { api } from '../api/client'
 import type { BacklogItem } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
@@ -194,17 +194,6 @@ export function BacklogPage() {
       if (updates.length > 0) await api.backlog.bulkUpdate(project.id, updates)
     },
     onSuccess: invalidate,
-  })
-
-  // Esporta Design Input: si sceglie il documento TIH-DI corrente (.xlsx),
-  // il backend vi aggiunge in cima le Story in scope di questo increment e
-  // restituisce il file aggiornato, scaricato subito.
-  const designInputFileRef = useRef<HTMLInputElement>(null)
-  const exportDesignInput = useMutation({
-    mutationFn: (file: File) => api.documents.designInput(project.id, file),
-    onSuccess: (result) => {
-      if (result.added > 0) saveBlob(result.blob, result.filename)
-    },
   })
 
   // Pianificazione a cascata: partendo dall'item con priorita' piu' alta
@@ -1031,26 +1020,6 @@ export function BacklogPage() {
           >
             {cascadeSchedule.isPending ? 'Calcolo...' : '📐 Pianificazione a cascata'}
           </button>
-          <button
-            className="btn"
-            title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
-            onClick={() => designInputFileRef.current?.click()}
-            disabled={exportDesignInput.isPending}
-          >
-            {exportDesignInput.isPending ? 'Esportazione...' : '📄 Esporta Design Input'}
-          </button>
-          <input
-            ref={designInputFileRef}
-            type="file"
-            accept=".xlsx"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              // Svuotato subito: scegliere di nuovo lo stesso file deve far ripartire l'esportazione.
-              e.target.value = ''
-              if (file) exportDesignInput.mutate(file)
-            }}
-          />
           <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
             {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
           </button>
@@ -1105,17 +1074,6 @@ export function BacklogPage() {
         </p>
       )}
 
-      {exportDesignInput.isError && (
-        <div className="error-banner">Esportazione Design Input non riuscita: {(exportDesignInput.error as Error).message}</div>
-      )}
-      {exportDesignInput.isSuccess && (
-        <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
-          {exportDesignInput.data.added > 0
-            ? `Design Input scaricato (${exportDesignInput.data.filename}): ${exportDesignInput.data.added} story aggiunte in cima`
-            : 'Nessuna story da aggiungere al Design Input: file non scaricato'}
-          {exportDesignInput.data.skipped > 0 && ` (${exportDesignInput.data.skipped} già presenti nel documento, non duplicate)`}.
-        </div>
-      )}
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
