@@ -55,6 +55,18 @@ export function ForecastingPage() {
     unplannedKeys,
   } = countPlannedUnplannedDone(backlogItems ?? [], project.dev_start_date)
 
+  // Traditional Forecasting di una nuova simulazione: la Fine pian. piu'
+  // tarda tra gli item ancora da chiudere, in scope e inclusi nel codefreeze
+  // (gli stessi su cui lavora Monte Carlo), cioe' quando il piano del Backlog
+  // prevede di finire - da confrontare con la data stimata da Monte Carlo.
+  // null se nessuno di quegli item ha una Fine pian.
+  const traditionalForecastIso = (backlogItems ?? [])
+    .filter((i) => i.in_scope && i.included_in_codefreeze && i.status !== 'Done')
+    .reduce<string | null>(
+      (latest, i) => (i.expected_finish && (!latest || i.expected_finish > latest) ? i.expected_finish : latest),
+      null,
+    )
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['forecasting', project.id] })
 
   const updateProject = useMutation({
@@ -77,6 +89,7 @@ export function ForecastingPage() {
         planned_pbi_keys: plannedKeys.join(', ') || null,
         unplanned_pbi_keys: unplannedKeys.join(', ') || null,
         code_freeze_deadline: project.code_freeze_date,
+        traditional_forecasting: formatIsoDate(traditionalForecastIso),
       }),
     onSuccess: invalidate,
   })
