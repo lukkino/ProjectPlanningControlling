@@ -16,31 +16,18 @@ import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
 import { countBacklogStats, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
+import {
+  addWorkingDays,
+  indexByKey,
+  nextWorkingDay,
+  parsePredecessors,
+  resolvePredecessors,
+  scheduleFromPredecessors,
+  toIsoLocal,
+  wouldCreateCycle,
+  type BacklogPatch,
+} from '../lib/scheduling'
 import { useProjectContext } from './useProjectContext'
-
-function toIsoLocal(d: Date): string {
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-// Inverso di workingDaysBetween: data di fine tale che ci siano esattamente
-// "days" giorni lavorativi da startStr a fine, estremi inclusi (es. days=1 ->
-// fine=inizio). Usata per calcolare "Fine pian." da "Start pian." + "Sizing
-// (gg)". Restituisce null se manca la data di inizio o i giorni non sono un
-// numero positivo.
-function addWorkingDays(startStr: string | null, days: number | null): string | null {
-  if (!startStr || days == null || days <= 0) return null
-  const cursor = new Date(`${startStr}T00:00:00`)
-  let remaining = days - 1
-  while (remaining > 0) {
-    cursor.setDate(cursor.getDate() + 1)
-    const day = cursor.getDay() // 0 = domenica, 6 = sabato
-    if (day !== 0 && day !== 6) remaining--
-  }
-  return toIsoLocal(cursor)
-}
 
 // "2026-09-19T09:11:34.301529" -> "19/09/2026, 09:11". null se manca o non è
 // una data valida (es. un item mai sincronizzato).
@@ -49,17 +36,6 @@ function formatDateTime(value: string | null): string | null {
   const d = parseBackendDateTime(value)
   if (Number.isNaN(d.getTime())) return null
   return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
-}
-
-// Primo giorno lavorativo successivo a startStr - usato per far ripartire la
-// pianificazione a cascata dell'item successivo subito dopo la Fine pian. di
-// quello precedente.
-function nextWorkingDay(startStr: string): string {
-  const cursor = new Date(`${startStr}T00:00:00`)
-  do {
-    cursor.setDate(cursor.getDate() + 1)
-  } while (cursor.getDay() === 0 || cursor.getDay() === 6)
-  return toIsoLocal(cursor)
 }
 
 // Ordinamento esplicito (facoltativo) per stato, dall'alto verso il basso:
@@ -107,6 +83,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   dev_estimate_hours: 65,
   test_estimate_hours: 65,
   planned_hours: 70,
+  predecessors: 120,
   planned_start: 90,
   expected_finish: 90,
   actual_start: 90,
@@ -240,34 +217,55 @@ export function BacklogPage() {
   // colonna, vedi render di 'expected_finish'). Gli item non "In Scope" sono
   // esclusi del tutto dalla catena (non contano ne' come ancora ne' come
   // anelli): non fanno parte del piano.
-  const inScopeByPriority = () =>
-    [...(items ?? [])].filter((i) => i.in_scope).sort((a, b) => a.priority_order - b.priority_order)
+  // Fanno eccezione gli item con predecessori: le loro date dipendono dai
+  // predecessori (vedi scheduleFromPredecessors), non dalla posizione in
+  // lista, quindi la cascata li salta.
+  const itemsByKey = indexByKey(items ?? [])
+  const cascadeChain = () =>
+    [...(items ?? [])]
+      .filter((i) => i.in_scope && resolvePredecessors(i, itemsByKey).length === 0)
+      .sort((a, b) => a.priority_order - b.priority_order)
 
-  // Ripianifica in cascata gli item che seguono sorted[fromIndex], la cui
-  // Fine pian. e' prevFinish.
-  const cascadeAfter = async (sorted: BacklogItem[], fromIndex: number, prevFinish: string) => {
-    for (const item of sorted.slice(fromIndex + 1)) {
+  // Ripianifica in cascata gli item che seguono chain[fromIndex], la cui
+  // Fine pian. e' prevFinish: le nuove date finiscono in patches.
+  const cascadeAfter = (
+    chain: BacklogItem[],
+    fromIndex: number,
+    prevFinish: string,
+    patches: Map<number, Partial<BacklogItem>>,
+  ) => {
+    for (const item of chain.slice(fromIndex + 1)) {
       const planned_start = nextWorkingDay(prevFinish)
       if (!item.planned_duration_days) {
-        await api.backlog.update(item.id, { planned_start })
+        patches.set(item.id, { planned_start })
         break
       }
       const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)!
-      await api.backlog.update(item.id, { planned_start, expected_finish })
+      patches.set(item.id, { planned_start, expected_finish })
       prevFinish = expected_finish
     }
   }
 
+  // Salva le modifiche richieste insieme a quelle che ne derivano lungo i
+  // predecessori, in una sola chiamata (tutto o niente).
+  const saveWithDependencies = async (patches: Map<number, Partial<BacklogItem>>) => {
+    const updates = scheduleFromPredecessors(items ?? [], patches)
+    if (updates.length > 0) await api.backlog.bulkUpdate(project.id, updates)
+  }
+  const saveSchedule = useMutation({ mutationFn: saveWithDependencies, onSuccess: invalidate })
+
   const cascadeSchedule = useMutation({
     mutationFn: async () => {
-      const sorted = inScopeByPriority()
-      const anchor = sorted[0]
+      const chain = cascadeChain()
+      const anchor = chain[0]
       if (!anchor || !anchor.planned_start || !anchor.expected_finish) {
         throw new Error(
           `Imposta prima Start pian. e Fine pian. per l'item in cima alla lista${anchor ? ` (${anchor.jira_key})` : ''}.`,
         )
       }
-      await cascadeAfter(sorted, 0, anchor.expected_finish)
+      const patches = new Map<number, Partial<BacklogItem>>()
+      cascadeAfter(chain, 0, anchor.expected_finish, patches)
+      await saveWithDependencies(patches)
     },
     onSuccess: invalidate,
   })
@@ -276,19 +274,60 @@ export function BacklogPage() {
   // dal Sizing (gg) e, se l'item e' in scope, gli item sotto di lui si
   // ripianificano in cascata con le stesse regole di cascadeSchedule (quelli
   // sopra non si toccano). Senza Sizing la Fine pian. non cambia, quindi non
-  // c'e' nulla da propagare.
+  // c'e' nulla da propagare in cascata.
   const reschedule = useMutation({
     mutationFn: async ({ item, planned_start }: { item: BacklogItem; planned_start: string | null }) => {
       const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
-      await api.backlog.update(item.id, expected_finish ? { planned_start, expected_finish } : { planned_start })
-      if (!expected_finish || !item.in_scope) return
-      const sorted = inScopeByPriority()
-      const index = sorted.findIndex((i) => i.id === item.id)
-      if (index !== -1) await cascadeAfter(sorted, index, expected_finish)
+      const patches = new Map<number, Partial<BacklogItem>>([
+        [item.id, expected_finish ? { planned_start, expected_finish } : { planned_start }],
+      ])
+      if (expected_finish) {
+        const chain = cascadeChain()
+        const index = chain.findIndex((i) => i.id === item.id)
+        if (index !== -1) cascadeAfter(chain, index, expected_finish, patches)
+      }
+      await saveWithDependencies(patches)
     },
-    // Anche in caso di errore a meta' cascata: gli item gia' aggiornati vanno mostrati.
-    onSettled: invalidate,
+    onSuccess: invalidate,
   })
+
+  // Predecessori scritti a mano: chiavi Jira separate da virgola; basta
+  // anche il solo numero ("1234") se identifica un unico item del backlog.
+  // Vengono rifiutati item sconosciuti, l'item stesso e i cicli.
+  const [predecessorError, setPredecessorError] = useState<string | null>(null)
+  const savePredecessors = (item: BacklogItem, text: string): boolean => {
+    const keys: string[] = []
+    for (const token of parsePredecessors(text)) {
+      const matches = itemsByKey.has(token)
+        ? [itemsByKey.get(token)!]
+        : /^\d+$/.test(token)
+          ? (items ?? []).filter((i) => i.jira_key.toUpperCase().endsWith(`-${token}`))
+          : []
+      if (matches.length !== 1) {
+        setPredecessorError(
+          matches.length === 0
+            ? `Predecessore "${token}" non trovato nel backlog di questo increment.`
+            : `"${token}" corrisponde a più item (${matches.map((m) => m.jira_key).join(', ')}): scrivi la chiave completa.`,
+        )
+        return false
+      }
+      if (matches[0].id === item.id) {
+        setPredecessorError(`${item.jira_key} non può essere predecessore di se stesso.`)
+        return false
+      }
+      if (!keys.includes(matches[0].jira_key)) keys.push(matches[0].jira_key)
+    }
+    if (wouldCreateCycle(items ?? [], item.jira_key, keys)) {
+      setPredecessorError(
+        `Dipendenza circolare: ${item.jira_key} è già, direttamente o indirettamente, predecessore di uno degli item indicati.`,
+      )
+      return false
+    }
+    setPredecessorError(null)
+    const predecessors = keys.join(', ') || null
+    if (predecessors !== (item.predecessors || null)) saveSchedule.mutate(new Map([[item.id, { predecessors }]]))
+    return true
+  }
 
   const num = (v: string) => (v === '' ? null : Number(v))
   const dateOrNull = (v: string) => v || null
@@ -402,10 +441,9 @@ export function BacklogPage() {
           onBlur={(e) => {
             const planned_duration_days = num(e.target.value)
             const expected_finish = addWorkingDays(item.planned_start, planned_duration_days)
-            update.mutate({
-              id: item.id,
-              data: expected_finish ? { planned_duration_days, expected_finish } : { planned_duration_days },
-            })
+            saveSchedule.mutate(
+              new Map([[item.id, expected_finish ? { planned_duration_days, expected_finish } : { planned_duration_days }]]),
+            )
           }}
         />
       ),
@@ -456,6 +494,36 @@ export function BacklogPage() {
     // restano sul modello dati, basta ri-aggiungere le colonne qui sotto per
     // rimetterle.
     {
+      key: 'predecessors',
+      label: 'Predecessori',
+      className: 'editable-cell',
+      // Item che devono finire prima che questo possa iniziare (legame
+      // fine-inizio, come in Project/Wrike): lo Start pian. diventa il giorno
+      // lavorativo dopo la loro Fine pian. Un valore non valido viene
+      // rifiutato e il campo torna a quello salvato.
+      render: (item) => {
+        const unknown = parsePredecessors(item.predecessors).filter((k) => !itemsByKey.has(k))
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              key={item.predecessors ?? ''}
+              defaultValue={item.predecessors ?? ''}
+              placeholder="es. 1234"
+              title="Chiavi Jira degli item che devono finire prima di questo, separate da virgola (basta anche il solo numero)"
+              onBlur={(e) => {
+                if (!savePredecessors(item, e.target.value)) e.target.value = item.predecessors ?? ''
+              }}
+            />
+            {unknown.length > 0 && (
+              <span title={`Non più nel backlog, ignorati: ${unknown.join(', ')}`} style={{ cursor: 'help' }}>
+                ⚠️
+              </span>
+            )}
+          </div>
+        )
+      },
+    },
+    {
       key: 'planned_start',
       label: 'Start pian.',
       className: 'editable-cell',
@@ -466,17 +534,28 @@ export function BacklogPage() {
       // davvero cambiata: uscire dal campo senza toccarlo non deve
       // riscrivere le date degli item successivi. key sul valore come per
       // Fine pian.: il campo va rimontato quando la cascata lo cambia.
-      render: (item) => (
-        <input
-          key={item.planned_start ?? ''}
-          type="date"
-          defaultValue={item.planned_start ?? ''}
-          onBlur={(e) => {
-            const planned_start = dateOrNull(e.target.value)
-            if (planned_start !== item.planned_start) reschedule.mutate({ item, planned_start })
-          }}
-        />
-      ),
+      // Con predecessori che hanno una Fine pian. la data e' calcolata da
+      // loro (giorno lavorativo successivo alla piu' tarda): non si scrive.
+      render: (item) => {
+        const driving = resolvePredecessors(item, itemsByKey).filter((p) => p.expected_finish)
+        return (
+          <input
+            key={item.planned_start ?? ''}
+            type="date"
+            defaultValue={item.planned_start ?? ''}
+            disabled={driving.length > 0}
+            title={
+              driving.length > 0
+                ? `Calcolato dai predecessori (${driving.map((p) => p.jira_key).join(', ')}): il giorno lavorativo dopo la loro Fine pian.`
+                : undefined
+            }
+            onBlur={(e) => {
+              const planned_start = dateOrNull(e.target.value)
+              if (planned_start !== item.planned_start) reschedule.mutate({ item, planned_start })
+            }}
+          />
+        )
+      },
     },
     {
       key: 'expected_finish',
@@ -491,7 +570,10 @@ export function BacklogPage() {
             key={item.expected_finish ?? ''}
             type="date"
             defaultValue={item.expected_finish ?? ''}
-            onBlur={(e) => update.mutate({ id: item.id, data: { expected_finish: dateOrNull(e.target.value) } })}
+            onBlur={(e) => {
+              const expected_finish = dateOrNull(e.target.value)
+              if (expected_finish !== item.expected_finish) saveSchedule.mutate(new Map([[item.id, { expected_finish }]]))
+            }}
           />
           {item.planned_start && !item.planned_duration_days && (
             <span
@@ -601,8 +683,13 @@ export function BacklogPage() {
           ? (JSON.parse(stored) as string[])
           : migrateLegacyColumnOrder(JSON.parse(legacy as string) as string[])
         const known = parsed.filter((k) => defaultColumnOrder.includes(k))
-        const missing = defaultColumnOrder.filter((k) => !known.includes(k))
-        return [...known, ...missing]
+        // Una colonna aggiunta dopo il salvataggio va subito dopo quella che
+        // la precede nell'ordine di default, non in fondo alla tabella.
+        for (const key of defaultColumnOrder.filter((k) => !known.includes(k))) {
+          const at = known.indexOf(defaultColumnOrder[defaultColumnOrder.indexOf(key) - 1])
+          known.splice(at < 0 ? known.length : at + 1, 0, key)
+        }
+        return known
       }
     } catch {
       // localStorage non disponibile o dato corrotto: usa l'ordine di default
@@ -848,7 +935,7 @@ export function BacklogPage() {
       .map(({ item, priority_order }) => ({ id: item.id, priority_order }))
   }
 
-  const runBulk = (updates: (Partial<BacklogItem> & { id: number })[]) => {
+  const runBulk = (updates: BacklogPatch[]) => {
     setBulkMenuOpen(false)
     bulkUpdate.mutate(updates)
   }
@@ -881,12 +968,20 @@ export function BacklogPage() {
   const bulkSizingValue = Number(bulkSizing)
   const applyBulkSizing = () => {
     runBulk(
-      selectedItems.map((item) => {
-        const expected_finish = addWorkingDays(item.planned_start, bulkSizingValue)
-        return expected_finish
-          ? { id: item.id, planned_duration_days: bulkSizingValue, expected_finish }
-          : { id: item.id, planned_duration_days: bulkSizingValue }
-      }),
+      scheduleFromPredecessors(
+        items ?? [],
+        new Map(
+          selectedItems.map((item) => {
+            const expected_finish = addWorkingDays(item.planned_start, bulkSizingValue)
+            return [
+              item.id,
+              expected_finish
+                ? { planned_duration_days: bulkSizingValue, expected_finish }
+                : { planned_duration_days: bulkSizingValue },
+            ]
+          }),
+        ),
+      ),
     )
     setBulkSizing('')
   }
@@ -963,6 +1058,10 @@ export function BacklogPage() {
       {reschedule.isError && (
         <div className="error-banner">Ripianificazione non riuscita: {(reschedule.error as Error).message}</div>
       )}
+      {saveSchedule.isError && (
+        <div className="error-banner">Salvataggio non riuscito: {(saveSchedule.error as Error).message}</div>
+      )}
+      {predecessorError && <div className="error-banner">{predecessorError}</div>}
 
       <div className="stat-chips">
         <div className="stat-chip blue">

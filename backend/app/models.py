@@ -353,6 +353,11 @@ class BacklogItem(Base):
     # quelli collegati al Project (Increment) di questo item: serve quando un
     # Increment ha piu' progetti collegati e le ore vanno divise tra loro.
     progetto_id: Mapped[int | None] = mapped_column(ForeignKey("increments.id", ondelete="SET NULL"), nullable=True)
+    # Predecessori: chiavi Jira (separate da virgola) degli item dello stesso
+    # backlog che devono finire prima che questo possa iniziare. Chiavi e non
+    # id perche' restano valide se la sync ricrea l'item; una chiave che non
+    # e' piu' nel backlog viene semplicemente ignorata dalla UI.
+    predecessors: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="backlog_items")
     progetto: Mapped["Increment | None"] = relationship()

@@ -113,6 +113,9 @@ def run_lightweight_migrations() -> None:
         if "progetto_id" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN progetto_id INTEGER REFERENCES increments(id)"))
+        if "predecessors" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN predecessors VARCHAR(512)"))
 
     if "increment_budget_lines" in table_names:
         budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}

@@ -90,6 +90,8 @@ export type BacklogItem = {
   ta_date: string | null
   notes: string | null
   progetto_id: number | null
+  // Chiavi Jira dei predecessori, separate da virgola (vedi lib/scheduling.ts).
+  predecessors: string | null
   status: 'To Do' | 'In Progress' | 'Done'
 }
 

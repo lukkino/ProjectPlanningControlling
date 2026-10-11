@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
+import { parsePredecessors } from '../lib/scheduling'
 
 // Stessa coppia di colori usata per Budget/Actual in IncrementHistoryCard:
 // blu = valore pianificato, arancio = valore effettivo.
@@ -15,6 +16,11 @@ const DAY_WIDTH = 22
 const LABEL_COLUMN_WIDTH = 110
 const ROW_HEIGHT = 60
 const BAR_HEIGHT = 14
+// Distanza della barra "Pianificato" dal bordo superiore della riga.
+const PLANNED_BAR_TOP = 22
+// Frecce predecessore -> successore.
+const COLOR_LINK = '#5b6472'
+const LINK_STUB = 8
 const MONTH_BAND_HEIGHT = 18
 const WEEK_ROW_HEIGHT = 20
 const HEADER_HEIGHT = MONTH_BAND_HEIGHT + WEEK_ROW_HEIGHT
@@ -178,6 +184,39 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
   const ticks = buildWeekTicks(minDay, maxDay)
   const monthBands = buildMonthBands(minDay, maxDay)
 
+  // Frecce dei predecessori, come in Project/Wrike: dalla fine della barra
+  // pianificata del predecessore all'inizio di quella del successore. Solo
+  // tra item entrambi visibili nel Gantt e con la barra pianificata.
+  const rowByKey = new Map(items.map((item, row) => [item.jira_key.toUpperCase(), row]))
+  const barCenterY = (row: number) => row * ROW_HEIGHT + PLANNED_BAR_TOP + BAR_HEIGHT / 2
+  const links = items.flatMap((successor, successorRow) => {
+    const sStart = dateStrToEpochDays(successor.planned_start)
+    if (sStart === null || dateStrToEpochDays(successor.expected_finish) === null) return []
+    return parsePredecessors(successor.predecessors).flatMap((key) => {
+      const predecessorRow = rowByKey.get(key)
+      if (predecessorRow === undefined || predecessorRow === successorRow) return []
+      const predecessor = items[predecessorRow]
+      const pStart = dateStrToEpochDays(predecessor.planned_start)
+      const pEnd = dateStrToEpochDays(predecessor.expected_finish)
+      if (pStart === null || pEnd === null) return []
+      const x1 = dayToX(Math.max(pStart, pEnd)) + DAY_WIDTH
+      const y1 = barCenterY(predecessorRow)
+      const x2 = dayToX(sStart)
+      const y2 = barCenterY(successorRow)
+      // Con spazio tra le due barre basta un gomito; altrimenti (successore
+      // che parte subito sotto la fine del predecessore, il caso normale) la
+      // linea rientra a sinistra passando tra le righe, per arrivare alla
+      // barra da sinistra.
+      const below = successorRow > predecessorRow
+      const yGap = below ? y2 - BAR_HEIGHT / 2 - 3 : (successorRow + 1) * ROW_HEIGHT
+      const path =
+        x2 >= x1 + 2 * LINK_STUB
+          ? `M${x1},${y1} H${x1 + LINK_STUB} V${y2} H${x2}`
+          : `M${x1},${y1} H${x1 + LINK_STUB} V${yGap} H${x2 - LINK_STUB} V${y2} H${x2}`
+      return [{ id: `${predecessor.id}-${successor.id}`, path, title: `${predecessor.jira_key} → ${successor.jira_key}` }]
+    })
+  })
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 16, marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
@@ -205,6 +244,12 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
           <span style={{ width: 0, height: 12, borderLeft: '1px dashed var(--danger)', display: 'inline-block' }} />
           Oggi
         </span>
+        {links.length > 0 && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ color: COLOR_LINK, fontWeight: 700 }}>→</span>
+            Predecessore → successore
+          </span>
+        )}
       </div>
 
       {/* Calendario e barra "specchio": fuori da .gantt-outer (vedi commento
@@ -328,7 +373,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
             mirrorHeaderScroll(wrapRef)
           }}
         >
-          <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth }}>
+          <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
             {items.map((item) => {
               const pStart = dateStrToEpochDays(item.planned_start)
               const pEnd = dateStrToEpochDays(item.expected_finish)
@@ -382,7 +427,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
                         position: 'absolute',
                         left: dayToX(pStart),
                         width: Math.max(DAY_WIDTH, dayToX(pEnd) - dayToX(pStart) + DAY_WIDTH),
-                        top: 22,
+                        top: PLANNED_BAR_TOP,
                         height: BAR_HEIGHT,
                         background: COLOR_PLANNED,
                         borderRadius: 3,
@@ -425,6 +470,34 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
                 </div>
               )
             })}
+            {/* Sopra le righe ma trasparente al mouse: tooltip delle barre e
+                trascinamento continuano a funzionare. */}
+            {links.length > 0 && (
+              <svg
+                width={chartWidth}
+                height={items.length * ROW_HEIGHT}
+                style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
+              >
+                <defs>
+                  <marker id="gantt-link-arrow" markerWidth="7" markerHeight="8" refX="7" refY="4" orient="auto">
+                    <path d="M0,0 L7,4 L0,8 Z" fill={COLOR_LINK} />
+                  </marker>
+                </defs>
+                {links.map((link) => (
+                  <path
+                    key={link.id}
+                    d={link.path}
+                    fill="none"
+                    stroke={COLOR_LINK}
+                    strokeWidth={1.5}
+                    strokeLinejoin="round"
+                    markerEnd="url(#gantt-link-arrow)"
+                  >
+                    <title>{link.title}</title>
+                  </path>
+                ))}
+              </svg>
+            )}
           </div>
         </div>
       </div>
