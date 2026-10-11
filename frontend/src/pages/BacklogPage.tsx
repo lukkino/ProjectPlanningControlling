@@ -833,8 +833,11 @@ export function BacklogPage() {
   // PBI che rientrano nell'ultima previsione di Forecasting: i primi N item
   // non-Done (In Progress/To Do), in scope e inclusi nel codefreeze,
   // nell'ordine attuale della tabella, dove N = "85% #PBI Completed by
-  // Release Deadline Forecasting" dell'ultima simulazione registrata.
-  const latestSimulation = simulations && simulations.length > 0 ? simulations[simulations.length - 1] : null
+  // Release Deadline Forecasting" dell'ultima simulazione che ha quel valore:
+  // una simulazione appena creata e non ancora compilata non deve far
+  // sparire evidenziazione e linea di taglio, vale la precedente.
+  const latestSimulation =
+    [...(simulations ?? [])].reverse().find((s) => s.pbi_completed_by_deadline_85pct != null) ?? null
   const forecastTarget = latestSimulation?.pbi_completed_by_deadline_85pct ?? null
   const forecastCandidates = (items ?? []).filter((i) => i.in_scope && i.included_in_codefreeze && i.status !== 'Done')
   const forecastHighlightIds = new Set(
