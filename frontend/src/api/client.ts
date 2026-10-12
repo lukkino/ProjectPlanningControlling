@@ -57,6 +57,58 @@ const post = <T,>(path: string, body?: unknown) =>
 const put = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 
+// Invia un documento .xlsx cosi' com'e' (corpo binario) e riceve lo stesso
+// file con le righe dell'increment aggiunte: quante ne sono state
+// aggiunte/saltate arriva negli header "<prefisso>-Added/-Skipped", in
+// "<prefisso>-Duplicates" quelle lasciate fuori perche' il documento ha gia'
+// lo stesso contenuto sotto un altro ID ("NUOVO=ESISTENTE, ..."), in
+// "<prefisso>-Version" la nuova versione del documento (null se la Cover non
+// e' stata aggiornata) e in "<prefisso>-Other-Projects" le eventuali voci
+// lasciate fuori perche' di un altro progetto Jira.
+export type WorkbookExportResult = {
+  blob: Blob
+  filename: string
+  added: number
+  skipped: number
+  duplicates: { key: string; existing: string }[]
+  version: number | null
+  otherProjects: string[]
+}
+
+async function addRowsToWorkbook(path: string, file: File, headerPrefix: string): Promise<WorkbookExportResult> {
+  const response = await fetch(`/api${path}?${new URLSearchParams({ filename: file.name })}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      const body = await response.json()
+      detail = body.detail ?? detail
+    } catch {
+      // ignore, keep statusText
+    }
+    throw new Error(detail)
+  }
+  const match = (response.headers.get('Content-Disposition') ?? '').match(/filename="?([^"]+)"?/)
+  return {
+    blob: await response.blob(),
+    filename: match ? match[1] : file.name,
+    added: Number(response.headers.get(`${headerPrefix}-Added`) ?? 0),
+    skipped: Number(response.headers.get(`${headerPrefix}-Skipped`) ?? 0),
+    duplicates: (response.headers.get(`${headerPrefix}-Duplicates`) ?? '')
+      .split(', ')
+      .filter(Boolean)
+      .map((pair) => {
+        const [key, existing] = pair.split('=')
+        return { key, existing }
+      }),
+    version: Number(response.headers.get(`${headerPrefix}-Version`)) || null,
+    otherProjects: (response.headers.get(`${headerPrefix}-Other-Projects`) ?? '').split(', ').filter(Boolean),
+  }
+}
+
 // Scarica un file binario (es. un documento .xlsx generato dal backend),
 // leggendo il nome file dall'header Content-Disposition invece di doverlo
 // ricostruire lato client.
@@ -208,32 +260,11 @@ export const api = {
     remove: (id: number) => del(`/forecasting/${id}`),
   },
   documents: {
-    // Invia il documento Design Input corrente (il file .xlsx cosi' com'e',
-    // come corpo binario) e riceve lo stesso file con le Story dell'increment
-    // aggiunte: quante ne sono state aggiunte/saltate arriva negli header.
-    designInput: async (projectId: number, file: File) => {
-      const response = await fetch(
-        `/api/projects/${projectId}/documents/design-input?${new URLSearchParams({ filename: file.name })}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file },
-      )
-      if (!response.ok) {
-        let detail = response.statusText
-        try {
-          const body = await response.json()
-          detail = body.detail ?? detail
-        } catch {
-          // ignore, keep statusText
-        }
-        throw new Error(detail)
-      }
-      const match = (response.headers.get('Content-Disposition') ?? '').match(/filename="?([^"]+)"?/)
-      return {
-        blob: await response.blob(),
-        filename: match ? match[1] : file.name,
-        added: Number(response.headers.get('X-Stories-Added') ?? 0),
-        skipped: Number(response.headers.get('X-Stories-Skipped') ?? 0),
-      }
-    },
+    // Design Input (TIH-DI) e User Needs (TIH-UN): vedi addRowsToWorkbook.
+    designInput: (projectId: number, file: File) =>
+      addRowsToWorkbook(`/projects/${projectId}/documents/design-input`, file, 'X-Stories'),
+    userNeeds: (projectId: number, file: File) =>
+      addRowsToWorkbook(`/projects/${projectId}/documents/user-needs`, file, 'X-User-Needs'),
     regressionAnalysisMeta: (projectId: number) =>
       request<DocumentRevisionMeta>(`/projects/${projectId}/documents/regression-analysis/meta`),
     regressionAnalysis: (projectId: number, version: number, revisionText: string) =>

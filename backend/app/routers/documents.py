@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
-from app.services.design_input import EMPTY_COMPONENTS, DesignInputError, Story, add_stories
+from app.services.design_input import (
+    EMPTY_COMPONENTS,
+    DesignInputError,
+    ExportResult,
+    Story,
+    UserNeed,
+    add_stories,
+    add_user_needs,
+)
 from app.services.document_generator import (
     PPR_DOCUMENT_TYPES,
     generate_ppr_document,
@@ -167,12 +175,63 @@ def add_stories_to_design_input(
         for i in items
     ]
     try:
-        content, added, skipped = add_stories(workbook, stories, notes=f"Increment {project.code}")
+        result = add_stories(workbook, stories, notes=f"Increment {project.code}")
     except DesignInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-DI-PTBSYS"
-    response = _xlsx_response(content, f"{stem} - {project.code}")
-    response.headers["X-Stories-Added"] = str(added)
-    response.headers["X-Stories-Skipped"] = str(skipped)
+    response = _xlsx_response(result.content, f"{stem} - {project.code}")
+    _set_export_headers(response, "X-Stories", result)
+    return response
+
+
+def _set_export_headers(response: Response, prefix: str, result: ExportResult) -> None:
+    response.headers[f"{prefix}-Added"] = str(result.added)
+    response.headers[f"{prefix}-Skipped"] = str(result.skipped)
+    # Lasciate fuori perche' il documento ha gia' lo stesso contenuto sotto
+    # un altro ID: "NUOVO=ESISTENTE, ...".
+    response.headers[f"{prefix}-Duplicates"] = ", ".join(f"{new}={old}" for new, old in result.duplicates)
+    # Nuova versione del documento (revision history aggiornata); vuoto se la
+    # Cover non e' stata aggiornata.
+    response.headers[f"{prefix}-Version"] = str(result.version or "")
+
+
+def _issue_number(jira_key: str) -> int:
+    number = jira_key.rsplit("-", 1)[-1]
+    return int(number) if number.isdigit() else 0
+
+
+@router.post("/api/projects/{project_id}/documents/user-needs")
+def add_user_needs_to_document(
+    project_id: int,
+    filename: str = Query("TIH-UN-PTBSYS.xlsx"),
+    workbook: bytes = Body(..., media_type="application/octet-stream"),
+    db: Session = Depends(get_db),
+):
+    """Come il Design Input, per il documento User Needs (TIH-UN): riceve il
+    file .xlsx corrente e lo restituisce con le User Need di questo increment
+    aggiunte in cima al foglio "User Needs". Le User Need sono i parent delle
+    Story in scope del backlog; contano solo quelle dello stesso progetto
+    Jira dell'increment (es. PTBSYS-...), perche' il foglio raccoglie quelle:
+    i parent di altri progetti Jira vengono solo segnalati."""
+    project = _get_project_or_404(db, project_id)
+    jira_project = project.code.split("-", 1)[0]
+    parents: dict[str, str] = {}
+    for item in project.backlog_items:
+        if item.in_scope and item.issue_type == "Story" and item.parent_key:
+            parents.setdefault(item.parent_key, item.parent_summary or "")
+    own = sorted((k for k in parents if k.split("-", 1)[0] == jira_project), key=_issue_number, reverse=True)
+    other = sorted(k for k in parents if k.split("-", 1)[0] != jira_project)
+
+    try:
+        result = add_user_needs(
+            workbook, [UserNeed(key=k, text=parents[k]) for k in own], notes=f"Increment {project.code}"
+        )
+    except DesignInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-UN-PTBSYS"
+    response = _xlsx_response(result.content, f"{stem} - {project.code}")
+    _set_export_headers(response, "X-User-Needs", result)
+    response.headers["X-User-Needs-Other-Projects"] = ", ".join(other)
     return response

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useRef, useState } from 'react'
-import { api, saveBlob } from '../api/client'
+import { api, saveBlob, type WorkbookExportResult } from '../api/client'
 import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
@@ -215,13 +215,24 @@ function PprDownloadButton({
   )
 }
 
-// Esporta Design Input: si sceglie il documento TIH-DI corrente (.xlsx),
-// il backend vi aggiunge in cima le Story in scope di questo increment e
-// restituisce il file aggiornato, scaricato subito.
-function DesignInputExportButton({ projectId, projectCode }: { projectId: number; projectCode: string }) {
+// Esporta Design Input / User Needs: si sceglie il documento corrente
+// (.xlsx), il backend vi aggiunge in cima le righe di questo increment e
+// restituisce il file aggiornato, scaricato subito. `noun` e' come chiamare
+// le righe aggiunte nei messaggi ("story", "user need").
+function WorkbookExportButton({
+  label,
+  title,
+  noun,
+  exportFile,
+}: {
+  label: string
+  title: string
+  noun: string
+  exportFile: (file: File) => Promise<WorkbookExportResult>
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const exportDesignInput = useMutation({
-    mutationFn: (file: File) => api.documents.designInput(projectId, file),
+  const run = useMutation({
+    mutationFn: exportFile,
     onSuccess: (result) => {
       if (result.added > 0) saveBlob(result.blob, result.filename)
     },
@@ -229,13 +240,8 @@ function DesignInputExportButton({ projectId, projectCode }: { projectId: number
 
   return (
     <>
-      <button
-        className="btn btn-primary"
-        title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${projectCode}" nella colonna Notes`}
-        onClick={() => fileRef.current?.click()}
-        disabled={exportDesignInput.isPending}
-      >
-        {exportDesignInput.isPending ? 'Esportazione...' : '📄 Esporta Design Input'}
+      <button className="btn btn-primary" title={title} onClick={() => fileRef.current?.click()} disabled={run.isPending}>
+        {run.isPending ? 'Esportazione...' : `📄 Esporta ${label}`}
       </button>
       <input
         ref={fileRef}
@@ -246,24 +252,34 @@ function DesignInputExportButton({ projectId, projectCode }: { projectId: number
           const file = e.target.files?.[0]
           // Svuotato subito: scegliere di nuovo lo stesso file deve far ripartire l'esportazione.
           e.target.value = ''
-          if (file) exportDesignInput.mutate(file)
+          if (file) run.mutate(file)
         }}
       />
       {/* flexBasis 100%: i messaggi vanno a capo sotto i pulsanti della sottosezione. */}
-      {exportDesignInput.isError && (
+      {run.isError && (
         <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
-          Esportazione Design Input non riuscita: {(exportDesignInput.error as Error).message}
+          Esportazione {label} non riuscita: {(run.error as Error).message}
         </div>
       )}
-      {exportDesignInput.isSuccess && (
+      {run.isSuccess && (
         <div
           className="error-banner"
           style={{ flexBasis: '100%', marginBottom: 0, background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}
         >
-          {exportDesignInput.data.added > 0
-            ? `Design Input scaricato (${exportDesignInput.data.filename}): ${exportDesignInput.data.added} story aggiunte in cima`
-            : 'Nessuna story da aggiungere al Design Input: file non scaricato'}
-          {exportDesignInput.data.skipped > 0 && ` (${exportDesignInput.data.skipped} già presenti nel documento, non duplicate)`}.
+          {run.data.added > 0
+            ? `${label} scaricato (${run.data.filename}): ${run.data.added} ${noun} aggiunte in cima`
+            : `Nessuna ${noun} da aggiungere a ${label}: file non scaricato`}
+          {run.data.skipped > 0 && ` (${run.data.skipped} già presenti nel documento, non duplicate)`}.
+          {run.data.added > 0 &&
+            (run.data.version != null
+              ? ` Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
+              : ' Versione e revision history non aggiornate (Cover non riconosciuta): da fare a mano.')}
+          {run.data.duplicates.length > 0 &&
+            ` Non aggiunte perché il documento ha già lo stesso contenuto con un altro ID: ${run.data.duplicates
+              .map((d) => `${d.key} (uguale a ${d.existing})`)
+              .join(', ')}.`}
+          {run.data.otherProjects.length > 0 &&
+            ` Non aggiunte perché di un altro progetto Jira: ${run.data.otherProjects.join(', ')}.`}
         </div>
       )}
     </>
@@ -392,7 +408,22 @@ export function DocumentsPage() {
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <PprDownloadButton projectId={project.id} docType={docType} label={label} />
-            {docType === 'planning' && <DesignInputExportButton projectId={project.id} projectCode={project.code} />}
+            {docType === 'planning' && (
+              <>
+                <WorkbookExportButton
+                  label="Design Input"
+                  noun="story"
+                  title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
+                  exportFile={(file) => api.documents.designInput(project.id, file)}
+                />
+                <WorkbookExportButton
+                  label="User Needs"
+                  noun="user need"
+                  title={`Scegli il documento User Needs (TIH-UN, .xlsx): le User Need di questo increment (i parent delle Story in scope) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes`}
+                  exportFile={(file) => api.documents.userNeeds(project.id, file)}
+                />
+              </>
+            )}
             {/* Regression Analysis e Release Report: compilano Cover e foglio
                 dati dei template Excel ufficiali con i dati dell'increment. */}
             {docType === 'execution' && (
