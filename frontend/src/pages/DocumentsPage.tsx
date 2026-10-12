@@ -91,6 +91,127 @@ function DocumentDownloadButton({
   )
 }
 
+// Spiegazione, mostrata dalla "i" accanto al pulsante, di come il backend
+// compila in automatico il documento (services/document_generator.py): da
+// tenere allineata a quel codice.
+type DocumentInfo = { intro: string; sections: { title: string; points: string[] }[] }
+
+const REGRESSION_ANALYSIS_INFO: DocumentInfo = {
+  intro:
+    'Il documento parte dal template ufficiale e viene compilato con i dati del Backlog di questo increment, così come sono dopo l\'ultima sincronizzazione con Jira.',
+  sections: [
+    {
+      title: 'Cover',
+      points: [
+        'Titolo: "REGRESSION ANALYSIS", ProTube System, codice e nome dell\'increment.',
+        'Firmatari: Project Manager, Quality Manager e Development Manager, sempre gli stessi.',
+        'Revisione: versione e descrizione inserite nel popup, data di oggi e Project Manager come autore. Il popup propone versione 1 e un testo con il Change Order.',
+      ],
+    },
+    {
+      title: 'Foglio "Regression Analysis"',
+      points: [
+        'Una riga per ogni Story e Bug in scope: prima le Story, poi i Bug, nell\'ordine di priorità del Backlog.',
+        'Colonna A: nome del Change Order configurato in questa pagina.',
+        'Colonne B e C: ID Jira e tipo (Story o Bug).',
+        'Colonna D: per le Story la description di Jira (il summary se è vuota); per i Bug il campo Jira "Change Description", oppure "n.a." se non è compilato.',
+        'Le altre colonne restano vuote. Le righe di esempio del template vengono eliminate.',
+      ],
+    },
+    {
+      title: 'Numero di documento e nome del file',
+      points: [
+        'TIH-REA-PTBSYS-<anno>-<codice del Change Order>.<versione>, ad esempio TIH-REA-PTBSYS-2026-0129.1 per CO2026-0129. Compare anche nell\'intestazione di stampa.',
+        'Se il nome del Change Order non è nel formato CO<anno>-<codice>, viene usato il codice dell\'increment.',
+      ],
+    },
+  ],
+}
+
+const RELEASE_REPORT_INFO: DocumentInfo = {
+  intro:
+    'Il documento parte dal template ufficiale, che contiene lo storico degli increment precedenti, e viene compilato con i dati del Backlog di questo increment, così come sono dopo l\'ultima sincronizzazione con Jira.',
+  sections: [
+    {
+      title: 'Cover',
+      points: [
+        'Titolo: "RELEASE REPORT", ProTube System, codice dell\'increment.',
+        'Revision history: viene aggiunta una riga in fondo con versione e descrizione inserite nel popup e il Project Manager come autore.',
+        'Il popup propone la versione successiva all\'ultima generata da qui e l\'ultima descrizione usata; la prima volta li prende dall\'ultima riga del template.',
+      ],
+    },
+    {
+      title: 'Foglio "Release Report": Bug',
+      points: [
+        'Una riga per ogni Bug in scope, nell\'ordine di priorità del Backlog. Le Story non hanno una riga propria.',
+        'Colonne A-C: "Bug", ID Jira, summary.',
+        'Colonna D: campo Jira "Problem Cause". Colonna E: campo Jira "Change Description". Se sono vuoti viene scritto "n.a.".',
+        'Colonna F: components. Colonna G: "Version: <codice dell\'increment>, Labels: <label del Bug>".',
+        'Colonne H e I: "n.a.".',
+      ],
+    },
+    {
+      title: 'Foglio "Release Report": Task',
+      points: [
+        'Dopo i Bug, una riga per ogni Task collegato con il link Jira "is implemented by" a una Story o a un Bug in scope: gli stessi Task della tabella in fondo a questa pagina.',
+        'Colonne A-C: "Task", ID Jira, summary. Colonne D, E e H: "n.a.".',
+        'Colonna F: components del Task. Colonna G: "Version: <fix version del Task>, Labels: <label del Task>".',
+        'Colonna I: ID della Story o del Bug che il Task implementa.',
+      ],
+    },
+    {
+      title: 'Numero di documento e nome del file',
+      points: [
+        'Il file si chiama sempre TIH-RR-PTBSYS.xlsx. La versione compare solo nel numero di documento (TIH-RR-PTBSYS.<versione>), nel titolo del foglio e nell\'intestazione di stampa.',
+      ],
+    },
+  ],
+}
+
+// "i" accanto a un pulsante di download: apre un popup con la spiegazione.
+function DocumentInfoButton({ label, info }: { label: string; info: DocumentInfo }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button
+        type="button"
+        className="info-icon"
+        style={{ background: 'none', padding: 0, cursor: 'pointer' }}
+        title={`Come viene compilato ${label}`}
+        aria-label={`Come viene compilato ${label}`}
+        onClick={() => setOpen(true)}
+      >
+        i
+      </button>
+      {open && (
+        // onMouseDown (non onClick): vedi commento in DocumentDownloadButton.
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Come viene compilato {label}</h3>
+            <p style={{ marginTop: 0 }}>{info.intro}</p>
+            {info.sections.map((section) => (
+              <div key={section.title}>
+                <strong>{section.title}</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 20 }}>
+                  {section.points.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            <div className="form-actions">
+              <button className="btn btn-primary" onClick={() => setOpen(false)}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // Come DocumentDownloadButton, ma con in piu' la sezione "Deliverable
 // Check" del foglio Planning Review (righe 40-56, sempre presente in
 // tutti e 4 i tipi di documento PPR): per ciascun documento, un flag
@@ -428,16 +549,23 @@ export function DocumentsPage() {
                 dati dei template Excel ufficiali con i dati dell'increment. */}
             {docType === 'execution' && (
               <>
-                <DocumentDownloadButton
-                  label="Regression Analysis"
-                  loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
-                  download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
-                />
-                <DocumentDownloadButton
-                  label="Release Report"
-                  loadMeta={() => api.documents.releaseReportMeta(project.id)}
-                  download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}
-                />
+                {/* Pulsante e "i" in un unico blocco: non si separano quando la riga va a capo. */}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <DocumentDownloadButton
+                    label="Regression Analysis"
+                    loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
+                    download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
+                  />
+                  <DocumentInfoButton label="Regression Analysis" info={REGRESSION_ANALYSIS_INFO} />
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <DocumentDownloadButton
+                    label="Release Report"
+                    loadMeta={() => api.documents.releaseReportMeta(project.id)}
+                    download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}
+                  />
+                  <DocumentInfoButton label="Release Report" info={RELEASE_REPORT_INFO} />
+                </span>
               </>
             )}
           </div>
