@@ -461,6 +461,39 @@ class DocumentRevisionMeta(BaseModel):
     last_revision_text: str
 
 
+class RequirementCheckItem(BaseModel):
+    key: str
+    summary: str = ""
+    status: str = ""
+    # Campo Jira "Epic Category": "UN" per le User Need.
+    category: str = ""
+    # Issue che sostituiscono questa (link Jira "is expanded by").
+    expanded_by: list[str] = []
+    # Ha la fix version di questo increment: se non e' ancora in Done e'
+    # attesa nel documento, non e' un'anomalia.
+    current_increment: bool = False
+
+
+class RequirementsCheck(BaseModel):
+    """Confronto tra un foglio di requisiti di un documento ("User Needs" o
+    "Design Input - Stories") e le issue corrispondenti su Jira."""
+
+    jira_project: str
+    document_count: int
+    # Issue su Jira in Done e non obsolete.
+    jira_valid_count: int
+    # Issue su Jira in Done ma obsolete (sostituite da un'altra).
+    jira_obsolete_count: int
+    missing: list[RequirementCheckItem]
+    obsolete_in_document: list[RequirementCheckItem]
+    not_done_in_document: list[RequirementCheckItem]
+    # Nel documento, ma su Jira sono Epic di un'altra categoria (non "UN").
+    wrong_category_in_document: list[RequirementCheckItem]
+    # Nel documento, ma su Jira non c'e' un'issue di quel tipo con questa chiave.
+    unknown_in_document: list[str]
+    repeated_in_document: list[str]
+
+
 class PprDeliverable(BaseModel):
     """Una riga della sezione "Deliverable Check" del foglio Planning
     Review: row/name sono fissi (letti dal template), included/filename/

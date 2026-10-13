@@ -221,6 +221,30 @@ export type DocumentRevisionMeta = {
   last_revision_text: string
 }
 
+export type RequirementCheckItem = {
+  key: string
+  summary: string
+  status: string
+  category: string
+  expanded_by: string[]
+  current_increment: boolean
+}
+
+// Confronto tra un foglio di requisiti di un documento ("User Needs" o
+// "Design Input - Stories") e le issue corrispondenti su Jira.
+export type RequirementsCheck = {
+  jira_project: string
+  document_count: number
+  jira_valid_count: number
+  jira_obsolete_count: number
+  missing: RequirementCheckItem[]
+  obsolete_in_document: RequirementCheckItem[]
+  not_done_in_document: RequirementCheckItem[]
+  wrong_category_in_document: RequirementCheckItem[]
+  unknown_in_document: string[]
+  repeated_in_document: string[]
+}
+
 export type PprDeliverable = {
   row: number
   name: string

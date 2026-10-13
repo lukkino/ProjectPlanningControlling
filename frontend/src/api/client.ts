@@ -30,6 +30,7 @@ import type {
   SyncResult,
   Team,
   TestConnectionResult,
+  RequirementsCheck,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -58,21 +59,27 @@ const put = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 
 // Invia un documento .xlsx cosi' com'e' (corpo binario) e riceve lo stesso
-// file con le righe dell'increment aggiunte: quante ne sono state
-// aggiunte/saltate arriva negli header "<prefisso>-Added/-Skipped", in
+// file con le righe dell'increment aggiunte: gli ID aggiunti e quante righe
+// sono state saltate arrivano negli header "<prefisso>-Added/-Skipped", in
 // "<prefisso>-Duplicates" quelle lasciate fuori perche' il documento ha gia'
 // lo stesso contenuto sotto un altro ID ("NUOVO=ESISTENTE, ..."), in
 // "<prefisso>-Version" la nuova versione del documento (null se la Cover non
-// e' stata aggiornata) e in "<prefisso>-Other-Projects" le eventuali voci
-// lasciate fuori perche' di un altro progetto Jira.
+// e' stata aggiornata), in "<prefisso>-Excluded" le eventuali voci
+// dell'increment lasciate fuori, ognuna con il motivo tra parentesi, in
+// "<prefisso>-Removed" le righe obsolete scritte come "Removed" nella nuova
+// revisione (le righe restano nel foglio, vanno tolte a mano) e in
+// "<prefisso>-Still-Present" le obsolete gia' dichiarate in una revisione
+// precedente ma ancora nel foglio.
 export type WorkbookExportResult = {
   blob: Blob
   filename: string
-  added: number
+  added: string[]
   skipped: number
   duplicates: { key: string; existing: string }[]
   version: number | null
-  otherProjects: string[]
+  excluded: string[]
+  removed: string[]
+  stillPresent: string[]
 }
 
 async function addRowsToWorkbook(path: string, file: File, headerPrefix: string): Promise<WorkbookExportResult> {
@@ -92,22 +99,29 @@ async function addRowsToWorkbook(path: string, file: File, headerPrefix: string)
     throw new Error(detail)
   }
   const match = (response.headers.get('Content-Disposition') ?? '').match(/filename="?([^"]+)"?/)
+  const list = (name: string) => (response.headers.get(`${headerPrefix}-${name}`) ?? '').split(', ').filter(Boolean)
   return {
     blob: await response.blob(),
     filename: match ? match[1] : file.name,
-    added: Number(response.headers.get(`${headerPrefix}-Added`) ?? 0),
+    added: list('Added'),
     skipped: Number(response.headers.get(`${headerPrefix}-Skipped`) ?? 0),
-    duplicates: (response.headers.get(`${headerPrefix}-Duplicates`) ?? '')
-      .split(', ')
-      .filter(Boolean)
-      .map((pair) => {
-        const [key, existing] = pair.split('=')
-        return { key, existing }
-      }),
+    duplicates: list('Duplicates').map((pair) => {
+      const [key, existing] = pair.split('=')
+      return { key, existing }
+    }),
     version: Number(response.headers.get(`${headerPrefix}-Version`)) || null,
-    otherProjects: (response.headers.get(`${headerPrefix}-Other-Projects`) ?? '').split(', ').filter(Boolean),
+    excluded: list('Excluded'),
+    removed: list('Removed'),
+    stillPresent: list('Still-Present'),
   }
 }
+
+const checkWorkbook = (projectId: number, document: string, file: File) =>
+  request<RequirementsCheck>(`/projects/${projectId}/documents/${document}/check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
 
 // Scarica un file binario (es. un documento .xlsx generato dal backend),
 // leggendo il nome file dall'header Content-Disposition invece di doverlo
@@ -265,6 +279,10 @@ export const api = {
       addRowsToWorkbook(`/projects/${projectId}/documents/design-input`, file, 'X-Stories'),
     userNeeds: (projectId: number, file: File) =>
       addRowsToWorkbook(`/projects/${projectId}/documents/user-needs`, file, 'X-User-Needs'),
+    // Confronta il documento (Design Input o User Needs) con Jira: il file non
+    // viene modificato.
+    designInputCheck: (projectId: number, file: File) => checkWorkbook(projectId, 'design-input', file),
+    userNeedsCheck: (projectId: number, file: File) => checkWorkbook(projectId, 'user-needs', file),
     regressionAnalysisMeta: (projectId: number) =>
       request<DocumentRevisionMeta>(`/projects/${projectId}/documents/regression-analysis/meta`),
     regressionAnalysis: (projectId: number, version: number, revisionText: string) =>

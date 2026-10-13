@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useRef, useState } from 'react'
 import { api, saveBlob, type WorkbookExportResult } from '../api/client'
-import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project } from '../api/types'
+import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project, RequirementCheckItem, RequirementsCheck } from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -338,8 +338,10 @@ function PprDownloadButton({
 
 // Esporta Design Input / User Needs: si sceglie il documento corrente
 // (.xlsx), il backend vi aggiunge in cima le righe di questo increment e
-// restituisce il file aggiornato, scaricato subito. `noun` e' come chiamare
-// le righe aggiunte nei messaggi ("story", "user need").
+// restituisce il file aggiornato, scaricato subito; poi un popup riassume
+// cosa e' stato aggiunto e quali righe obsolete sono state dichiarate
+// "Removed" nella revision history. `noun` e' come chiamare le righe aggiunte
+// nei messaggi ("story", "user need").
 function WorkbookExportButton({
   label,
   title,
@@ -355,9 +357,11 @@ function WorkbookExportButton({
   const run = useMutation({
     mutationFn: exportFile,
     onSuccess: (result) => {
-      if (result.added > 0) saveBlob(result.blob, result.filename)
+      // Il file cambia se ha righe nuove o una nuova riga di revisione.
+      if (result.added.length > 0 || result.removed.length > 0) saveBlob(result.blob, result.filename)
     },
   })
+  const changed = run.isSuccess && (run.data.added.length > 0 || run.data.removed.length > 0)
 
   return (
     <>
@@ -376,31 +380,242 @@ function WorkbookExportButton({
           if (file) run.mutate(file)
         }}
       />
-      {/* flexBasis 100%: i messaggi vanno a capo sotto i pulsanti della sottosezione. */}
+      {/* flexBasis 100%: il messaggio va a capo sotto i pulsanti della sottosezione. */}
       {run.isError && (
         <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
           Esportazione {label} non riuscita: {(run.error as Error).message}
         </div>
       )}
       {run.isSuccess && (
+        // Riepilogo di cio' che l'esportazione ha fatto, mostrato dopo il
+        // salvataggio del file. onMouseDown: vedi DocumentDownloadButton.
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && run.reset()}>
+          <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>{label}: riepilogo</h3>
+            {changed ? (
+              <p style={{ marginTop: 0 }}>
+                File salvato: <strong>{run.data.filename}</strong>.{' '}
+                {run.data.version != null
+                  ? `Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
+                  : 'Versione e revision history non aggiornate (Cover non riconosciuta): da fare a mano.'}
+              </p>
+            ) : (
+              <p style={{ marginTop: 0 }}>Nessuna modifica da fare: il file non è stato salvato.</p>
+            )}
+            <ExportSummaryList title={`Aggiunte in cima al foglio (${noun})`} keys={run.data.added} />
+            <ExportSummaryList
+              title="Obsolete: scritte come “Removed” nella revision history"
+              keys={run.data.removed}
+              note="Le righe NON sono state cancellate: sono ancora nel documento, da togliere a mano dopo il controllo."
+            />
+            <ExportSummaryList
+              title="Obsolete già dichiarate “Removed” in una revisione precedente, ma ancora nel documento"
+              keys={run.data.stillPresent}
+              note="Da togliere a mano."
+            />
+            {run.data.duplicates.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <strong>Non aggiunte: stesso contenuto già presente con un altro ID ({run.data.duplicates.length})</strong>
+                <div>{run.data.duplicates.map((d) => `${d.key} (uguale a ${d.existing})`).join(', ')}</div>
+              </div>
+            )}
+            {run.data.excluded.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <strong>Non aggiunte pur avendo la fix version dell'increment ({run.data.excluded.length})</strong>
+                <div>{run.data.excluded.join(', ')}</div>
+              </div>
+            )}
+            {run.data.skipped > 0 && (
+              <div className="muted" style={{ marginTop: 10 }}>
+                {run.data.skipped} {noun} dell'increment erano già nel documento.
+              </div>
+            )}
+            <div className="form-actions">
+              <button className="btn btn-primary" onClick={() => run.reset()}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// Una voce del riepilogo dell'esportazione: titolo, chiavi Jira e nota.
+function ExportSummaryList({ title, keys, note }: { title: string; keys: string[]; note?: string }) {
+  if (keys.length === 0) return null
+  return (
+    <div style={{ marginTop: 10 }}>
+      <strong>
+        {title} ({keys.length})
+      </strong>
+      <div>
+        {keys.map((key, index) => (
+          <Fragment key={key}>
+            {index > 0 && ', '}
+            {jiraLink(key)}
+          </Fragment>
+        ))}
+      </div>
+      {note && <div className="muted">{note}</div>}
+    </div>
+  )
+}
+
+const jiraLink = (key: string) => (
+  <a href={`https://inpeco.atlassian.net/browse/${key}`} target="_blank" rel="noreferrer">
+    {key}
+  </a>
+)
+
+// Una voce dell'esito della verifica: titolo e, sotto, l'elenco delle issue.
+function RequirementsCheckList({
+  title,
+  items,
+  detail,
+}: {
+  title: string
+  items: RequirementCheckItem[]
+  detail?: (item: RequirementCheckItem) => string
+}) {
+  if (items.length === 0) return null
+  return (
+    <div style={{ marginTop: 8 }}>
+      <strong>
+        {title} ({items.length})
+      </strong>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+        {items.map((item) => (
+          <li key={item.key}>
+            {jiraLink(item.key)} {item.summary}
+            {detail && <span className="muted"> — {detail(item)}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// Verifica Design Input / User Needs: si sceglie il documento (.xlsx, quello
+// di partenza o quello appena esportato) e il backend lo confronta con Jira.
+// Il documento dovrebbe contenere tutte e sole le issue non obsolete che
+// sono in Done oppure hanno la fix version di questo increment (un'issue
+// sostituita da un'altra, "is expanded by", resta in Done ma non deve
+// esserci). Il file non viene modificato. `noun` e' come chiamare le righe
+// nei messaggi ("Story", "User Need").
+function RequirementsCheckButton({
+  label,
+  code,
+  noun,
+  checkFile,
+}: {
+  label: string
+  code: string
+  noun: string
+  checkFile: (file: File) => Promise<RequirementsCheck>
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const run = useMutation({ mutationFn: checkFile })
+  const check = run.data
+
+  // Anomalie: tutto tranne le issue di questo increment (fix version) ancora da chiudere.
+  const pending = check?.not_done_in_document.filter((i) => i.current_increment) ?? []
+  const notDone = check?.not_done_in_document.filter((i) => !i.current_increment) ?? []
+  const problems = check
+    ? check.missing.length +
+      check.obsolete_in_document.length +
+      notDone.length +
+      check.wrong_category_in_document.length +
+      check.unknown_in_document.length +
+      check.repeated_in_document.length
+    : 0
+
+  return (
+    <>
+      <button
+        className="btn"
+        title={`Scegli un documento ${label} (${code}, .xlsx): viene confrontato con le ${noun} su Jira, senza modificarlo`}
+        onClick={() => fileRef.current?.click()}
+        disabled={run.isPending}
+      >
+        {run.isPending ? 'Verifica...' : `🔍 Verifica ${label}`}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".xlsx"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) run.mutate(file)
+        }}
+      />
+      {run.isError && (
+        <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
+          Verifica {label} non riuscita: {(run.error as Error).message}
+        </div>
+      )}
+      {check && (
         <div
           className="error-banner"
-          style={{ flexBasis: '100%', marginBottom: 0, background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}
+          style={{
+            flexBasis: '100%',
+            marginBottom: 0,
+            ...(problems === 0 ? { background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' } : {}),
+          }}
         >
-          {run.data.added > 0
-            ? `${label} scaricato (${run.data.filename}): ${run.data.added} ${noun} aggiunte in cima`
-            : `Nessuna ${noun} da aggiungere a ${label}: file non scaricato`}
-          {run.data.skipped > 0 && ` (${run.data.skipped} già presenti nel documento, non duplicate)`}.
-          {run.data.added > 0 &&
-            (run.data.version != null
-              ? ` Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
-              : ' Versione e revision history non aggiornate (Cover non riconosciuta): da fare a mano.')}
-          {run.data.duplicates.length > 0 &&
-            ` Non aggiunte perché il documento ha già lo stesso contenuto con un altro ID: ${run.data.duplicates
-              .map((d) => `${d.key} (uguale a ${d.existing})`)
-              .join(', ')}.`}
-          {run.data.otherProjects.length > 0 &&
-            ` Non aggiunte perché di un altro progetto Jira: ${run.data.otherProjects.join(', ')}.`}
+          <div>
+            <strong>
+              {problems === 0
+                ? `Verifica ${label}: il documento è allineato a Jira.`
+                : `Verifica ${label}: ${problems} ${problems === 1 ? 'anomalia' : 'anomalie'} da controllare.`}
+            </strong>
+          </div>
+          <div>
+            Nel documento: {check.document_count} {noun}. Su Jira ({check.jira_project}) in Done e valide:{' '}
+            {check.jira_valid_count}
+            {check.jira_obsolete_count > 0 && `, più ${check.jira_obsolete_count} in Done ma obsolete (sostituite da un'altra)`}
+            .
+            {pending.length > 0 &&
+              ` Il documento ne ha ${pending.length} in più perché hanno la fix version di questo increment e non sono ancora in Done.`}
+          </div>
+          <RequirementsCheckList
+            title="Attese ma mancanti nel documento"
+            items={check.missing}
+            detail={(i) => (i.current_increment ? `di questo increment, stato ${i.status}` : i.status)}
+          />
+          <RequirementsCheckList
+            title="Nel documento, ma obsolete su Jira: da togliere"
+            items={check.obsolete_in_document}
+            detail={(i) => (i.expanded_by.length > 0 ? `sostituita da ${i.expanded_by.join(', ')}` : 'Expand Status = INVALID')}
+          />
+          <RequirementsCheckList
+            title="Nel documento, ma non in Done su Jira e senza la fix version di questo increment"
+            items={notDone}
+            detail={(i) => i.status}
+          />
+          <RequirementsCheckList
+            title={`Nel documento, ma su Jira non sono ${noun}`}
+            items={check.wrong_category_in_document}
+            detail={(i) => `Epic Category = ${i.category || 'vuota'}, stato ${i.status}`}
+          />
+          {check.unknown_in_document.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Nel documento, ma non trovate su Jira:</strong> {check.unknown_in_document.join(', ')}
+            </div>
+          )}
+          {check.repeated_in_document.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Ripetute nel documento:</strong> {check.repeated_in_document.join(', ')}
+            </div>
+          )}
+          <RequirementsCheckList
+            title="Con la fix version di questo increment, non ancora in Done (attese nel documento)"
+            items={pending}
+            detail={(i) => i.status}
+          />
         </div>
       )}
     </>
@@ -534,14 +749,26 @@ export function DocumentsPage() {
                 <WorkbookExportButton
                   label="Design Input"
                   noun="story"
-                  title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story in scope di questo increment vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
+                  title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story di questo increment (lette da Jira: fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
                   exportFile={(file) => api.documents.designInput(project.id, file)}
                 />
                 <WorkbookExportButton
                   label="User Needs"
                   noun="user need"
-                  title={`Scegli il documento User Needs (TIH-UN, .xlsx): le User Need di questo increment (i parent delle Story in scope) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes`}
+                  title={`Scegli il documento User Needs (TIH-UN, .xlsx): le User Need di questo increment (lette da Jira: Epic con Epic Category "UN" e fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes`}
                   exportFile={(file) => api.documents.userNeeds(project.id, file)}
+                />
+                <RequirementsCheckButton
+                  label="Design Input"
+                  code="TIH-DI"
+                  noun="Story"
+                  checkFile={(file) => api.documents.designInputCheck(project.id, file)}
+                />
+                <RequirementsCheckButton
+                  label="User Needs"
+                  code="TIH-UN"
+                  noun="User Need"
+                  checkFile={(file) => api.documents.userNeedsCheck(project.id, file)}
                 />
               </>
             )}

@@ -7,14 +7,18 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.routers.settings import SETTINGS_ROW_ID
 from app.services.design_input import (
     EMPTY_COMPONENTS,
+    SHEET_NAME,
+    USER_NEEDS_SHEET_NAME,
     DesignInputError,
     ExportResult,
     Story,
     UserNeed,
     add_stories,
     add_user_needs,
+    read_ids,
 )
 from app.services.document_generator import (
     PPR_DOCUMENT_TYPES,
@@ -26,6 +30,7 @@ from app.services.document_generator import (
     get_regression_analysis_defaults,
     get_release_report_defaults,
 )
+from app.services.jira_client import JiraClientError, fetch_requirement_issues
 
 router = APIRouter(tags=["documents"])
 
@@ -154,39 +159,37 @@ def add_stories_to_design_input(
     db: Session = Depends(get_db),
 ):
     """Riceve il documento Design Input corrente (il file .xlsx cosi' com'e',
-    nel corpo della richiesta) e lo restituisce con le Story in scope del
-    backlog di questo increment aggiunte in cima al foglio "Design Input -
-    Stories". Il file non viene salvato sul server."""
+    nel corpo della richiesta) e lo restituisce con le Story di questo
+    increment aggiunte in cima al foglio "Design Input - Stories". Le Story
+    dell'increment sono lette da Jira: quelle con la fix version
+    dell'increment, in qualunque stato (anche non ancora Done), escluse
+    quelle obsolete, che vengono solo segnalate. Il file non viene salvato
+    sul server."""
     project = _get_project_or_404(db, project_id)
-    # Dalla piu' recente (numero di issue piu' alto), come nel documento.
-    items = sorted(
-        (i for i in project.backlog_items if i.in_scope and i.issue_type == "Story"),
-        key=lambda i: int(i.jira_key.rsplit("-", 1)[-1]) if i.jira_key.rsplit("-", 1)[-1].isdigit() else 0,
-        reverse=True,
-    )
+    own, excluded, obsolete = _increment_requirements(db, project, "Story")
     stories = [
         Story(
-            key=i.jira_key,
-            title=i.summary or "",
-            description=i.description or "",
-            components=i.components or EMPTY_COMPONENTS,
-            labels=", ".join(sorted(label for label in (i.labels or "").split(";") if label)),
+            key=issue["key"],
+            title=issue["summary"],
+            description=issue["description"],
+            components=", ".join(issue["components"]) or EMPTY_COMPONENTS,
+            labels=", ".join(sorted(issue["labels"])),
         )
-        for i in items
+        for issue in own
     ]
     try:
-        result = add_stories(workbook, stories, notes=f"Increment {project.code}")
+        result = add_stories(workbook, stories, notes=f"Increment {project.code}", obsolete=obsolete)
     except DesignInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-DI-PTBSYS"
     response = _xlsx_response(result.content, f"{stem} - {project.code}")
-    _set_export_headers(response, "X-Stories", result)
+    _set_export_headers(response, "X-Stories", result, excluded)
     return response
 
 
-def _set_export_headers(response: Response, prefix: str, result: ExportResult) -> None:
-    response.headers[f"{prefix}-Added"] = str(result.added)
+def _set_export_headers(response: Response, prefix: str, result: ExportResult, excluded: list[str]) -> None:
+    response.headers[f"{prefix}-Added"] = ", ".join(result.added_keys)
     response.headers[f"{prefix}-Skipped"] = str(result.skipped)
     # Lasciate fuori perche' il documento ha gia' lo stesso contenuto sotto
     # un altro ID: "NUOVO=ESISTENTE, ...".
@@ -194,6 +197,13 @@ def _set_export_headers(response: Response, prefix: str, result: ExportResult) -
     # Nuova versione del documento (revision history aggiornata); vuoto se la
     # Cover non e' stata aggiornata.
     response.headers[f"{prefix}-Version"] = str(result.version or "")
+    # Issue con la fix version dell'increment lasciate fuori: "CHIAVE (motivo), ...".
+    response.headers[f"{prefix}-Excluded"] = ", ".join(excluded)
+    # Obsolete presenti nel foglio (le righe non vengono cancellate): quelle
+    # scritte come "Removed" nella nuova revisione, e quelle gia' dichiarate
+    # in una revisione precedente ma ancora presenti.
+    response.headers[f"{prefix}-Removed"] = ", ".join(result.removed)
+    response.headers[f"{prefix}-Still-Present"] = ", ".join(result.still_present)
 
 
 def _issue_number(jira_key: str) -> int:
@@ -210,28 +220,150 @@ def add_user_needs_to_document(
 ):
     """Come il Design Input, per il documento User Needs (TIH-UN): riceve il
     file .xlsx corrente e lo restituisce con le User Need di questo increment
-    aggiunte in cima al foglio "User Needs". Le User Need sono i parent delle
-    Story in scope del backlog; contano solo quelle dello stesso progetto
-    Jira dell'increment (es. PTBSYS-...), perche' il foglio raccoglie quelle:
-    i parent di altri progetti Jira vengono solo segnalati."""
+    aggiunte in cima al foglio "User Needs". Le User Need dell'increment sono
+    lette da Jira: gli Epic con Epic Category "UN" e la fix version
+    dell'increment, in qualunque stato (anche non ancora Done), escluse
+    quelle obsolete. Gli Epic con quella fix version lasciati fuori (non
+    User Need, oppure obsoleti) vengono solo segnalati."""
     project = _get_project_or_404(db, project_id)
-    jira_project = project.code.split("-", 1)[0]
-    parents: dict[str, str] = {}
-    for item in project.backlog_items:
-        if item.in_scope and item.issue_type == "Story" and item.parent_key:
-            parents.setdefault(item.parent_key, item.parent_summary or "")
-    own = sorted((k for k in parents if k.split("-", 1)[0] == jira_project), key=_issue_number, reverse=True)
-    other = sorted(k for k in parents if k.split("-", 1)[0] != jira_project)
-
+    own, excluded, obsolete = _increment_requirements(db, project, "Epic")
     try:
         result = add_user_needs(
-            workbook, [UserNeed(key=k, text=parents[k]) for k in own], notes=f"Increment {project.code}"
+            workbook,
+            [UserNeed(key=issue["key"], text=issue["summary"]) for issue in own],
+            notes=f"Increment {project.code}",
+            obsolete=obsolete,
         )
     except DesignInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-UN-PTBSYS"
     response = _xlsx_response(result.content, f"{stem} - {project.code}")
-    _set_export_headers(response, "X-User-Needs", result)
-    response.headers["X-User-Needs-Other-Projects"] = ", ".join(other)
+    _set_export_headers(response, "X-User-Needs", result, excluded)
     return response
+
+
+def _fetch_requirements(db: Session, project: models.Project, issue_type: str) -> list[dict]:
+    """Issue di un tipo (Epic per le User Need, Story per i Design Input) del
+    progetto Jira dell'increment (es. PTBSYS), lette da Jira."""
+    jira_settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    try:
+        return fetch_requirement_issues(
+            (jira_settings.jira_base_url if jira_settings else None) or "",
+            (jira_settings.jira_email if jira_settings else None) or "",
+            (jira_settings.jira_api_token if jira_settings else None) or "",
+            project.code.split("-", 1)[0],
+            issue_type,
+        )
+    except JiraClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _in_increment(issue: dict, project: models.Project) -> bool:
+    """L'issue ha la fix version di questo increment. Su Jira il nome della
+    fix version puo' avere un suffisso dopo il codice (es. "PTBSYS-03-004 -
+    December 26" per l'increment PTBSYS-03-004)."""
+    return any(
+        name == project.code or name.startswith((f"{project.code} ", f"{project.code}-"))
+        for name in issue["fix_versions"]
+    )
+
+
+def _increment_requirements(
+    db: Session, project: models.Project, issue_type: str
+) -> tuple[list[dict], list[str], set[str]]:
+    """Issue da aggiungere al documento per questo increment: quelle con la
+    sua fix version, in qualunque stato, dalla piu' recente (numero di issue
+    piu' alto) come nel documento. Restituisce anche quelle con la stessa fix
+    version lasciate fuori, come "CHIAVE (motivo)", e le chiavi di tutte le
+    issue obsolete (di qualunque increment), che nel documento non devono
+    esserci."""
+    everything = _fetch_requirements(db, project, issue_type)
+    obsolete = {issue["key"] for issue in everything if issue["eligible"] and issue["obsolete"]}
+    issues = [issue for issue in everything if _in_increment(issue, project)]
+    own = sorted(
+        (issue for issue in issues if issue["eligible"] and not issue["obsolete"]),
+        key=lambda issue: _issue_number(issue["key"]),
+        reverse=True,
+    )
+    excluded = [
+        f"{issue['key']} ({'obsoleta' if issue['eligible'] else 'Epic Category ' + (issue['category'] or 'vuota')})"
+        for issue in issues
+        if not issue["eligible"] or issue["obsolete"]
+    ]
+    return own, excluded, obsolete
+
+
+@router.post("/api/projects/{project_id}/documents/user-needs/check", response_model=schemas.RequirementsCheck)
+def check_user_needs_document(
+    project_id: int,
+    workbook: bytes = Body(..., media_type="application/octet-stream"),
+    db: Session = Depends(get_db),
+):
+    """Confronta il foglio "User Needs" del file ricevuto con le User Need su
+    Jira: vedi _check_requirements."""
+    return _check_requirements(db, _get_project_or_404(db, project_id), workbook, USER_NEEDS_SHEET_NAME, "Epic")
+
+
+@router.post("/api/projects/{project_id}/documents/design-input/check", response_model=schemas.RequirementsCheck)
+def check_design_input_document(
+    project_id: int,
+    workbook: bytes = Body(..., media_type="application/octet-stream"),
+    db: Session = Depends(get_db),
+):
+    """Confronta il foglio "Design Input - Stories" del file ricevuto con le
+    Story su Jira: vedi _check_requirements."""
+    return _check_requirements(db, _get_project_or_404(db, project_id), workbook, SHEET_NAME, "Story")
+
+
+def _check_requirements(
+    db: Session, project: models.Project, workbook: bytes, sheet_name: str, issue_type: str
+) -> schemas.RequirementsCheck:
+    """Confronta gli ID di un foglio (User Needs o Design Input) con le issue
+    su Jira (sola lettura): il documento dovrebbe contenere tutte e sole
+    quelle non obsolete che sono in Done oppure hanno la fix version di
+    questo increment (nuove, anche se non ancora Done). Un'issue sostituita
+    da un'altra ("is expanded by") resta in Done su Jira ma nel documento
+    non deve esserci. Il file non viene modificato ne' salvato."""
+    try:
+        document_ids = read_ids(workbook, sheet_name)
+    except DesignInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    issues = _fetch_requirements(db, project, issue_type)
+    all_by_key = {issue["key"]: issue for issue in issues}
+    by_key = {key: issue for key, issue in all_by_key.items() if issue["eligible"]}
+    in_document = set(document_ids)
+    current = {issue["key"] for issue in issues if _in_increment(issue, project)}
+
+    def item(key: str) -> schemas.RequirementCheckItem:
+        issue = all_by_key[key]
+        return schemas.RequirementCheckItem(
+            key=key,
+            summary=issue["summary"],
+            status=issue["status"],
+            category=issue["category"],
+            expanded_by=issue["expanded_by"],
+            current_increment=key in current,
+        )
+
+    def newest_first(keys) -> list[str]:
+        return sorted(keys, key=_issue_number, reverse=True)
+
+    valid = {k for k, issue in by_key.items() if issue["done"] and not issue["obsolete"]}
+    expected = valid | {k for k, issue in by_key.items() if k in current and not issue["obsolete"]}
+    known = in_document & set(by_key)
+    return schemas.RequirementsCheck(
+        jira_project=project.code.split("-", 1)[0],
+        document_count=len(document_ids),
+        jira_valid_count=len(valid),
+        jira_obsolete_count=sum(1 for issue in by_key.values() if issue["done"] and issue["obsolete"]),
+        missing=[item(k) for k in newest_first(expected - in_document)],
+        obsolete_in_document=[item(k) for k in newest_first(k for k in known if by_key[k]["obsolete"])],
+        not_done_in_document=[
+            item(k) for k in newest_first(k for k in known if not by_key[k]["done"] and not by_key[k]["obsolete"])
+        ],
+        wrong_category_in_document=[item(k) for k in newest_first((in_document & set(all_by_key)) - known)],
+        unknown_in_document=newest_first(in_document - set(all_by_key)),
+        repeated_in_document=newest_first({k for k in document_ids if document_ids.count(k) > 1}),
+    )

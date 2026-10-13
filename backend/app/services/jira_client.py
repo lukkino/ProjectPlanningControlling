@@ -641,3 +641,101 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 
     return results
+
+
+# Requisiti dei documenti User Needs e Design Input. Le User Need sono Epic
+# con il campo custom "Epic Category" (customfield_10114) = "UN" (gli altri
+# Epic, es. categoria "DIR", non lo sono); i Design Input sono le Story.
+USER_NEED_CATEGORY_FIELD = "customfield_10114"
+USER_NEED_CATEGORY = "UN"
+# Un requisito sostituito da un altro ha il link "is expanded by" verso il
+# nuovo e/o il campo custom "Expand Status" (customfield_10231) = "INVALID":
+# resta in Done ma e' obsoleto. ("EXPANDED" e' invece il nuovo, valido.)
+EXPAND_STATUS_FIELD = "customfield_10231"
+EXPAND_STATUS_OBSOLETE = "INVALID"
+EXPANDED_BY_PHRASE = "is expanded by"
+
+
+def fetch_requirement_issues(
+    base_url: str, email: str, api_token: str, jira_project: str, issue_type: str
+) -> list[dict]:
+    """Tutte le issue di un tipo ("Epic" per le User Need, "Story" per i
+    Design Input) di un progetto Jira, per compilare e controllare i
+    documenti User Needs e Design Input. Per ognuna: "key", "summary",
+    "description" (testo), "components" e "labels" (liste di nomi), "status",
+    "done" (categoria di stato Done), "category" (Epic Category), "eligible"
+    (puo' stare nel documento: per gli Epic solo quelli di categoria "UN"),
+    "obsolete" (sostituita da un'altra: vedi sopra), "expanded_by" (chiavi
+    delle issue che la sostituiscono), "fix_versions" (nomi). Le issue non
+    "eligible" restano nell'elenco per poter dire cosa sono se compaiono nel
+    documento."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+
+    base_url = base_url.rstrip("/")
+    jql = f'project = "{jira_project}" AND issuetype = "{issue_type}"'
+    fields = [
+        "summary",
+        "description",
+        "components",
+        "labels",
+        "status",
+        "issuelinks",
+        "fixVersions",
+        USER_NEED_CATEGORY_FIELD,
+        EXPAND_STATUS_FIELD,
+    ]
+    issues: list[dict] = []
+    next_page_token: str | None = None
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": fields}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in .env")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+
+                for raw in data.get("issues", []):
+                    f = raw.get("fields") or {}
+                    category = (f.get(USER_NEED_CATEGORY_FIELD) or {}).get("value") or ""
+                    status = f.get("status") or {}
+                    expanded_by = [
+                        link["inwardIssue"].get("key")
+                        for link in f.get("issuelinks") or []
+                        if link.get("inwardIssue") and (link.get("type") or {}).get("inward") == EXPANDED_BY_PHRASE
+                    ]
+                    issues.append(
+                        {
+                            "key": raw.get("key", ""),
+                            "summary": f.get("summary") or "",
+                            "description": _extract_description(f.get("description")) or "",
+                            "components": [c.get("name", "") for c in f.get("components") or []],
+                            "labels": f.get("labels") or [],
+                            "status": status.get("name", ""),
+                            "done": (status.get("statusCategory") or {}).get("key") == "done",
+                            "category": category,
+                            "eligible": issue_type != "Epic" or category == USER_NEED_CATEGORY,
+                            "obsolete": bool(expanded_by) or f.get(EXPAND_STATUS_FIELD) == EXPAND_STATUS_OBSOLETE,
+                            "expanded_by": expanded_by,
+                            "fix_versions": [v.get("name", "") for v in f.get("fixVersions") or []],
+                        }
+                    )
+
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+    return issues

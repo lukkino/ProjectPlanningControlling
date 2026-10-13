@@ -75,18 +75,37 @@ class UserNeed:
 
 
 class ExportResult:
-    """Esito di un'esportazione: `skipped` sono le righe con un ID gia' nel
-    foglio, `duplicates` quelle lasciate fuori perche' il foglio contiene
-    gia' lo stesso contenuto sotto un altro ID - coppie (ID nuovo, ID gia'
-    presente). `version` e' la nuova versione del documento, None se la Cover
-    non e' stata aggiornata."""
+    """Esito di un'esportazione: `added_keys` sono gli ID delle righe
+    aggiunte, `skipped` le righe con un ID gia' nel foglio, `duplicates`
+    quelle lasciate fuori perche' il foglio contiene gia' lo stesso contenuto
+    sotto un altro ID - coppie (ID nuovo, ID gia' presente). `removed` sono
+    le righe obsolete presenti nel foglio e scritte come "Removed" nella
+    nuova riga di revision history: le righe NON vengono cancellate, vanno
+    tolte a mano. `still_present` sono le obsolete ancora nel foglio ma gia'
+    scritte come "Removed" in una revisione precedente. `version` e' la nuova
+    versione del documento, None se la Cover non e' stata aggiornata."""
 
-    def __init__(self, content: bytes, added: int, skipped: int, duplicates: list[tuple[str, str]], version: int | None):
+    def __init__(
+        self,
+        content: bytes,
+        added_keys: list[str],
+        skipped: int,
+        duplicates: list[tuple[str, str]],
+        version: int | None,
+        removed: list[str],
+        still_present: list[str],
+    ):
         self.content = content
-        self.added = added
+        self.added_keys = added_keys
         self.skipped = skipped
         self.duplicates = duplicates
         self.version = version
+        self.removed = removed
+        self.still_present = still_present
+
+    @property
+    def added(self) -> int:
+        return len(self.added_keys)
 
 
 def _normalized(text: str) -> str:
@@ -176,9 +195,15 @@ def _shift_ref(ref: str, first_row: int, offset: int) -> str:
     )
 
 
-def add_stories(workbook_bytes: bytes, stories: list[Story], notes: str) -> ExportResult:
+def _sentences(*parts: str) -> str:
+    return " ".join(part for part in parts if part)
+
+
+def add_stories(workbook_bytes: bytes, stories: list[Story], notes: str, obsolete: set[str] = frozenset()) -> ExportResult:
     """Aggiunge al documento le story non ancora presenti. `stories`
-    nell'ordine in cui devono comparire dall'alto."""
+    nell'ordine in cui devono comparire dall'alto. `obsolete` sono gli ID
+    delle story obsolete: quelle presenti nel foglio vengono scritte come
+    "Removed" nella revision history (vedi ExportResult.removed)."""
     entries = [
         (
             story.key,
@@ -193,11 +218,17 @@ def add_stories(workbook_bytes: bytes, stories: list[Story], notes: str) -> Expo
         COLUMNS,
         CONTENT_COLUMNS,
         entries,
-        lambda keys: f"Added the following new stories for {notes}: {', '.join(keys)}.",
+        obsolete,
+        lambda added, removed: _sentences(
+            f"Added the following new stories for {notes}: {', '.join(added)}." if added else "",
+            f"Removed the following obsolete stories: {', '.join(removed)}." if removed else "",
+        ),
     )
 
 
-def add_user_needs(workbook_bytes: bytes, user_needs: list[UserNeed], notes: str) -> ExportResult:
+def add_user_needs(
+    workbook_bytes: bytes, user_needs: list[UserNeed], notes: str, obsolete: set[str] = frozenset()
+) -> ExportResult:
     """Come add_stories, per il foglio "User Needs" del documento TIH-UN:
     colonne ID, Text, Components (sempre "N/A"), Project Name (copiato dalle
     righe esistenti) e Notes."""
@@ -216,8 +247,29 @@ def add_user_needs(workbook_bytes: bytes, user_needs: list[UserNeed], notes: str
         USER_NEEDS_COLUMNS,
         USER_NEEDS_CONTENT_COLUMNS,
         entries,
-        lambda keys: f"Added new UN {', '.join(keys)} for {notes}.",
+        obsolete,
+        lambda added, removed: _sentences(
+            f"Added new UN {', '.join(added)} for {notes}." if added else "",
+            f"Removed obsolete UN {', '.join(removed)}." if removed else "",
+        ),
     )
+
+
+def read_ids(workbook_bytes: bytes, sheet_name: str) -> list[str]:
+    """ID (colonna A) delle righe di un foglio ("User Needs" o "Design Input
+    - Stories"), nell'ordine in cui compaiono e con le eventuali ripetizioni:
+    serve a confrontare il documento con le issue presenti su Jira."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(workbook_bytes))
+        xml = archive.read(_sheet_path(archive, sheet_name)).decode("utf-8")
+        shared = _shared_strings(archive)
+    except (zipfile.BadZipFile, KeyError, AttributeError, UnicodeDecodeError) as exc:
+        raise DesignInputError("Il file selezionato non è un file Excel (.xlsx) valido") from exc
+
+    ids = [_cell_text(_cells_of(m.group(0)).get("A", ""), shared).strip() for m in _ROW.finditer(xml)]
+    if "ID" not in ids:
+        raise DesignInputError(f'Nel foglio "{sheet_name}" non trovo la riga di intestazione (colonna A = "ID")')
+    return [row_id for row_id in ids[ids.index("ID") + 1 :] if row_id]
 
 
 def _export(
@@ -226,10 +278,12 @@ def _export(
     columns: str,
     content_columns: str,
     entries: list[tuple[str, list, float]],
+    obsolete: set[str],
     revision_text,
 ) -> ExportResult:
-    """Aggiunge le righe al foglio e, se ne ha aggiunte, porta avanti la
-    versione del documento."""
+    """Aggiunge le righe al foglio e, se ne ha aggiunte o se il foglio
+    contiene righe obsolete non ancora dichiarate, porta avanti la versione
+    del documento con una nuova riga di revision history."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(workbook_bytes))
         sheet_path = _sheet_path(archive, sheet_name)
@@ -238,9 +292,25 @@ def _export(
     except (zipfile.BadZipFile, KeyError, AttributeError, UnicodeDecodeError) as exc:
         raise DesignInputError("Il file selezionato non è un file Excel (.xlsx) valido") from exc
 
-    new_xml, added_keys, skipped, duplicates = _add_rows(xml, shared, sheet_name, columns, content_columns, entries)
-    if not added_keys:
-        return ExportResult(workbook_bytes, 0, skipped, duplicates, None)
+    new_xml, added_keys, skipped, duplicates, existing_ids = _add_rows(
+        xml, shared, sheet_name, columns, content_columns, entries
+    )
+    try:
+        cover_path = _sheet_path(archive, COVER_SHEET_NAME)
+        cover_xml = archive.read(cover_path).decode("utf-8")
+    except (DesignInputError, KeyError, UnicodeDecodeError):
+        cover_path = cover_xml = None
+
+    # Righe obsolete presenti nel foglio: non vengono cancellate (vanno tolte
+    # a mano), ma la nuova revisione le dichiara "Removed". Quelle gia'
+    # dichiarate in una revisione precedente non vengono ripetute, cosi'
+    # esportare di nuovo lo stesso file non crea un'altra revisione.
+    present = [key for key in existing_ids if key in obsolete]
+    announced = _removed_in_revisions(cover_xml, shared) if cover_xml else set()
+    removed = [key for key in present if key not in announced]
+    still_present = [key for key in present if key in announced]
+    if not added_keys and not (removed and cover_xml):
+        return ExportResult(workbook_bytes, [], skipped, duplicates, None, [], present)
     parts = {sheet_path: new_xml}
 
     # Versione e revision history: se la Cover manca o non ha una revision
@@ -248,21 +318,25 @@ def _export(
     # versione resta da aggiornare a mano (version = None).
     version = None
     try:
-        cover_path = _sheet_path(archive, COVER_SHEET_NAME)
-        revised = _add_revision(archive.read(cover_path).decode("utf-8"), shared, revision_text(added_keys))
-    except (DesignInputError, KeyError, AttributeError, UnicodeDecodeError):
+        revised = _add_revision(cover_xml, shared, revision_text(added_keys, removed)) if cover_xml else None
+    except (KeyError, AttributeError):
         revised = None
     if revised:
         cover_xml, old_version, version = revised
         parts[cover_path] = _bump_version(cover_xml, shared, old_version, version)
         parts[sheet_path] = _bump_version(new_xml, shared, old_version, version)
+    else:
+        # Niente revisione scritta: le obsolete non risultano dichiarate.
+        removed, still_present = [], present
+        if not added_keys:
+            return ExportResult(workbook_bytes, [], skipped, duplicates, None, [], present)
 
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as result:
         for info in archive.infolist():
             content = parts[info.filename].encode("utf-8") if info.filename in parts else archive.read(info.filename)
             result.writestr(info, content, compress_type=info.compress_type)
-    return ExportResult(output.getvalue(), len(added_keys), skipped, duplicates, version)
+    return ExportResult(output.getvalue(), added_keys, skipped, duplicates, version, removed, still_present)
 
 
 def _add_rows(
@@ -272,14 +346,15 @@ def _add_rows(
     columns: str,
     content_columns: str,
     entries: list[tuple[str, list, float]],
-) -> tuple[str, list[str], int, list[tuple[str, str]]]:
+) -> tuple[str, list[str], int, list[tuple[str, str]], list[str]]:
     """Inserisce sotto l'intestazione del foglio una riga per ogni elemento
     di `entries` - (ID, valori delle colonne, altezza della riga) - senza
     creare duplicati rispetto a cio' che il foglio contiene gia': salta gli
     ID gia' presenti in colonna A e le righe il cui contenuto (colonne
     `content_columns`) e' gia' nel foglio sotto un altro ID. Restituisce (XML
     del foglio aggiornato, ID aggiunti, righe saltate per ID, duplicati per
-    contenuto come coppie (ID nuovo, ID gia' presente))."""
+    contenuto come coppie (ID nuovo, ID gia' presente), ID che il foglio
+    conteneva gia', dall'alto)."""
     data = re.search(r"<sheetData>(.*)</sheetData>", xml, re.S)
     if data is None:
         raise DesignInputError(f'Il foglio "{sheet_name}" è vuoto: intestazione non trovata')
@@ -293,14 +368,14 @@ def _add_rows(
     insert_row = header[0] + 1
     data_rows = [r for r in rows if r[0] >= insert_row]
 
-    existing_ids: set[str] = set()
+    existing_ids: dict[str, None] = {}  # insieme ordinato: dall'alto
     existing_content: dict[tuple[str, ...], str] = {}
     for _number, row_xml in data_rows:
         cells = _cells_of(row_xml)
         row_id = _cell_text(cells.get("A", ""), shared).strip()
         if not row_id:
             continue  # seconda riga di una story su due righe unite
-        existing_ids.add(row_id)
+        existing_ids[row_id] = None
         content = tuple(_normalized(_cell_text(cells.get(c, ""), shared)) for c in content_columns)
         if content[0]:
             existing_content.setdefault(content, row_id)
@@ -321,7 +396,7 @@ def _add_rows(
             if content[0]:
                 existing_content[content] = key
     if not new_entries:
-        return xml, [], skipped, duplicates
+        return xml, [], skipped, duplicates, list(existing_ids)
 
     # Stile delle nuove celle: quello della prima riga esistente su una riga
     # singola (quelle su due righe unite hanno bordi diversi tra la riga
@@ -363,7 +438,13 @@ def _add_rows(
             new_merges += [f'<mergeCell ref="{c}{row}:{c}{row + span - 1}"/>' for c in columns]
         row += span
 
-    return _insert_rows(xml, insert_row, new_rows_xml, new_merges), [e[0] for e in new_entries], skipped, duplicates
+    return (
+        _insert_rows(xml, insert_row, new_rows_xml, new_merges),
+        [e[0] for e in new_entries],
+        skipped,
+        duplicates,
+        list(existing_ids),
+    )
 
 
 def _insert_rows(xml: str, insert_row: int, new_rows_xml: list[str], new_merges: list[str]) -> str:
@@ -413,6 +494,17 @@ def _insert_rows(xml: str, insert_row: int, new_rows_xml: list[str], new_merges:
 
     head = re.sub(r'(<dimension\b[^>]*\bref=")([^"]+)(")', grow, head)
     return head + data_xml[:split] + "".join(new_rows_xml) + shifted + tail
+
+
+def _removed_in_revisions(cover_xml: str, shared: list[str]) -> set[str]:
+    """ID che una riga della Cover dichiara gia' "Removed" (es. "Removed
+    obsolete UN PTBSYS-1, PTBSYS-2.")."""
+    removed: set[str] = set()
+    for row in _ROW.finditer(cover_xml):
+        for cell_xml in _cells_of(row.group(0)).values():
+            for sentence in re.findall(r"(?i)removed[^.]*", _cell_text(cell_xml, shared)):
+                removed.update(re.findall(r"[A-Z][A-Z0-9]+-\d+", sentence))
+    return removed
 
 
 def _add_revision(cover_xml: str, shared: list[str], text: str) -> tuple[str, int, int] | None:
