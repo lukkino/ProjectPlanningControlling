@@ -27,6 +27,15 @@ const CUTOFF_BAND_HEIGHT = 18
 const MONTH_BAND_HEIGHT = 18
 const WEEK_ROW_HEIGHT = 20
 const HEADER_HEIGHT = MONTH_BAND_HEIGHT + WEEK_ROW_HEIGHT
+// Riga del calendario con i nomi di Code Freeze e fasi, sopra le loro linee.
+const MARK_ROW_HEIGHT = 16
+// Larghezza stimata di un carattere delle etichette (11px, grassetto), per
+// capire quando due etichette vicine si sovrapporrebbero.
+const MARK_CHAR_WIDTH = 6.5
+// Come sopra, per il summary scritto sopra le barre (11px): stima larga,
+// cosi' il calendario si allunga abbastanza da non tagliarlo.
+const LABEL_CHAR_WIDTH = 6.5
+const COLOR_PHASE = '#7c4dbd'
 
 const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -94,7 +103,13 @@ type Props = {
   forecastCutoffLabel?: string
   // Data di Code Freeze dell'increment (ISO), disegnata come linea verticale.
   codeFreezeDate?: string | null
+  // Fasi dell'increment (es. Release to Market) con la loro data ISO: una
+  // linea verticale ciascuna, e il calendario arriva fino all'ultima anche
+  // senza item che ci arrivano.
+  phases?: { name: string; date: string | null }[]
 }
+
+const NO_PHASES: { name: string; date: string | null }[] = []
 
 export function BacklogGanttChart({
   items,
@@ -102,6 +117,7 @@ export function BacklogGanttChart({
   forecastCutoffId = null,
   forecastCutoffLabel,
   codeFreezeDate = null,
+  phases = NO_PHASES,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
@@ -172,9 +188,30 @@ export function BacklogGanttChart({
   const todayDay = toEpochDays(new Date())
   // Anche il Code Freeze entra sempre nel range, per lo stesso motivo.
   const codeFreezeDay = dateStrToEpochDays(codeFreezeDate)
-  const rangeDays = codeFreezeDay === null ? [...allDays, todayDay] : [...allDays, todayDay, codeFreezeDay]
+  // Linee verticali con etichetta nel calendario: Code Freeze e fasi. Quelle
+  // nello stesso giorno diventano una linea sola con i nomi uno dopo l'altro
+  // (la fase "Code freeze" coincide di norma con il Code Freeze).
+  const namesByDay = new Map<number, string[]>()
+  const addMark = (day: number | null, name: string) => {
+    if (day === null) return
+    const names = namesByDay.get(day) ?? []
+    if (!names.some((n) => n.toLowerCase() === name.toLowerCase())) names.push(name)
+    namesByDay.set(day, names)
+  }
+  addMark(codeFreezeDay, 'Code Freeze')
+  for (const phase of phases) addMark(dateStrToEpochDays(phase.date), phase.name)
+  const markDays = [...namesByDay.keys()].sort((a, b) => a - b)
+  const rangeDays = [...allDays, todayDay, ...markDays]
   const minDay = Math.min(...rangeDays) - 2
-  const maxDay = Math.max(...rangeDays) + 2
+  // Il summary parte dall'inizio della barra e puo' essere piu' lungo di
+  // quanto resta fino all'ultima data: il calendario si allunga dei giorni
+  // che servono a leggerlo per intero.
+  const labelEndDays = items.map((item) => {
+    const anchor = dateStrToEpochDays(item.planned_start) ?? dateStrToEpochDays(item.actual_start)
+    if (anchor === null) return 0
+    return anchor + Math.ceil(((item.summary ?? item.jira_key).length * LABEL_CHAR_WIDTH + 8) / DAY_WIDTH)
+  })
+  const maxDay = Math.max(Math.max(...rangeDays) + 2, ...labelEndDays)
 
   // All'apertura del Gantt la vista e' centrata su oggi, invece di partire
   // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
@@ -201,6 +238,26 @@ export function BacklogGanttChart({
   const dayToX = (day: number) => (day - minDay) * DAY_WIDTH
   const ticks = buildWeekTicks(minDay, maxDay)
   const monthBands = buildMonthBands(minDay, maxDay)
+
+  // Etichetta a destra della linea (a sinistra a fine calendario, dove a
+  // destra non ci starebbe); se toccherebbe quella prima va sulla riga sotto.
+  const laneEnds: number[] = []
+  const marks = markDays.map((day) => {
+    const label = namesByDay.get(day)!.join(' · ')
+    const width = label.length * MARK_CHAR_WIDTH
+    const alignRight = day > maxDay - 8
+    const start = alignRight ? dayToX(day) - 3 - width : dayToX(day) + 6
+    let lane = laneEnds.findIndex((end) => end + 8 <= start)
+    if (lane === -1) lane = laneEnds.length
+    laneEnds[lane] = start + width
+    return {
+      day,
+      label,
+      lane,
+      color: day === codeFreezeDay ? 'var(--success)' : COLOR_PHASE,
+      position: alignRight ? { right: chartWidth - dayToX(day) + 3 } : { left: dayToX(day) + 6 },
+    }
+  })
 
   // Frecce dei predecessori, come in Project/Wrike: dalla fine della barra
   // pianificata del predecessore all'inizio di quella del successore. Solo
@@ -271,6 +328,12 @@ export function BacklogGanttChart({
             Code Freeze {formatEpochDaysAsDate(codeFreezeDay)}
           </span>
         )}
+        {phases.some((phase) => phase.date !== null) && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 0, height: 12, borderLeft: `3px dashed ${COLOR_PHASE}`, display: 'inline-block' }} />
+            Fasi dell'increment
+          </span>
+        )}
         {links.length > 0 && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ color: COLOR_LINK, fontWeight: 700 }}>→</span>
@@ -297,7 +360,11 @@ export function BacklogGanttChart({
             <div
               className={dragClassName}
               {...dragHandlers}
-              style={{ width: chartWidth, height: HEADER_HEIGHT, position: 'relative' }}
+              style={{
+                width: chartWidth,
+                height: HEADER_HEIGHT + laneEnds.length * MARK_ROW_HEIGHT,
+                position: 'relative',
+              }}
             >
               <div
                 style={{
@@ -360,6 +427,25 @@ export function BacklogGanttChart({
                   </div>
                 ))}
               </div>
+              {marks.map((mark) => (
+                <div
+                  key={mark.day}
+                  title={`${mark.label} ${formatEpochDaysAsDate(mark.day)}`}
+                  style={{
+                    position: 'absolute',
+                    top: HEADER_HEIGHT + mark.lane * MARK_ROW_HEIGHT,
+                    height: MARK_ROW_HEIGHT,
+                    ...mark.position,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    lineHeight: `${MARK_ROW_HEIGHT}px`,
+                    whiteSpace: 'nowrap',
+                    color: mark.color,
+                  }}
+                >
+                  {mark.label}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -438,18 +524,19 @@ export function BacklogGanttChart({
                       }}
                     />
                   )}
-                  {codeFreezeDay !== null && (
+                  {marks.map((mark) => (
                     <div
-                      title={`Code Freeze ${formatEpochDaysAsDate(codeFreezeDay)}`}
+                      key={mark.day}
+                      title={`${mark.label} ${formatEpochDaysAsDate(mark.day)}`}
                       style={{
                         position: 'absolute',
-                        left: dayToX(codeFreezeDay),
+                        left: dayToX(mark.day),
                         top: 0,
                         bottom: 0,
-                        borderLeft: '3px dashed var(--success)',
+                        borderLeft: `3px dashed ${mark.color}`,
                       }}
                     />
-                  )}
+                  ))}
 
                   {labelAnchor !== null && (
                     <div

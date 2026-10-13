@@ -121,8 +121,9 @@ export function BacklogPage() {
   const [hideDone, setHideDone] = useState(true)
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
-  // Gantt: di default solo gli item dentro la finestra di forecast.
-  const [ganttOnlyForecast, setGanttOnlyForecast] = useState(true)
+  // Gantt: di default tutti gli item; il filtro sulla finestra di forecast
+  // si attiva a mano.
+  const [ganttOnlyForecast, setGanttOnlyForecast] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
@@ -161,6 +162,15 @@ export function BacklogPage() {
     queryKey: ['forecasting', project.id],
     queryFn: () => api.forecasting.list(project.id),
   })
+
+  // Stessa query cache di PhasesCard: il Gantt mostra una linea per ogni
+  // fase dell'increment (es. Release to Market), alla data effettiva se c'e'
+  // gia', altrimenti a quella pianificata.
+  const { data: phases } = useQuery({
+    queryKey: ['phases', project.id],
+    queryFn: () => api.phases.list(project.id),
+  })
+  const ganttPhases = (phases ?? []).map((p) => ({ name: p.name, date: p.actual_date ?? p.planned_date }))
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
@@ -1184,6 +1194,7 @@ export function BacklogPage() {
           forecastCutoffId={forecastCutoffId}
           forecastCutoffLabel={forecastCutoffLabel}
           codeFreezeDate={project.code_freeze_date}
+          phases={ganttPhases}
         />
       )}
 
