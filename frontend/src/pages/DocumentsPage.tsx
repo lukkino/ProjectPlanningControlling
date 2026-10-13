@@ -168,6 +168,85 @@ const RELEASE_REPORT_INFO: DocumentInfo = {
   ],
 }
 
+// Da tenere allineata a services/kickoff_presentation.py.
+const KICKOFF_PRESENTATION_INFO: DocumentInfo = {
+  intro:
+    'La presentazione parte dal template ufficiale di Kick-off (MOD-KICK_OFF) e ne riscrive solo le slide che dipendono dall\'increment, con i dati del Backlog così come sono dopo l\'ultima sincronizzazione con Jira. Il testo è in inglese, come il template.',
+  sections: [
+    {
+      title: 'Copertina e Team Members',
+      points: [
+        'Copertina: codice e nome dell\'increment, data di oggi.',
+        'Team Members: in "Project Code for Timesheet" i progetti e i sotto-progetti collegati all\'increment.',
+      ],
+    },
+    {
+      title: 'Scope Description',
+      points: [
+        'Testo discorsivo ricavato dai summary delle Story in scope, escluse quelle con la label "oos": un paragrafo d\'apertura con i macro-argomenti e uno per ogni macro-argomento.',
+        'Enhancement: le Story che citano un enhancement nel summary o nella description (es. "ENH 02215") hanno un paragrafo a parte, ognuna col suo riferimento in grassetto.',
+        'Tickets / Complaints: i Bug in scope, ognuno col numero del complaint in grassetto (dall\'area Complaints, oppure dal prefisso "[12345]" del summary); i Bug che non sono complaint sono citati con l\'ID Jira.',
+      ],
+    },
+    {
+      title: 'Major Requirements',
+      points: [
+        'Le stesse Story, raggruppate per macro-argomento: i macro-argomenti sono le voci di primo livello dello Scope della Dashboard.',
+        'Una Story va nella voce che la cita (ID Jira o numero di enhancement), in quella che si chiama come una sua label, oppure in quella di un\'altra Story con lo stesso Epic. Le altre sono raggruppate per Epic, o finiscono in "Other requirements".',
+        'Se non stanno in una slide, l\'elenco continua su altre slide.',
+      ],
+    },
+    {
+      title: 'Project Timeline',
+      points: [
+        'Elenco delle fasi dell\'increment con il mese di scadenza, e grafico con una milestone per fase: conta la data effettiva se c\'è, altrimenti quella pianificata.',
+        'Nella barra dell\'increment: lo sviluppo fino al Code Freeze e i progetti collegati che hanno date di inizio e fine, con la parte già trascorsa più scura.',
+      ],
+    },
+    {
+      title: 'Slide non modificate',
+      points: [
+        'Agenda, mercati, vincoli, volumi, product line ed effort restano quelli del template: vanno aggiornati a mano.',
+      ],
+    },
+  ],
+}
+
+// Presentazione .pptx: nessun dato da chiedere, si scarica subito.
+function PresentationDownloadButton({
+  label,
+  download,
+}: {
+  label: string
+  download: () => Promise<{ blob: Blob; filename: string }>
+}) {
+  const run = useMutation({
+    mutationFn: download,
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+  })
+
+  return (
+    <>
+      <button className="btn btn-primary" disabled={run.isPending} onClick={() => run.mutate()}>
+        {run.isPending ? 'Generazione…' : `⬇ Scarica ${label} (.pptx)`}
+      </button>
+      {run.isError && (
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && run.reset()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>{label}</h3>
+            <div className="error-banner">{(run.error as Error).message}</div>
+            <div className="form-actions">
+              <button className="btn btn-primary" onClick={() => run.reset()}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // "i" accanto a un pulsante di download: apre un popup con la spiegazione.
 function DocumentInfoButton({ label, info }: { label: string; info: DocumentInfo }) {
   const [open, setOpen] = useState(false)
@@ -746,6 +825,13 @@ export function DocumentsPage() {
             <PprDownloadButton projectId={project.id} docType={docType} label={label} />
             {docType === 'planning' && (
               <>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <PresentationDownloadButton
+                    label="presentazione Kick-off"
+                    download={() => api.documents.kickoffPresentation(project.id)}
+                  />
+                  <DocumentInfoButton label="la presentazione Kick-off" info={KICKOFF_PRESENTATION_INFO} />
+                </span>
                 <WorkbookExportButton
                   label="Design Input"
                   noun="story"

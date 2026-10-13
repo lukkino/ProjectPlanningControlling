@@ -31,6 +31,7 @@ from app.services.document_generator import (
     get_release_report_defaults,
 )
 from app.services.jira_client import JiraClientError, fetch_requirement_issues
+from app.services.kickoff_presentation import generate_kickoff_presentation
 
 router = APIRouter(tags=["documents"])
 
@@ -149,6 +150,26 @@ def download_ppr_document(
         project, doc_type, resolved_version, resolved_text, deliverables_list
     )
     return _xlsx_response(content, filename_stem)
+
+
+@router.get("/api/projects/{project_id}/documents/kickoff-presentation")
+def download_kickoff_presentation(project_id: int, db: Session = Depends(get_db)):
+    """Presentazione di Kick-off (.pptx) dal template ufficiale, con scope,
+    major requirements e timeline compilati dai dati dell'increment (vedi
+    services/kickoff_presentation.py)."""
+    project = _get_project_or_404(db, project_id)
+    # Numero del case Salesforce dei Bug dell'increment che sono complaint.
+    bug_keys = [i.jira_key for i in project.backlog_items if i.issue_type == "Bug"]
+    complaint_numbers = {
+        c.jira_key: c.salesforce_case_number or ""
+        for c in db.query(models.Complaint).filter(models.Complaint.jira_key.in_(bug_keys))
+    }
+    content, filename_stem = generate_kickoff_presentation(project, complaint_numbers)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename_stem}.pptx"'},
+    )
 
 
 @router.post("/api/projects/{project_id}/documents/design-input")

@@ -274,6 +274,9 @@ export const api = {
     remove: (id: number) => del(`/forecasting/${id}`),
   },
   documents: {
+    // Presentazione di Kick-off (.pptx) dal template ufficiale.
+    kickoffPresentation: (projectId: number) =>
+      downloadFile(`/projects/${projectId}/documents/kickoff-presentation`),
     // Design Input (TIH-DI) e User Needs (TIH-UN): vedi addRowsToWorkbook.
     designInput: (projectId: number, file: File) =>
       addRowsToWorkbook(`/projects/${projectId}/documents/design-input`, file, 'X-Stories'),
