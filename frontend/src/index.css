@@ -391,6 +391,17 @@ tbody tr:hover .sticky-col { background: var(--bg); }
 .gantt-timeline-row { position: relative; border-top: 1px solid var(--border); }
 .gantt-timeline-row:first-child { border-top: none; }
 .gantt-timeline-row:hover { background: var(--bg); }
+/* Fine della finestra di forecast: stessa fascia verde della riga
+   .forecast-cutoff-label-row nella tabella del Backlog. */
+.gantt-forecast-cutoff {
+  background: var(--success);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.gantt-forecast-cutoff span { display: inline-block; position: sticky; left: 8px; }
 
 .col-resize-handle {
   position: absolute;

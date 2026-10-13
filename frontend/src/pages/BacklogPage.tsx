@@ -1181,6 +1181,9 @@ export function BacklogPage() {
               : displayItems
           }
           jiraBrowseUrl={project.jira_jql ? 'https://inpeco.atlassian.net/browse/' : null}
+          forecastCutoffId={forecastCutoffId}
+          forecastCutoffLabel={forecastCutoffLabel}
+          codeFreezeDate={project.code_freeze_date}
         />
       )}
 

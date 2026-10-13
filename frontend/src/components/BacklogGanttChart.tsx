@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
 import { parsePredecessors } from '../lib/scheduling'
@@ -21,6 +21,9 @@ const PLANNED_BAR_TOP = 22
 // Frecce predecessore -> successore.
 const COLOR_LINK = '#5b6472'
 const LINK_STUB = 8
+// Fascia verde sotto l'ultimo item della finestra di forecast, come la riga
+// "Forecasting - Code Freeze" nella tabella del Backlog.
+const CUTOFF_BAND_HEIGHT = 18
 const MONTH_BAND_HEIGHT = 18
 const WEEK_ROW_HEIGHT = 20
 const HEADER_HEIGHT = MONTH_BAND_HEIGHT + WEEK_ROW_HEIGHT
@@ -85,9 +88,21 @@ function buildMonthBands(minDay: number, maxDay: number): MonthBand[] {
 type Props = {
   items: BacklogItem[]
   jiraBrowseUrl: string | null
+  // Ultimo item della finestra di forecast e testo della fascia disegnata
+  // sotto la sua riga; null = nessuna finestra (o item non mostrato).
+  forecastCutoffId?: number | null
+  forecastCutoffLabel?: string
+  // Data di Code Freeze dell'increment (ISO), disegnata come linea verticale.
+  codeFreezeDate?: string | null
 }
 
-export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
+export function BacklogGanttChart({
+  items,
+  jiraBrowseUrl,
+  forecastCutoffId = null,
+  forecastCutoffLabel,
+  codeFreezeDate = null,
+}: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
   // righe). Calendario e specchio stanno sopra le righe, fuori da
@@ -155,8 +170,11 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
   // resta sempre visibile invece di sparire quando tutte le date degli item
   // sono lontane da adesso.
   const todayDay = toEpochDays(new Date())
-  const minDay = Math.min(...allDays, todayDay) - 2
-  const maxDay = Math.max(...allDays, todayDay) + 2
+  // Anche il Code Freeze entra sempre nel range, per lo stesso motivo.
+  const codeFreezeDay = dateStrToEpochDays(codeFreezeDate)
+  const rangeDays = codeFreezeDay === null ? [...allDays, todayDay] : [...allDays, todayDay, codeFreezeDay]
+  const minDay = Math.min(...rangeDays) - 2
+  const maxDay = Math.max(...rangeDays) + 2
 
   // All'apertura del Gantt la vista e' centrata su oggi, invece di partire
   // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
@@ -188,7 +206,10 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
   // pianificata del predecessore all'inizio di quella del successore. Solo
   // tra item entrambi visibili nel Gantt e con la barra pianificata.
   const rowByKey = new Map(items.map((item, row) => [item.jira_key.toUpperCase(), row]))
-  const barCenterY = (row: number) => row * ROW_HEIGHT + PLANNED_BAR_TOP + BAR_HEIGHT / 2
+  // Le righe sotto la fascia della finestra di forecast sono piu' in basso.
+  const cutoffRow = forecastCutoffId == null ? -1 : items.findIndex((item) => item.id === forecastCutoffId)
+  const rowTop = (row: number) => row * ROW_HEIGHT + (cutoffRow >= 0 && row > cutoffRow ? CUTOFF_BAND_HEIGHT : 0)
+  const barCenterY = (row: number) => rowTop(row) + PLANNED_BAR_TOP + BAR_HEIGHT / 2
   const links = items.flatMap((successor, successorRow) => {
     const sStart = dateStrToEpochDays(successor.planned_start)
     if (sStart === null || dateStrToEpochDays(successor.expected_finish) === null) return []
@@ -208,7 +229,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
       // linea rientra a sinistra passando tra le righe, per arrivare alla
       // barra da sinistra.
       const below = successorRow > predecessorRow
-      const yGap = below ? y2 - BAR_HEIGHT / 2 - 3 : (successorRow + 1) * ROW_HEIGHT
+      const yGap = below ? y2 - BAR_HEIGHT / 2 - 3 : rowTop(successorRow) + ROW_HEIGHT
       const path =
         x2 >= x1 + 2 * LINK_STUB
           ? `M${x1},${y1} H${x1 + LINK_STUB} V${y2} H${x2}`
@@ -244,10 +265,22 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
           <span style={{ width: 0, height: 12, borderLeft: '1px dashed var(--danger)', display: 'inline-block' }} />
           Oggi
         </span>
+        {codeFreezeDay !== null && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 0, height: 12, borderLeft: '3px dashed var(--success)', display: 'inline-block' }} />
+            Code Freeze {formatEpochDaysAsDate(codeFreezeDay)}
+          </span>
+        )}
         {links.length > 0 && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ color: COLOR_LINK, fontWeight: 700 }}>→</span>
             Predecessore → successore
+          </span>
+        )}
+        {cutoffRow >= 0 && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 4, background: 'var(--success)', display: 'inline-block' }} />
+            Fine della finestra di forecast
           </span>
         )}
       </div>
@@ -352,16 +385,19 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
           sotto), resta quindi sempre visibile scorrendo a destra. */}
       <div className="gantt-outer">
         <div className="gantt-labels-col" style={{ width: LABEL_COLUMN_WIDTH }}>
-          {items.map((item) => (
-            <div key={item.id} className="gantt-label-row" style={{ height: ROW_HEIGHT }}>
-              {jiraBrowseUrl ? (
-                <a href={`${jiraBrowseUrl}${item.jira_key}`} target="_blank" rel="noreferrer">
-                  {item.jira_key}
-                </a>
-              ) : (
-                item.jira_key
-              )}
-            </div>
+          {items.map((item, row) => (
+            <Fragment key={item.id}>
+              <div className="gantt-label-row" style={{ height: ROW_HEIGHT }}>
+                {jiraBrowseUrl ? (
+                  <a href={`${jiraBrowseUrl}${item.jira_key}`} target="_blank" rel="noreferrer">
+                    {item.jira_key}
+                  </a>
+                ) : (
+                  item.jira_key
+                )}
+              </div>
+              {row === cutoffRow && <div className="gantt-forecast-cutoff" style={{ height: CUTOFF_BAND_HEIGHT }} />}
+            </Fragment>
           ))}
         </div>
 
@@ -374,7 +410,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
           }}
         >
           <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
-            {items.map((item) => {
+            {items.map((item, row) => {
               const pStart = dateStrToEpochDays(item.planned_start)
               const pEnd = dateStrToEpochDays(item.expected_finish)
               const aStart = dateStrToEpochDays(item.actual_start)
@@ -383,7 +419,8 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
               const label = item.summary ?? item.jira_key
 
               return (
-                <div key={item.id} className="gantt-timeline-row" style={{ height: ROW_HEIGHT }}>
+                <Fragment key={item.id}>
+                <div className="gantt-timeline-row" style={{ height: ROW_HEIGHT }}>
                   {ticks.map((t) => (
                     <div
                       key={t.day}
@@ -398,6 +435,18 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
                         top: 0,
                         bottom: 0,
                         borderLeft: '1px dashed var(--danger)',
+                      }}
+                    />
+                  )}
+                  {codeFreezeDay !== null && (
+                    <div
+                      title={`Code Freeze ${formatEpochDaysAsDate(codeFreezeDay)}`}
+                      style={{
+                        position: 'absolute',
+                        left: dayToX(codeFreezeDay),
+                        top: 0,
+                        bottom: 0,
+                        borderLeft: '3px dashed var(--success)',
                       }}
                     />
                   )}
@@ -468,6 +517,14 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
                     />
                   )}
                 </div>
+                {/* Il testo resta agganciato a sinistra scorrendo il Gantt in
+                    orizzontale. */}
+                {row === cutoffRow && (
+                  <div className="gantt-forecast-cutoff" style={{ height: CUTOFF_BAND_HEIGHT }}>
+                    <span>{forecastCutoffLabel}</span>
+                  </div>
+                )}
+                </Fragment>
               )
             })}
             {/* Sopra le righe ma trasparente al mouse: tooltip delle barre e
@@ -475,7 +532,7 @@ export function BacklogGanttChart({ items, jiraBrowseUrl }: Props) {
             {links.length > 0 && (
               <svg
                 width={chartWidth}
-                height={items.length * ROW_HEIGHT}
+                height={rowTop(items.length)}
                 style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
               >
                 <defs>
