@@ -10,6 +10,8 @@ type Props = { projectId: number; currentStatus: string }
 // slot fissi: blu, arancio.
 const COLOR_PLANNED = '#2a78d6'
 const COLOR_ACTUAL = '#eb6834'
+// Linea che unisce data pianificata ed effettiva della stessa fase.
+const COLOR_SLIP = '#d62728'
 
 type TimelinePoint = { x: number; y: string }
 
@@ -43,6 +45,12 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
   const isPoint = (p: TimelinePoint | { x: number | null; y: string }): p is TimelinePoint => p.x !== null
   const plannedPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.planned_date), y: p.name })).filter(isPoint)
   const actualPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.actual_date), y: p.name })).filter(isPoint)
+  // Per le fasi con entrambe le date: segmento pianificata -> effettiva.
+  const slipSegments = (phases ?? [])
+    .map((p) => ({ id: p.id, planned: dateStrToEpochDays(p.planned_date), actual: dateStrToEpochDays(p.actual_date), y: p.name }))
+    .filter((s) => s.planned !== null && s.actual !== null && s.planned !== s.actual)
+    .map((s) => ({ id: s.id, points: [{ x: s.planned as number, y: s.y }, { x: s.actual as number, y: s.y }] }))
+  const arrowId = `phase-slip-arrow-${projectId}`
   const allEpochs = [...plannedPoints, ...actualPoints].map((p) => p.x)
   const dateDomain: [number, number] =
     allEpochs.length > 0 ? [Math.min(...allEpochs) - 3, Math.max(...allEpochs) + 3] : [0, 1]
@@ -145,6 +153,34 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   cursor={{ strokeDasharray: '3 3' }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
+                {/* Punta della freccia verso la data effettiva, arretrata di
+                    qualche pixel per non finire sotto il pallino. */}
+                <defs>
+                  <marker
+                    id={arrowId}
+                    viewBox="0 0 10 10"
+                    refX={17.5}
+                    refY={5}
+                    markerWidth={8}
+                    markerHeight={8}
+                    markerUnits="userSpaceOnUse"
+                    orient="auto"
+                  >
+                    <path d="M0,0 L10,5 L0,10 z" fill={COLOR_SLIP} />
+                  </marker>
+                </defs>
+                {/* Prima le linee, cosi' i pallini restano sopra. */}
+                {slipSegments.map((s) => (
+                  <Scatter
+                    key={s.id}
+                    data={s.points}
+                    line={{ stroke: COLOR_SLIP, strokeWidth: 2, markerEnd: `url(#${arrowId})` }}
+                    shape={() => <g />}
+                    legendType="none"
+                    tooltipType="none"
+                    isAnimationActive={false}
+                  />
+                ))}
                 <Scatter name="Pianificata" data={plannedPoints} fill={COLOR_PLANNED} />
                 <Scatter name="Effettiva" data={actualPoints} fill={COLOR_ACTUAL} />
               </ScatterChart>
