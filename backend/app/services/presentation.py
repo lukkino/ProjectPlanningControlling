@@ -607,6 +607,8 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
         f"Inizio: {_date(project.start_date)}",
         f"Code freeze: {_date(project.code_freeze_date)}",
     ]
+    if project.release_date is not None:
+        details.append(f"Rilasciato il {_date(project.release_date)}")
     if metrics.percent_time_elapsed is not None:
         details.append(f"Tempo trascorso: {_pct(metrics.percent_time_elapsed)}")
     details_top = box.top + tile_height + Inches(0.35)
@@ -758,11 +760,12 @@ def _timeline_slide(deck: _Deck, project: models.Project) -> None:
     """Gantt delle fasi: una riga per fase, con le sue date e, sull'asse del
     tempo, un rombo vuoto alla data pianificata e uno pieno a quella
     effettiva (come nel Gantt della Dashboard generale). In cima la barra
-    dell'increment, dall'inizio al Planned finish."""
+    dell'increment, dall'inizio al Planned finish; se l'increment e' stato
+    rilasciato, una linea verde alla data di rilascio."""
     slide, box = deck.add_slide("Timeline increment")
     phases = list(project.phases)
-    start, finish = project.start_date, project.planned_finish_date
-    days = [d for d in (start, finish) if d is not None]
+    start, finish, release = project.start_date, project.planned_finish_date, project.release_date
+    days = [d for d in (start, finish, release) if d is not None]
     days += [d for p in phases for d in (p.planned_date, p.actual_date) if d is not None]
     if not days:
         _text(
@@ -845,6 +848,8 @@ def _timeline_slide(deck: _Deck, project: models.Project) -> None:
     show_today = axis_start <= today <= axis_end
     if show_today:
         line(x_of(today), rows_top, x_of(today), rows_bottom, COLOR_DANGER, width=1.25, dashed=True)
+    if release is not None:
+        line(x_of(release), rows_top, x_of(release), rows_bottom, COLOR_SUCCESS, width=2.25)
 
     mark_size = min(Inches(0.2), int(row_height * 0.62))
     top = rows_top
@@ -895,6 +900,10 @@ def _timeline_slide(deck: _Deck, project: models.Project) -> None:
         line(x - Inches(0.1), legend_middle, x + Inches(0.2), legend_middle, COLOR_DANGER, width=1.25, dashed=True)
         cell(x + Inches(0.3), legend_top, Inches(1.8), Inches(0.3), f"Oggi ({_date(today)})", size=10, color=COLOR_MUTED)
         x += Inches(2.1)
+    if release is not None:
+        line(x - Inches(0.1), legend_middle, x + Inches(0.2), legend_middle, COLOR_SUCCESS, width=2.25)
+        cell(x + Inches(0.3), legend_top, Inches(2.0), Inches(0.3), f"Rilascio ({_date(release)})", size=10, color=COLOR_MUTED)
+        x += Inches(2.3)
     if any(p.name == project.status for p in phases):
         cell(x, legend_top, Inches(2.5), Inches(0.3), "In grassetto la fase corrente", size=10, color=COLOR_MUTED)
 
