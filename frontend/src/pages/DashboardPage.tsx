@@ -35,6 +35,15 @@ const COLOR_CODE_FREEZE = '#d3402f'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 
+const SPI_HELP =
+  "SPI (Schedule Performance Index): % di completamento del backlog diviso % di tempo trascorso dall'inizio al code freeze.\n\n" +
+  '• SPI < 1: in ritardo, il lavoro completato è meno del tempo già passato (es. 0,8 = si va all\'80% del ritmo necessario).\n' +
+  '• SPI = 1: in linea, avanzamento e tempo trascorso coincidono.\n' +
+  '• SPI > 1: in anticipo, il lavoro completato è più del tempo già passato.\n' +
+  '• SPI = 0: nessun PBI completato, anche se il tempo scorre.\n\n' +
+  'Il valore è verde sopra 1,05 (in anticipo), arancione sotto 0,95 (in ritardo), nero in mezzo (in linea).\n' +
+  "Senza data di inizio o di code freeze, o prima dell'inizio, non è calcolato (—)."
+
 function spiTone(spi: number | null) {
   if (spi === null) return ''
   if (spi > 1.05) return 'done'
@@ -555,7 +564,12 @@ export function DashboardPage() {
             <span className={`value ${metrics ? spiTone(metrics.spi) : ''}`}>
               {metrics?.spi != null ? metrics.spi.toFixed(2) : '—'}
             </span>
-            <span className="label">SPI (avanzamento / tempo trascorso)</span>
+            <span className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              SPI (avanzamento / tempo trascorso)
+              <span className="info-icon" title={SPI_HELP} aria-label={SPI_HELP}>
+                i
+              </span>
+            </span>
           </div>
           <div className="stat">
             {metrics && spiStatusLabel(metrics.spi) ? (

@@ -209,6 +209,9 @@ input, select, textarea {
   gap: 4px;
 }
 .stat .value { font-size: 26px; font-weight: 700; }
+/* Tono di un valore (es. SPI): stessi colori dei badge done/progress. */
+.stat .value.done { color: var(--success); }
+.stat .value.progress { color: var(--warning); }
 .stat .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
 .stat-chips {
