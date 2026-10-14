@@ -46,6 +46,8 @@ const BAR_HEIGHT = 30
 // Increment non "in corso": tinta chiara dello stesso blu --primary, cosi'
 // quelli "in corso" (blu pieno + bordo) risaltano per contrasto.
 const COLOR_INACTIVE = '#c7d9fb'
+// Marcatore della data di rilascio (increment "Rilasciato").
+const COLOR_RELEASE = 'var(--success)'
 
 // Palette categoriale fissa (Story/Bug/Activity/Task, in quest'ordine) per
 // il grafico a ciambella "Metriche": stessi colori gia' usati nell'app per
@@ -217,6 +219,7 @@ type Row = {
   project: Project
   startEpoch: number | null
   endEpoch: number | null
+  releaseEpoch: number | null
   plannedPhases: PhaseMark[]
   actualPhases: PhaseMark[]
 }
@@ -1249,15 +1252,16 @@ export function OverviewDashboardPage() {
       project,
       startEpoch: dateStrToEpochDays(project.start_date),
       endEpoch: dateStrToEpochDays(project.planned_finish_date),
+      releaseEpoch: dateStrToEpochDays(project.release_date),
       plannedPhases: phaseMarks(phases, 'planned_date'),
       actualPhases: phaseMarks(phases, 'actual_date'),
     }
   })
 
-  // Anche le date delle fasi allargano l'asse: una fase puo' cadere prima
-  // dell'inizio o dopo il Planned finish dell'increment.
+  // Anche le date delle fasi e del rilascio allargano l'asse: possono cadere
+  // prima dell'inizio o dopo il Planned finish dell'increment.
   const allEpochs = rows
-    .flatMap((r) => [r.startEpoch, r.endEpoch, ...[...r.plannedPhases, ...r.actualPhases].map((m) => m.epoch)])
+    .flatMap((r) => [r.startEpoch, r.endEpoch, r.releaseEpoch, ...[...r.plannedPhases, ...r.actualPhases].map((m) => m.epoch)])
     .filter((e): e is number => e !== null)
 
   if (allEpochs.length === 0) {
@@ -1309,7 +1313,8 @@ export function OverviewDashboardPage() {
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
           Panoramica di tutti gli increment: una barra per increment, da Inizio a Planned finish. Quelli "in corso"
           sono evidenziati. Sotto ogni barra le fasi dell'increment, col nome: su una corsia le date pianificate,
-          sull'altra quelle effettive. La linea rossa tratteggiata indica la data odierna.
+          sull'altra quelle effettive. La linea verde indica la data di rilascio degli increment rilasciati, quella
+          rossa tratteggiata la data odierna.
         </p>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1336,6 +1341,10 @@ export function OverviewDashboardPage() {
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <PhaseDiamond color={COLOR_PHASE_ACTUAL} filled />
             Fase: data effettiva
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 3, height: 14, background: COLOR_RELEASE, display: 'inline-block' }} />
+            Rilascio
           </span>
         </div>
       </div>
@@ -1398,7 +1407,7 @@ export function OverviewDashboardPage() {
               </div>
             </div>
 
-            {sortedRows.map(({ project, startEpoch, endEpoch, plannedPhases, actualPhases }, index) => {
+            {sortedRows.map(({ project, startEpoch, endEpoch, releaseEpoch, plannedPhases, actualPhases }, index) => {
               // Corsie delle fasi sotto la barra: prima le pianificate, poi
               // le effettive; a sinistra l'intestazione di ciascuna.
               const phaseLanes = [
@@ -1449,6 +1458,11 @@ export function OverviewDashboardPage() {
                       {project.is_current && (
                         <span title="In corso" style={{ color: 'var(--warning)' }}>
                           ●
+                        </span>
+                      )}
+                      {project.release_date && (
+                        <span title={`Rilasciato il ${formatIsoDate(project.release_date)}`} style={{ color: COLOR_RELEASE }}>
+                          ✓
                         </span>
                       )}
                     </div>
@@ -1556,6 +1570,41 @@ export function OverviewDashboardPage() {
                         {project.name}
                       </span>
                     </div>
+                  )}
+
+                  {/* Data di rilascio: linea verde sopra la barra, con la
+                      data sopra (sotto ci sono inizio e fine). */}
+                  {releaseEpoch !== null && (
+                    <>
+                      <div
+                        title={`Rilasciato il ${formatEpochDaysAsDate(releaseEpoch)}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${pct(releaseEpoch)}%`,
+                          top: -6,
+                          bottom: -6,
+                          width: 3,
+                          borderRadius: 2,
+                          background: COLOR_RELEASE,
+                          transform: 'translateX(-50%)',
+                          zIndex: 1,
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: `${pct(releaseEpoch)}%`,
+                          top: -20,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          color: COLOR_RELEASE,
+                          transform: 'translateX(-50%)',
+                        }}
+                      >
+                        ✓ Rilascio {formatEpochDaysAsDate(releaseEpoch)}
+                      </span>
+                    </>
                   )}
 
                   {/* Date di inizio/fine ben visibili sotto la barra. */}
