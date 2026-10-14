@@ -34,6 +34,19 @@ type Sort = { key: SortKey; desc: boolean }
 
 const JIRA_BADGE_CLASS: Record<string, string> = { Done: 'done', Rejected: 'todo', 'To Do': 'todo' }
 
+// Ricerca libera: ogni parola deve comparire (senza distinzione di
+// maiuscole) in uno dei campi testuali del complaint, ID compresi.
+const searchableText = (c: Complaint) =>
+  [c.salesforce_case_number, c.salesforce_case_id, c.jira_key, c.summary, c.customer_site, c.fix_versions, c.labels]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+const matchesSearch = (c: Complaint, words: string[]) => {
+  if (words.length === 0) return true
+  const text = searchableText(c)
+  return words.every((w) => text.includes(w))
+}
+
 type FilterGroupProps = {
   label: string
   options: string[]
@@ -162,6 +175,8 @@ export function ComplaintsPage() {
   const [jiraHidden, setJiraHidden] = useState<Set<string>>(new Set())
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [fixVersionFilter, setFixVersionFilter] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
+  const searchWords = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
   // Clic sull'intestazione: inverte il verso se la tabella e' gia' ordinata
   // su quella colonna, altrimenti ordina su quella (dal piu' nuovo / dalla
@@ -229,7 +244,8 @@ export function ComplaintsPage() {
         !salesforceHidden.has(c.salesforce_status) &&
         !jiraHidden.has(c.jira_status ?? '') &&
         (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)) &&
-        (fixVersionFilter.size === 0 || fixVersionsOf(c).some((v) => fixVersionFilter.has(v))),
+        (fixVersionFilter.size === 0 || fixVersionsOf(c).some((v) => fixVersionFilter.has(v))) &&
+        matchesSearch(c, searchWords),
     )
     .sort((a, b) => {
       if (sort.key === 'severity' && a.severity !== b.severity) {
@@ -243,8 +259,10 @@ export function ComplaintsPage() {
       )
     })
   const filtersActive =
-    architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size + fixVersionFilter.size > 0
+    architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size + fixVersionFilter.size > 0 ||
+    searchWords.length > 0
   const clearFilters = () => {
+    setSearch('')
     setArchitectureFilter(new Set())
     setSalesforceHidden(new Set())
     setJiraHidden(new Set())
@@ -260,6 +278,18 @@ export function ComplaintsPage() {
         {update.isError && <div className="error-banner">Salvataggio non riuscito: {(update.error as Error).message}</div>}
 
         <div className="filter-bar">
+          <div className="filter-group">
+            <span className="filter-group-label">Cerca</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ID Salesforce, ID Jira o testo…"
+              aria-label="Cerca nei complaint"
+              title="Cerca nell'ID Salesforce, nell'ID Jira, nel Summary, nel Sito Cliente, nelle Fix Version e nelle label. Più parole: devono comparire tutte."
+              style={{ width: 280 }}
+            />
+          </div>
           <FilterGroup
             label="Architettura"
             options={architectureOptions}
