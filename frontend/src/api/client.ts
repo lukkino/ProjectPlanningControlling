@@ -212,6 +212,13 @@ export const api = {
   incrementSnapshotValues: {
     update: (id: number, data: Partial<IncrementSnapshotValue>) =>
       put<IncrementSnapshotValue>(`/increments/snapshot-values/${id}`, data),
+    // Ripartizione dell'Actual ore (Project Management, Develop, ...): ogni
+    // chiamata restituisce il valore con l'Actual ricalcolato.
+    split: (valueId: number) => post<IncrementSnapshotValue>(`/increments/snapshot-values/${valueId}/split`),
+    removeSplit: (valueId: number) =>
+      request<IncrementSnapshotValue>(`/increments/snapshot-values/${valueId}/split`, { method: 'DELETE' }),
+    setEntryHours: (entryId: number, hours: number) =>
+      put<IncrementSnapshotValue>(`/increments/snapshot-value-entries/${entryId}`, { hours }),
   },
   hoursCalculator: {
     get: (incrementId: number) => request<HoursCalculator>(`/increments/${incrementId}/hours-calculator`),

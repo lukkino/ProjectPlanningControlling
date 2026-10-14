@@ -346,6 +346,29 @@ class IncrementSnapshotValue(Base):
 
     snapshot: Mapped["IncrementSnapshot"] = relationship(back_populates="values")
     budget_line: Mapped["IncrementBudgetLine"] = relationship(back_populates="snapshot_values")
+    # Ripartizione dell'Actual (solo voci in ore: Project Management,
+    # Develop, ...): se ci sono righe, actual_value e' la loro somma
+    # (ricalcolata a ogni modifica).
+    entries: Mapped[list["IncrementSnapshotValueEntry"]] = relationship(
+        back_populates="value",
+        cascade="all, delete-orphan",
+        order_by="IncrementSnapshotValueEntry.id",
+    )
+
+
+class IncrementSnapshotValueEntry(Base):
+    """Ore di una voce di ripartizione (es. "Develop") nell'Actual di una
+    voce in ore di uno snapshot: cumulative ad oggi come il valore che
+    compongono."""
+
+    __tablename__ = "increment_snapshot_value_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value_id: Mapped[int] = mapped_column(ForeignKey("increment_snapshot_values.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128), default="")
+    hours: Mapped[float] = mapped_column(Float, default=0)
+
+    value: Mapped["IncrementSnapshotValue"] = relationship(back_populates="entries")
 
 
 class BacklogItem(Base):

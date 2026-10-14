@@ -21,6 +21,15 @@ export type IncrementSnapshotValue = {
   budget_line_id: number
   budget_value: number
   actual_value: number
+  // Ripartizione dell'Actual (voci in ore: Project Management, Develop,
+  // ...): se presente, actual_value ne e' la somma, calcolata dal backend.
+  entries: IncrementSnapshotValueEntry[]
+}
+
+export type IncrementSnapshotValueEntry = {
+  id: number
+  name: string
+  hours: number
 }
 
 export type IncrementSnapshot = {

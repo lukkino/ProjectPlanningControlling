@@ -263,6 +263,11 @@ def create_snapshot(increment_id: int, payload: schemas.IncrementSnapshotCreate,
                 budget_line_id=line.id,
                 budget_value=prev_value.budget_value if prev_value else 0,
                 actual_value=prev_value.actual_value if prev_value else 0,
+                # Anche la ripartizione dell'Actual riparte dal precedente.
+                entries=[
+                    models.IncrementSnapshotValueEntry(name=e.name, hours=e.hours)
+                    for e in (prev_value.entries if prev_value else [])
+                ],
             )
         )
     # Lo stesso per l'Actual ore dei sotto-progetti, cumulativo anche lui.
@@ -300,8 +305,68 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 @router.put("/snapshot-values/{value_id}", response_model=schemas.IncrementSnapshotValue)
 def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValueUpdate, db: Session = Depends(get_db)):
     value = _get_snapshot_value_or_404(db, value_id)
-    for field, val in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # Con la ripartizione l'Actual e' la somma delle sue voci.
+    if value.entries:
+        data.pop("actual_value", None)
+    for field, val in data.items():
         setattr(value, field, val)
+    db.commit()
+    db.refresh(value)
+    return value
+
+
+# ---------- Ripartizione dell'Actual ore di uno snapshot ----------
+
+# Voci in cui si ripartisce l'Actual di una voce in ore.
+ACTUAL_SPLIT_NAMES = ["Project Management", "Develop", "Testing", "System Testing"]
+
+
+def _get_value_entry_or_404(db: Session, entry_id: int) -> models.IncrementSnapshotValueEntry:
+    entry = db.get(models.IncrementSnapshotValueEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Riga del dettaglio non trovata")
+    return entry
+
+
+def _save_entries(db: Session, value: models.IncrementSnapshotValue) -> models.IncrementSnapshotValue:
+    db.flush()
+    db.refresh(value)
+    value.actual_value = round(sum(e.hours for e in value.entries), 2)
+    db.commit()
+    db.refresh(value)
+    return value
+
+
+@router.post("/snapshot-values/{value_id}/split", response_model=schemas.IncrementSnapshotValue, status_code=201)
+def create_value_split(value_id: int, db: Session = Depends(get_db)):
+    """Ripartisce l'Actual di una voce in ore nelle voci ACTUAL_SPLIT_NAMES,
+    tutte a 0: da qui in poi l'Actual e' la loro somma."""
+    value = _get_snapshot_value_or_404(db, value_id)
+    if not value.budget_line.is_hours:
+        raise HTTPException(status_code=400, detail="La ripartizione vale solo per le voci in ore")
+    if value.entries:
+        raise HTTPException(status_code=400, detail="L'Actual di questa voce è già ripartito")
+    for name in ACTUAL_SPLIT_NAMES:
+        db.add(models.IncrementSnapshotValueEntry(value_id=value.id, name=name, hours=0))
+    return _save_entries(db, value)
+
+
+@router.put("/snapshot-value-entries/{entry_id}", response_model=schemas.IncrementSnapshotValue)
+def update_value_entry(
+    entry_id: int, payload: schemas.IncrementSnapshotValueEntryUpdate, db: Session = Depends(get_db)
+):
+    entry = _get_value_entry_or_404(db, entry_id)
+    entry.hours = payload.hours
+    return _save_entries(db, entry.value)
+
+
+@router.delete("/snapshot-values/{value_id}/split", response_model=schemas.IncrementSnapshotValue)
+def delete_value_split(value_id: int, db: Session = Depends(get_db)):
+    """Toglie la ripartizione: l'Actual resta all'ultimo totale e torna
+    modificabile a mano."""
+    value = _get_snapshot_value_or_404(db, value_id)
+    value.entries.clear()
     db.commit()
     db.refresh(value)
     return value

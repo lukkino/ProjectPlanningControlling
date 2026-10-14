@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Fragment, useState } from 'react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  LabelList,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { api } from '../api/client'
 import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue, SubProject } from '../api/types'
 import { formatIsoDate } from '../lib/dates'
@@ -38,8 +50,88 @@ function parseCurrencyInput(text: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
+type ChartMode = 'budget' | 'split'
+
+// Voci della ripartizione dell'Actual ore (come ACTUAL_SPLIT_NAMES nel
+// backend), ognuna col suo colore fisso: prime quattro tinte della palette
+// categoriale, validate per daltonismo.
+const SPLIT_SERIES = [
+  { name: 'Project Management', color: '#2a78d6' },
+  { name: 'Develop', color: '#eb6834' },
+  { name: 'Testing', color: '#1baf7a' },
+  { name: 'System Testing', color: '#eda100' },
+]
+
+// Andamento ad ogni snapshot delle ore per voce di ripartizione, sommate su
+// tutte le voci in ore del progetto. Solo gli snapshot con l'Actual
+// ripartito: negli altri il dato per voce non esiste.
+function SplitTrendChart({ snapshotsAsc, lines }: { snapshotsAsc: IncrementSnapshot[]; lines: IncrementBudgetLine[] }) {
+  const hoursLineIds = new Set(lines.filter((l) => l.is_hours).map((l) => l.id))
+  const data = snapshotsAsc
+    .map((snap) => {
+      const entries = snap.values.filter((v) => hoursLineIds.has(v.budget_line_id)).flatMap((v) => v.entries)
+      if (entries.length === 0) return null
+      const point: Record<string, string | number> = { date: formatIsoDate(snap.snapshot_date) ?? snap.snapshot_date }
+      for (const series of SPLIT_SERIES)
+        point[series.name] = entries.filter((e) => e.name === series.name).reduce((sum, e) => sum + e.hours, 0)
+      return point
+    })
+    .filter((p): p is Record<string, string | number> => p !== null)
+
+  if (data.length === 0)
+    return (
+      <p className="muted" style={{ textAlign: 'center', fontSize: 13 }}>
+        Nessuno snapshot con l'Actual ore ripartito: apri ▸ accanto all'Actual di una voce in ore e premi "Ripartisci
+        l'Actual".
+      </p>
+    )
+
+  const last = data.length - 1
+  return (
+    <>
+      <h4 style={{ margin: '0 0 8px', fontSize: 13, textAlign: 'center' }}>Andamento Actual ore per voce</h4>
+      <div style={{ height: 260 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 10, right: 40, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <Tooltip formatter={(value) => `${formatValue(Number(value), true)} h`} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            {SPLIT_SERIES.map((series) => (
+              <Line
+                key={series.name}
+                type="monotone"
+                dataKey={series.name}
+                stroke={series.color}
+                strokeWidth={2}
+                dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: series.color }}
+                activeDot={{ r: 5 }}
+                isAnimationActive={false}
+              >
+                {/* Valore solo sull'ultimo snapshot, in colore testo. */}
+                <LabelList
+                  dataKey={series.name}
+                  content={(props) =>
+                    props.index === last ? (
+                      <text x={Number(props.x) + 8} y={Number(props.y) + 4} fontSize={11} fill="var(--text-muted)">
+                        {formatValue(Number(props.value), true)}
+                      </text>
+                    ) : null
+                  }
+                />
+              </Line>
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  )
+}
+
 export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   const [showAll, setShowAll] = useState(false)
+  const [chartMode, setChartMode] = useState<ChartMode>('budget')
   const queryClient = useQueryClient()
   const { data: lines } = useQuery({
     queryKey: ['increment-budget-lines', incrementId],
@@ -95,6 +187,28 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
     onSuccess: invalidate,
   })
 
+  // Ripartizione dell'Actual ore: righe aperte, per snapshot e voce.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  const split = useMutation({
+    mutationFn: (valueId: number) => api.incrementSnapshotValues.split(valueId),
+    onSuccess: invalidate,
+  })
+  const removeSplit = useMutation({
+    mutationFn: (valueId: number) => api.incrementSnapshotValues.removeSplit(valueId),
+    onSuccess: invalidate,
+  })
+  const setEntryHours = useMutation({
+    mutationFn: ({ id, hours }: { id: number; hours: number }) => api.incrementSnapshotValues.setEntryHours(id, hours),
+    onSuccess: invalidate,
+  })
+
   const setSubHours = useMutation({
     mutationFn: ({ snapshotId, subProjectId, hours }: { snapshotId: number; subProjectId: number; hours: number }) =>
       api.incrementSnapshots.setSubProjectHours(snapshotId, subProjectId, hours),
@@ -109,7 +223,10 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
     updateSnapshot.error ??
     addSnapshot.error ??
     removeSnapshot.error ??
-    updateValue.error
+    updateValue.error ??
+    split.error ??
+    removeSplit.error ??
+    setEntryHours.error
 
   // snapshotsAsc e' in ordine cronologico (dal backend): qui serve anche
   // dal piu' recente, sia per decidere quali mostrare di default sia per
@@ -221,8 +338,13 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                       const prevValue = prevByLine.get(line.id)
                       const diff = (value?.actual_value ?? 0) - (prevValue?.actual_value ?? 0)
                       const pctUsed = value && value.budget_value ? (value.actual_value / value.budget_value) * 100 : null
+                      const entries = value?.entries ?? []
+                      const expandKey = `${snap.id}-${line.id}`
+                      const isExpanded = line.is_hours && expanded.has(expandKey)
+                      const prevEntryHours = new Map((prevValue?.entries ?? []).map((e) => [e.name, e.hours]))
                       return (
-                        <tr key={line.id}>
+                        <Fragment key={line.id}>
+                        <tr>
                           <td style={{ whiteSpace: 'normal' }}>
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                               <input
@@ -264,15 +386,37 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                               />
                             )}
                           </td>
-                          <td className="editable-cell">
+                          <td className={entries.length > 0 ? undefined : 'editable-cell'}>
                             {line.is_hours ? (
-                              <input
-                                type="number"
-                                defaultValue={value?.actual_value ?? 0}
-                                onBlur={(e) =>
-                                  value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
-                                }
-                              />
+                              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                {entries.length > 0 ? (
+                                  // Somma della ripartizione: si modifica da li'.
+                                  <span style={{ flex: 1, fontWeight: 600 }}>{formatValue(value?.actual_value ?? 0, true)}</span>
+                                ) : (
+                                  <input
+                                    key={value?.actual_value}
+                                    type="number"
+                                    style={{ minWidth: 0 }}
+                                    defaultValue={value?.actual_value ?? 0}
+                                    onBlur={(e) =>
+                                      value && updateValue.mutate({ id: value.id, data: { actual_value: Number(e.target.value) } })
+                                    }
+                                  />
+                                )}
+                                <button
+                                  className="btn"
+                                  style={{ flex: '0 0 auto', padding: '2px 6px' }}
+                                  title={
+                                    isExpanded
+                                      ? 'Chiudi la ripartizione'
+                                      : 'Ripartizione: ore di Project Management, Develop, Testing e System Testing, sommate nell\'Actual'
+                                  }
+                                  aria-expanded={isExpanded}
+                                  onClick={() => toggleExpanded(expandKey)}
+                                >
+                                  {isExpanded ? '▾' : '▸'}
+                                </button>
+                              </div>
                             ) : (
                               <input
                                 key={value?.actual_value}
@@ -299,6 +443,78 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                             </button>
                           </td>
                         </tr>
+                        {isExpanded &&
+                          entries.map((entry) => {
+                            const entryDiff = entry.hours - (prevEntryHours.get(entry.name) ?? 0)
+                            return (
+                              // key: campi non controllati, vanno ricreati quando i valori salvati cambiano.
+                              <tr key={`entry-${entry.id}-${entry.hours}`} style={{ background: 'var(--bg)' }}>
+                                <td style={{ paddingLeft: 24, whiteSpace: 'normal' }}>{entry.name}</td>
+                                <td />
+                                <td className="editable-cell">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    defaultValue={entry.hours}
+                                    aria-label={`Actual ore di ${entry.name}`}
+                                    onBlur={(e) => {
+                                      const hours = Math.max(0, Number(e.target.value) || 0)
+                                      if (hours !== entry.hours) setEntryHours.mutate({ id: entry.id, hours })
+                                    }}
+                                  />
+                                </td>
+                                <td>{formatDiff(entryDiff, true)}</td>
+                                <td colSpan={2} />
+                              </tr>
+                            )
+                          })}
+                        {isExpanded && value && (
+                          <tr>
+                            <td colSpan={6} style={{ paddingLeft: 24, whiteSpace: 'normal' }}>
+                              {entries.length === 0 ? (
+                                <>
+                                  <button
+                                    className="btn"
+                                    disabled={split.isPending}
+                                    onClick={() =>
+                                      (value.actual_value === 0 ||
+                                        window.confirm(
+                                          `L'Actual attuale (${formatValue(value.actual_value, true)} h) verrà sostituito dalla somma ` +
+                                            'di Project Management, Develop, Testing e System Testing, che partono da 0. Continuare?',
+                                        )) &&
+                                      split.mutate(value.id)
+                                    }
+                                  >
+                                    Ripartisci l'Actual
+                                  </button>
+                                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                                    Inserisci le ore di Project Management, Develop, Testing e System Testing: l'Actual
+                                    diventa la loro somma.
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="muted" style={{ fontSize: 12 }}>
+                                    L'Actual è la somma di queste voci; il nuovo snapshot riparte da questi valori.
+                                  </span>
+                                  <button
+                                    className="btn"
+                                    style={{ marginLeft: 8 }}
+                                    disabled={removeSplit.isPending}
+                                    title="L'Actual resta all'ultimo totale e torna modificabile a mano"
+                                    onClick={() =>
+                                      window.confirm('Togliere la ripartizione da questo snapshot? L\'Actual resta all\'ultimo totale.') &&
+                                      removeSplit.mutate(value.id)
+                                    }
+                                  >
+                                    Togli ripartizione
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       )
                     })}
                     {/* Actual ore dei sotto-progetti: stesse colonne delle
@@ -390,6 +606,20 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
 
         {chartData.length > 0 && (
           <div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+              <select
+                value={chartMode}
+                onChange={(e) => setChartMode(e.target.value as ChartMode)}
+                aria-label="Grafico da mostrare"
+              >
+                <option value="budget">Budget vs Actual</option>
+                <option value="split">Andamento ore per voce</option>
+              </select>
+            </div>
+            {chartMode === 'split' ? (
+              <SplitTrendChart snapshotsAsc={snapshotsAsc ?? []} lines={lines ?? []} />
+            ) : (
+            <>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, textAlign: 'center' }}>
               Budget vs Actual — {formatIsoDate(latestSnapshot?.snapshot_date ?? null)}
             </h4>
@@ -406,6 +636,8 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            </>
+            )}
           </div>
         )}
       </div>

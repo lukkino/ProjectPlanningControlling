@@ -58,12 +58,26 @@ class IncrementBudgetLine(IncrementBudgetLineBase):
 
 # ---------- IncrementSnapshot (Storico progetto) ----------
 
+class IncrementSnapshotValueEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    hours: float
+
+
+class IncrementSnapshotValueEntryUpdate(BaseModel):
+    hours: float = Field(ge=0)
+
+
 class IncrementSnapshotValue(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     budget_line_id: int
     budget_value: float
     actual_value: float
+    # Ripartizione dell'Actual (voci in ore: Project Management, Develop,
+    # ...): se presente, actual_value ne e' la somma.
+    entries: list[IncrementSnapshotValueEntry] = []
 
 
 class IncrementSnapshotValueUpdate(BaseModel):
