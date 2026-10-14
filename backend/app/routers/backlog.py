@@ -47,6 +47,18 @@ def create_backlog_item(project_id: int, payload: schemas.BacklogItemCreate, db:
     return item
 
 
+def _apply_update(item: models.BacklogItem, data: dict) -> None:
+    """Un'attivita' di servizio e' sempre fuori dal code freeze: segnarla
+    toglie il codefreeze, rimettere il codefreeze la fa tornare un item
+    normale."""
+    if data.get("is_activity"):
+        data["included_in_codefreeze"] = False
+    elif data.get("included_in_codefreeze"):
+        data["is_activity"] = False
+    for field, value in data.items():
+        setattr(item, field, value)
+
+
 @router.put("/api/projects/{project_id}/backlog/bulk", response_model=list[schemas.BacklogItem])
 def bulk_update_backlog_items(
     project_id: int, payload: list[schemas.BacklogItemBulkUpdate], db: Session = Depends(get_db)
@@ -67,9 +79,7 @@ def bulk_update_backlog_items(
         raise HTTPException(status_code=404, detail=f"Backlog item non trovati in questo progetto: {missing}")
 
     for entry in payload:
-        item = by_id[entry.id]
-        for field, value in entry.model_dump(exclude_unset=True, exclude={"id"}).items():
-            setattr(item, field, value)
+        _apply_update(by_id[entry.id], entry.model_dump(exclude_unset=True, exclude={"id"}))
     db.commit()
     return [by_id[item_id] for item_id in dict.fromkeys(ids)]
 
@@ -77,8 +87,7 @@ def bulk_update_backlog_items(
 @router.put("/api/backlog/{item_id}", response_model=schemas.BacklogItem)
 def update_backlog_item(item_id: int, payload: schemas.BacklogItemUpdate, db: Session = Depends(get_db)):
     item = _get_item_or_404(db, item_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(item, field, value)
+    _apply_update(item, payload.model_dump(exclude_unset=True))
     db.commit()
     db.refresh(item)
     return item

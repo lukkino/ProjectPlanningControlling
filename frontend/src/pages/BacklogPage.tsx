@@ -76,6 +76,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   issue_type: 70,
   in_scope: 60,
   included_in_codefreeze: 80,
+  is_activity: 80,
   status: 70,
   refinement_date: 130,
   ta_date: 130,
@@ -218,11 +219,13 @@ export function BacklogPage() {
   // anelli): non fanno parte del piano.
   // Fanno eccezione gli item con predecessori: le loro date dipendono dai
   // predecessori (vedi scheduleFromPredecessors), non dalla posizione in
-  // lista, quindi la cascata li salta.
+  // lista, quindi la cascata li salta. Saltate anche le attivita' di
+  // servizio: non sono lavoro del team di sviluppo, le loro date si
+  // impostano a mano o coi predecessori.
   const itemsByKey = indexByKey(items ?? [])
   const cascadeChain = () =>
     [...(items ?? [])]
-      .filter((i) => i.in_scope && resolvePredecessors(i, itemsByKey).length === 0)
+      .filter((i) => i.in_scope && !i.is_activity && resolvePredecessors(i, itemsByKey).length === 0)
       .sort((a, b) => a.priority_order - b.priority_order)
 
   // Ripianifica in cascata gli item che seguono chain[fromIndex], la cui
@@ -399,6 +402,21 @@ export function BacklogPage() {
           type="checkbox"
           checked={item.included_in_codefreeze}
           onChange={(e) => update.mutate({ id: item.id, data: { included_in_codefreeze: e.target.checked } })}
+        />
+      ),
+    },
+    {
+      // Fuori dal code freeze ma visibile in tabella e nel Gantt, e fuori
+      // dalla cascata (es. validazione col cliente, preparazione documenti).
+      // Il backend toglie il codefreeze quando si segna.
+      key: 'is_activity',
+      label: 'Attività di servizio',
+      render: (item) => (
+        <input
+          type="checkbox"
+          checked={item.is_activity}
+          title="Attività di servizio: fuori dal code freeze, ma resta visibile in tabella e nel Gantt e fuori dalla pianificazione a cascata"
+          onChange={(e) => update.mutate({ id: item.id, data: { is_activity: e.target.checked } })}
         />
       ),
     },
@@ -867,7 +885,7 @@ export function BacklogPage() {
   const visibleItems = (items ?? []).filter(
     (i) =>
       (!onlyInScope || i.in_scope) &&
-      (!onlyCodefreeze || i.included_in_codefreeze) &&
+      (!onlyCodefreeze || i.included_in_codefreeze || i.is_activity) &&
       (!hideDone || i.status !== 'Done') &&
       (!i.issue_type || !hiddenTypes.has(i.issue_type)),
   )
@@ -1101,7 +1119,7 @@ export function BacklogPage() {
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyCodefreeze} onChange={(e) => setOnlyCodefreeze(e.target.checked)} />
-          Mostra solo item "Incluso in codefreeze"
+          Mostra solo item "Incluso in codefreeze" e attività di servizio
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1270,6 +1288,15 @@ export function BacklogPage() {
                       className="btn"
                       onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, included_in_codefreeze: false })))}
                     >
+                      No
+                    </button>
+                  </div>
+                  <div className="bulk-menu-row">
+                    <span>Attività di servizio</span>
+                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, is_activity: true })))}>
+                      Sì
+                    </button>
+                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, is_activity: false })))}>
                       No
                     </button>
                   </div>

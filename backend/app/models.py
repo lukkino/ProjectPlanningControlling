@@ -428,6 +428,12 @@ class BacklogItem(Base):
     # escluderlo dai totali PBI (Backlog, Snapshot, Forecasting) senza
     # doverlo anche togliere dallo scope del progetto.
     included_in_codefreeze: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Attivita' di servizio (es. validazione col cliente, preparazione
+    # documenti): fuori dal code freeze come sopra, ma a differenza di una
+    # story senza sviluppi va comunque mostrata in tabella e nel Gantt.
+    # Resta fuori dalla pianificazione a cascata degli sviluppi.
+    # Implica included_in_codefreeze=False (vedi routers/backlog.py).
+    is_activity: Mapped[bool] = mapped_column(Boolean, default=False)
     planned: Mapped[bool] = mapped_column(Boolean, default=False)
     planned_duration_days: Mapped[float | None] = mapped_column(Float, nullable=True)
     dev_estimate_hours: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -107,6 +107,9 @@ export type BacklogItem = {
   ready_for_refinement: boolean
   in_scope: boolean
   included_in_codefreeze: boolean
+  // Attivita' di servizio: fuori dal code freeze ma visibile in tabella e
+  // nel Gantt, fuori dalla cascata. Implica included_in_codefreeze=false.
+  is_activity: boolean
   planned: boolean
   planned_duration_days: number | null
   dev_estimate_hours: number | null

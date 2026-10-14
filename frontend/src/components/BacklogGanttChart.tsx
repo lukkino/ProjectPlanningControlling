@@ -11,6 +11,10 @@ const COLOR_ACTUAL = '#eb6834'
 // ancora una Fine eff. - l'inizio e' certo, la fine no (vedi barra
 // sfumata sotto).
 const COLOR_IN_PROGRESS = '#d3402f'
+// Attivita' di servizio (fuori dal code freeze): barre a righe oblique,
+// stesso colore ma riconoscibili anche senza distinguere le tinte.
+const activityFill = (color: string) =>
+  `repeating-linear-gradient(135deg, ${color} 0 4px, color-mix(in srgb, ${color} 35%, white) 4px 8px)`
 
 const DAY_WIDTH = 22
 const LABEL_COLUMN_WIDTH = 110
@@ -334,6 +338,14 @@ export function BacklogGanttChart({
             Fasi dell'increment
           </span>
         )}
+        {items.some((item) => item.is_activity) && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_PLANNED), display: 'inline-block' }}
+            />
+            Attività di servizio (fuori code freeze)
+          </span>
+        )}
         {links.length > 0 && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ color: COLOR_LINK, fontWeight: 700 }}>→</span>
@@ -481,6 +493,11 @@ export function BacklogGanttChart({
                 ) : (
                   item.jira_key
                 )}
+                {item.is_activity && (
+                  <span className="muted" style={{ fontSize: 10, display: 'block' }} title="Attività di servizio: fuori dal code freeze">
+                    Attività
+                  </span>
+                )}
               </div>
               {row === cutoffRow && <div className="gantt-forecast-cutoff" style={{ height: CUTOFF_BAND_HEIGHT }} />}
             </Fragment>
@@ -565,7 +582,7 @@ export function BacklogGanttChart({
                         width: Math.max(DAY_WIDTH, dayToX(pEnd) - dayToX(pStart) + DAY_WIDTH),
                         top: PLANNED_BAR_TOP,
                         height: BAR_HEIGHT,
-                        background: COLOR_PLANNED,
+                        background: item.is_activity ? activityFill(COLOR_PLANNED) : COLOR_PLANNED,
                         borderRadius: 3,
                       }}
                     />
@@ -580,7 +597,7 @@ export function BacklogGanttChart({
                         width: Math.max(DAY_WIDTH, dayToX(aEnd) - dayToX(aStart) + DAY_WIDTH),
                         top: 22 + BAR_HEIGHT + 4,
                         height: BAR_HEIGHT,
-                        background: COLOR_ACTUAL,
+                        background: item.is_activity ? activityFill(COLOR_ACTUAL) : COLOR_ACTUAL,
                         borderRadius: 3,
                       }}
                     />

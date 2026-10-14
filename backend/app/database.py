@@ -116,6 +116,9 @@ def run_lightweight_migrations() -> None:
         if "predecessors" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN predecessors VARCHAR(512)"))
+        if "is_activity" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN is_activity BOOLEAN DEFAULT 0"))
 
     if "increment_budget_lines" in table_names:
         budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
