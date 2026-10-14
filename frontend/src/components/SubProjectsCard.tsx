@@ -61,7 +61,7 @@ export function SubProjectsCard({ increment }: Props) {
       <p className="muted" style={{ marginTop: 0 }}>
         Per un progetto che non va per intero su un solo increment (es. una maintenance divisa tra più increment):
         ogni sotto-progetto ha il suo budget ore e si collega a un increment per conto suo. Le ore usate si
-        inseriscono a ogni snapshot nello Storico progetto qui sopra.
+        inseriscono a ogni snapshot nel Consumo risorse progetto qui sopra.
       </p>
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
       {wholeLinked && subProjects.length > 0 && (
@@ -79,7 +79,7 @@ export function SubProjectsCard({ increment }: Props) {
               <tr>
                 <th style={{ minWidth: 220 }}>Sotto-progetto</th>
                 <th>Budget ore</th>
-                <th title="Actual nell'ultimo snapshot dello Storico progetto">Ore usate</th>
+                <th title="Actual nell'ultimo snapshot del Consumo risorse progetto">Ore usate</th>
                 <th style={{ minWidth: 260 }}>Increment collegato</th>
                 <th />
               </tr>

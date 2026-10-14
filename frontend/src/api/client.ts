@@ -12,6 +12,8 @@ import type {
   DocumentRevisionMeta,
   ForecastSimulation,
   HoursCalculator,
+  HoursDetail,
+  HoursDetailRow,
   Increment,
   IncrementBudgetLine,
   IncrementDetail,
@@ -220,6 +222,21 @@ export const api = {
     updateResourceType: (id: number, data: Partial<IncrementResourceType>) =>
       put<IncrementResourceType>(`/increments/resource-types/${id}`, data),
     removeResourceType: (id: number) => del(`/increments/resource-types/${id}`),
+  },
+  hoursDetail: {
+    get: (incrementId: number) => request<HoursDetail>(`/increments/${incrementId}/hours-detail`),
+    // "Aggiorna ore progetto": le righe diventano le tipologie del calcolatore.
+    setRows: (incrementId: number, rows: Pick<HoursDetailRow, 'name' | 'resource_count' | 'hours'>[]) =>
+      put<HoursDetail>(`/increments/${incrementId}/hours-detail/rows`, rows),
+    // Ore di una riga corrette a mano (es. arrotondate).
+    setRowHours: (rowId: number, hours: number) => put<HoursDetail>(`/increments/hours-detail/rows/${rowId}`, { hours }),
+    addReview: (incrementId: number) => post<HoursDetail>(`/increments/${incrementId}/hours-detail/reviews`),
+    renameReview: (reviewId: number, name: string) =>
+      put<HoursDetail>(`/increments/hours-detail/reviews/${reviewId}`, { name }),
+    removeReview: (reviewId: number) => del(`/increments/hours-detail/reviews/${reviewId}`),
+    // hours null = svuota la cella.
+    setReviewHours: (reviewId: number, rowId: number, hours: number | null) =>
+      put<HoursDetail>(`/increments/hours-detail/reviews/${reviewId}/rows/${rowId}`, { hours }),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

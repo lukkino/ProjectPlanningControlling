@@ -129,7 +129,7 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: 4 }}>
-        <h3 style={{ margin: 0 }}>Storico progetto</h3>
+        <h3 style={{ margin: 0 }}>Consumo risorse progetto</h3>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn" onClick={() => addLine.mutate()}>
             + Aggiungi voce

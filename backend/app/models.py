@@ -49,6 +49,12 @@ class Increment(Base):
     budget_lines: Mapped[list["IncrementBudgetLine"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetLine.order"
     )
+    hours_detail_rows: Mapped[list["IncrementHoursDetailRow"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementHoursDetailRow.order"
+    )
+    hours_reviews: Mapped[list["IncrementHoursReview"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementHoursReview.order"
+    )
     snapshots: Mapped[list["IncrementSnapshot"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementSnapshot.snapshot_date"
     )
@@ -226,6 +232,65 @@ class IncrementResourceType(Base):
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     increment: Mapped["Increment"] = relationship(back_populates="resource_types")
+
+
+# Colonne di revisione del Dettaglio budget ore di un progetto che non ne ha
+# ancora: create la prima volta che il dettaglio viene letto.
+DEFAULT_HOURS_REVIEWS = ["Review 1", "Review 2"]
+
+
+class IncrementHoursDetailRow(Base):
+    """Dettaglio budget ore progetto: le ore di una tipologia di risorsa,
+    copiate dal Calcolatore ore progetto col pulsante "Aggiorna ore progetto"
+    (non seguono le modifiche successive del calcolatore). Le ore rivedute
+    nelle revisioni sono in IncrementHoursReviewValue."""
+
+    __tablename__ = "increment_hours_detail_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    resource_count: Mapped[float] = mapped_column(Float, default=0)
+    hours: Mapped[float] = mapped_column(Float, default=0)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="hours_detail_rows")
+    # cascade lato ORM: SQLite qui non applica i vincoli di FK.
+    review_values: Mapped[list["IncrementHoursReviewValue"]] = relationship(
+        back_populates="row", cascade="all, delete-orphan"
+    )
+
+
+class IncrementHoursReview(Base):
+    """Una colonna di revisione ("Review 1") del Dettaglio budget ore
+    progetto: per ogni riga le ore rivedute, inserite a mano."""
+
+    __tablename__ = "increment_hours_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="hours_reviews")
+    values: Mapped[list["IncrementHoursReviewValue"]] = relationship(
+        back_populates="review", cascade="all, delete-orphan"
+    )
+
+
+class IncrementHoursReviewValue(Base):
+    """Ore di una riga del Dettaglio budget ore in una revisione: la riga
+    esiste solo da quando il valore viene inserito."""
+
+    __tablename__ = "increment_hours_review_values"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("increment_hours_reviews.id", ondelete="CASCADE"))
+    row_id: Mapped[int] = mapped_column(ForeignKey("increment_hours_detail_rows.id", ondelete="CASCADE"))
+    hours: Mapped[float] = mapped_column(Float, default=0)
+
+    review: Mapped["IncrementHoursReview"] = relationship(back_populates="values")
+    row: Mapped["IncrementHoursDetailRow"] = relationship(back_populates="review_values")
 
 
 class IncrementSnapshot(Base):

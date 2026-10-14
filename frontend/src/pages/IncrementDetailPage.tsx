@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { HoursDetailCard } from '../components/HoursDetailCard'
 import { HoursCalculatorCard } from '../components/HoursCalculatorCard'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
@@ -117,11 +118,13 @@ export function IncrementDetailPage() {
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nello Storico sotto): le ore usate
-          vengono dall'ultimo snapshot e restano a 0 finché lo Storico è vuoto, anche se il progetto è collegato a un
+          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nel Consumo risorse progetto sotto): le ore
+          usate vengono dall'ultimo snapshot e restano a 0 finché il Consumo risorse progetto è vuoto, anche se il progetto è collegato a un
           increment.
         </p>
       </div>
+
+      <HoursDetailCard incrementId={increment.id} />
 
       <IncrementHistoryCard incrementId={increment.id} subProjects={increment.sub_projects} />
 

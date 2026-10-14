@@ -53,6 +53,28 @@ export type HoursCalculator = {
   resource_types: IncrementResourceType[]
 }
 
+// Dettaglio budget ore progetto: le ore per tipologia di risorsa copiate dal
+// calcolatore ("Aggiorna ore progetto") e le colonne di revisione.
+export type HoursDetailRow = {
+  id: number
+  name: string
+  resource_count: number
+  hours: number
+  // Ore per revisione: chiave = id della revisione; manca se non inserite.
+  review_hours: Record<number, number>
+}
+
+export type HoursReview = {
+  id: number
+  name: string
+  order: number
+}
+
+export type HoursDetail = {
+  rows: HoursDetailRow[]
+  reviews: HoursReview[]
+}
+
 export type ImplementedByTask = {
   key: string
   summary: string | null

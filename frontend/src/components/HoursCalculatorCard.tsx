@@ -54,7 +54,15 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
     onSuccess: invalidate,
   })
 
-  const error = updateCalc.error ?? updateType.error ?? addType.error ?? removeType.error
+  // "Aggiorna ore progetto": copia le ore calcolate nel Dettaglio budget ore
+  // progetto (le righe con lo stesso nome tengono le ore delle review).
+  const publish = useMutation({
+    mutationFn: (rows: { name: string; resource_count: number; hours: number }[]) =>
+      api.hoursDetail.setRows(incrementId, rows),
+    onSuccess: (saved) => queryClient.setQueryData(['hours-detail', incrementId], saved),
+  })
+
+  const error = updateCalc.error ?? updateType.error ?? addType.error ?? removeType.error ?? publish.error
 
   if (!calc) return null
 
@@ -68,14 +76,41 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   const totalResources = calc.resource_types.reduce((sum, t) => sum + t.resource_count, 0)
   const totalHours = netDays === null ? null : calc.resource_types.reduce((sum, t) => sum + (hoursOf(t) ?? 0), 0)
 
+  const handlePublish = () => {
+    if (netDays === null) return
+    if (!confirm('Aggiornare il Dettaglio budget ore progetto con le ore calcolate qui? Eventuali ore corrette a mano (es. arrotondate) vengono sovrascritte; le ore delle review restano.')) return
+    publish.mutate(
+      calc.resource_types.map((t) => ({ name: t.name, resource_count: t.resource_count, hours: netDays * t.resource_count * t.hours_per_day })),
+    )
+  }
+
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>Calcolatore ore progetto</h3>
-        <button className="btn" onClick={() => addType.mutate()}>
-          + Aggiungi tipologia
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => addType.mutate()}>
+            + Aggiungi tipologia
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={netDays === null || calc.resource_types.length === 0 || publish.isPending}
+            title={
+              netDays === null
+                ? 'Imposta data di inizio e data di fine per calcolare le ore'
+                : 'Copia le ore calcolate nel Dettaglio budget ore progetto'
+            }
+            onClick={handlePublish}
+          >
+            {publish.isPending ? 'Aggiornamento…' : '↑ Aggiorna ore progetto'}
+          </button>
+        </div>
       </div>
+      {publish.isSuccess && (
+        <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+          Dettaglio budget ore progetto aggiornato.
+        </p>
+      )}
       <p className="muted" style={{ marginTop: 0 }}>
         Ore disponibili = giorni lavorativi netti × numero di risorse × ore effettive al giorno. I giorni lavorativi
         sono i lunedì-venerdì tra le due date (estremi compresi): festività e chiusure vanno aggiunte ai giorni di

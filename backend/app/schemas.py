@@ -146,6 +146,50 @@ class HoursCalculator(BaseModel):
     resource_types: list[IncrementResourceType] = []
 
 
+# ---------- Dettaglio budget ore progetto ----------
+
+class HoursDetailRowInput(BaseModel):
+    """Una riga mandata da "Aggiorna ore progetto": i valori del calcolatore."""
+
+    name: str
+    resource_count: float = Field(default=0, ge=0)
+    hours: float = Field(default=0, ge=0)
+
+
+class HoursDetailRowUpdate(BaseModel):
+    hours: float = Field(ge=0)
+
+
+class HoursDetailRow(BaseModel):
+    id: int
+    name: str
+    resource_count: float
+    hours: float
+    # Ore per revisione: chiave = id della revisione; manca se non inserite.
+    review_hours: dict[int, float] = {}
+
+
+class HoursReview(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    order: int
+
+
+class HoursReviewUpdate(BaseModel):
+    name: str
+
+
+class HoursReviewValueUpdate(BaseModel):
+    # null = svuota la cella.
+    hours: float | None = Field(default=None, ge=0)
+
+
+class HoursDetail(BaseModel):
+    rows: list[HoursDetailRow] = []
+    reviews: list[HoursReview] = []
+
+
 # ---------- BacklogItem ----------
 
 class BacklogItemBase(BaseModel):

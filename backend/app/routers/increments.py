@@ -379,3 +379,131 @@ def delete_resource_type(resource_type_id: int, db: Session = Depends(get_db)):
     resource_type = _get_resource_type_or_404(db, resource_type_id)
     db.delete(resource_type)
     db.commit()
+
+
+# ---------- Dettaglio budget ore progetto ----------
+
+def _hours_detail(increment: models.Increment) -> schemas.HoursDetail:
+    return schemas.HoursDetail(
+        rows=[
+            schemas.HoursDetailRow(
+                id=row.id,
+                name=row.name,
+                resource_count=row.resource_count,
+                hours=row.hours,
+                review_hours={value.review_id: value.hours for value in row.review_values},
+            )
+            for row in increment.hours_detail_rows
+        ],
+        reviews=list(increment.hours_reviews),
+    )
+
+
+def _get_hours_review_or_404(db: Session, review_id: int) -> models.IncrementHoursReview:
+    review = db.get(models.IncrementHoursReview, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Revisione non trovata")
+    return review
+
+
+@router.get("/{increment_id}/hours-detail", response_model=schemas.HoursDetail)
+def get_hours_detail(increment_id: int, db: Session = Depends(get_db)):
+    increment = _get_increment_or_404(db, increment_id)
+    # Prima lettura: le colonne di revisione di partenza.
+    if not increment.hours_reviews:
+        for order, name in enumerate(models.DEFAULT_HOURS_REVIEWS, start=1):
+            increment.hours_reviews.append(models.IncrementHoursReview(name=name, order=order))
+        db.commit()
+        db.refresh(increment)
+    return _hours_detail(increment)
+
+
+@router.put("/{increment_id}/hours-detail/rows", response_model=schemas.HoursDetail)
+def update_hours_detail_rows(
+    increment_id: int, payload: list[schemas.HoursDetailRowInput], db: Session = Depends(get_db)
+):
+    """"Aggiorna ore progetto": le righe diventano le tipologie del
+    calcolatore. Le righe gia' presenti con lo stesso nome vengono
+    aggiornate e tengono le ore delle revisioni; quelle che non ci sono piu'
+    vengono eliminate."""
+    increment = _get_increment_or_404(db, increment_id)
+    existing = {row.name.strip().lower(): row for row in increment.hours_detail_rows}
+    for order, item in enumerate(payload, start=1):
+        row = existing.pop(item.name.strip().lower(), None)
+        if row is None:
+            row = models.IncrementHoursDetailRow(increment_id=increment.id)
+            db.add(row)
+        row.name = item.name.strip()
+        row.resource_count = item.resource_count
+        row.hours = item.hours
+        row.order = order
+    for row in existing.values():
+        db.delete(row)
+    db.commit()
+    db.refresh(increment)
+    return _hours_detail(increment)
+
+
+@router.put("/hours-detail/rows/{row_id}", response_model=schemas.HoursDetail)
+def update_hours_detail_row(row_id: int, payload: schemas.HoursDetailRowUpdate, db: Session = Depends(get_db)):
+    """Ore di una riga corrette a mano (es. arrotondate): restano finche' un
+    nuovo "Aggiorna ore progetto" non le sovrascrive."""
+    row = db.get(models.IncrementHoursDetailRow, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Riga del dettaglio ore non trovata")
+    row.hours = payload.hours
+    db.commit()
+    db.refresh(row.increment)
+    return _hours_detail(row.increment)
+
+
+@router.post("/{increment_id}/hours-detail/reviews", response_model=schemas.HoursDetail, status_code=201)
+def create_hours_review(increment_id: int, db: Session = Depends(get_db)):
+    increment = _get_increment_or_404(db, increment_id)
+    order = max((r.order for r in increment.hours_reviews), default=0) + 1
+    increment.hours_reviews.append(
+        models.IncrementHoursReview(name=f"Review {len(increment.hours_reviews) + 1}", order=order)
+    )
+    db.commit()
+    db.refresh(increment)
+    return _hours_detail(increment)
+
+
+@router.put("/hours-detail/reviews/{review_id}", response_model=schemas.HoursDetail)
+def update_hours_review(review_id: int, payload: schemas.HoursReviewUpdate, db: Session = Depends(get_db)):
+    review = _get_hours_review_or_404(db, review_id)
+    review.name = payload.name.strip() or review.name
+    db.commit()
+    db.refresh(review.increment)
+    return _hours_detail(review.increment)
+
+
+@router.delete("/hours-detail/reviews/{review_id}", response_model=schemas.HoursDetail)
+def delete_hours_review(review_id: int, db: Session = Depends(get_db)):
+    review = _get_hours_review_or_404(db, review_id)
+    increment = review.increment
+    db.delete(review)
+    db.commit()
+    db.refresh(increment)
+    return _hours_detail(increment)
+
+
+@router.put("/hours-detail/reviews/{review_id}/rows/{row_id}", response_model=schemas.HoursDetail)
+def set_hours_review_value(
+    review_id: int, row_id: int, payload: schemas.HoursReviewValueUpdate, db: Session = Depends(get_db)
+):
+    review = _get_hours_review_or_404(db, review_id)
+    row = db.get(models.IncrementHoursDetailRow, row_id)
+    if row is None or row.increment_id != review.increment_id:
+        raise HTTPException(status_code=404, detail="Riga del dettaglio ore non trovata")
+    value = next((v for v in review.values if v.row_id == row_id), None)
+    if payload.hours is None:
+        if value is not None:
+            db.delete(value)
+    elif value is None:
+        db.add(models.IncrementHoursReviewValue(review_id=review.id, row_id=row.id, hours=payload.hours))
+    else:
+        value.hours = payload.hours
+    db.commit()
+    db.refresh(review.increment)
+    return _hours_detail(review.increment)
