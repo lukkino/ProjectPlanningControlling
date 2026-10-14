@@ -147,6 +147,8 @@ export type Project = {
   change_order_url: string | null
   change_order_label: string | null
   is_current: boolean
+  // Data di rilascio: valorizzata = increment "Rilasciato".
+  release_date: string | null
   // Posizione nel Gantt della Dashboard generale in ordinamento Manuale
   // (null = mai riordinato a mano).
   gantt_order: number | null

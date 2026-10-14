@@ -10,6 +10,7 @@ export function ProjectLayout() {
   const { projectId } = useParams()
   const id = Number(projectId)
   const [showEdit, setShowEdit] = useState(false)
+  const [showRelease, setShowRelease] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -37,6 +38,17 @@ export function ProjectLayout() {
     },
   })
 
+  // Rilascio: un increment rilasciato non e' piu' "in corso".
+  const setRelease = useMutation({
+    mutationFn: (releaseDate: string | null) =>
+      api.projects.update(id, releaseDate ? { release_date: releaseDate, is_current: false } : { release_date: null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', id] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setShowRelease(false)
+    },
+  })
+
   if (isLoading || !project) return <p className="muted">Caricamento...</p>
 
   const handleDelete = () => {
@@ -59,6 +71,11 @@ export function ProjectLayout() {
                 ● In corso
               </span>
             )}
+            {project.release_date && (
+              <span className="badge done" style={{ fontSize: 11, fontWeight: 600 }}>
+                ✓ Rilasciato il {formatIsoDate(project.release_date)}
+              </span>
+            )}
           </h1>
           <div className="sub">
             Stato: {project.status}
@@ -75,6 +92,13 @@ export function ProjectLayout() {
             title={project.is_current ? 'Smarca come increment in corso' : 'Segna come increment in corso'}
           >
             {project.is_current ? '★ In corso' : '☆ Segna come in corso'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => setShowRelease(true)}
+            title={project.release_date ? 'Modifica la data di rilascio o annulla il rilascio' : 'Segna come rilasciato'}
+          >
+            {project.release_date ? '✓ Rilasciato' : '🚀 Segna come rilasciato'}
           </button>
           <button className="btn" onClick={() => setShowEdit(true)}>
             Modifica
@@ -112,6 +136,60 @@ export function ProjectLayout() {
       <Outlet context={{ project } satisfies { project: ProjectDetail }} />
 
       {showEdit && <ProjectFormModal project={project} onClose={() => setShowEdit(false)} />}
+      {showRelease && (
+        <ReleaseModal
+          project={project}
+          saving={setRelease.isPending}
+          error={setRelease.error as Error | null}
+          onSave={(releaseDate) => setRelease.mutate(releaseDate)}
+          onClose={() => setShowRelease(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+type ReleaseModalProps = {
+  project: ProjectDetail
+  saving: boolean
+  error: Error | null
+  onSave: (releaseDate: string | null) => void
+  onClose: () => void
+}
+
+// Data di rilascio dell'increment: di default oggi; se gia' rilasciato si
+// puo' correggere la data o annullare il rilascio.
+function ReleaseModal({ project, saving, error, onSave, onClose }: ReleaseModalProps) {
+  const [releaseDate, setReleaseDate] = useState(project.release_date ?? new Date().toISOString().slice(0, 10))
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 400 }} onClick={(e) => e.stopPropagation()}>
+        <h3>{project.release_date ? 'Rilascio increment' : 'Segna come rilasciato'}</h3>
+        {error && <div className="error-banner">Salvataggio non riuscito: {error.message}</div>}
+        <div className="form-row">
+          <label>Data di rilascio</label>
+          <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} />
+        </div>
+        {!project.release_date && project.is_current && (
+          <p className="muted" style={{ fontSize: 12 }}>
+            L'increment non sarà più segnato come "in corso".
+          </p>
+        )}
+        <div className="form-actions">
+          {project.release_date && (
+            <button className="btn btn-danger" style={{ marginRight: 'auto' }} disabled={saving} onClick={() => onSave(null)}>
+              Annulla rilascio
+            </button>
+          )}
+          <button className="btn" onClick={onClose}>
+            Chiudi
+          </button>
+          <button className="btn btn-primary" disabled={saving || !releaseDate} onClick={() => onSave(releaseDate)}>
+            Salva
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

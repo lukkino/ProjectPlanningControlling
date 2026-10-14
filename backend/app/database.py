@@ -223,6 +223,9 @@ def run_lightweight_migrations() -> None:
         if "gantt_order" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN gantt_order INTEGER"))
+        if "release_date" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN release_date DATE"))
 
         # estimated_budget_hours/estimated_budget_material sono relitti di
         # uno schema precedente allo split Project/Increment (il budget vive

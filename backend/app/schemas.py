@@ -320,6 +320,7 @@ class ProjectBase(BaseModel):
     change_order_url: str | None = None
     change_order_label: str | None = None
     is_current: bool = False
+    release_date: dt.date | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -344,6 +345,7 @@ class ProjectUpdate(BaseModel):
     change_order_url: str | None = None
     change_order_label: str | None = None
     is_current: bool | None = None
+    release_date: dt.date | None = None
 
 
 class ProjectListItem(ProjectBase):

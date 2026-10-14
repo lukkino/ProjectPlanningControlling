@@ -62,6 +62,11 @@ export function Sidebar() {
                     {' '}●
                   </span>
                 )}
+                {p.release_date && (
+                  <span style={{ opacity: 0.7 }} title="Increment rilasciato">
+                    {' '}✓
+                  </span>
+                )}
               </span>
               <span className="name">{p.name}</span>
             </NavLink>

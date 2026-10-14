@@ -139,6 +139,8 @@ class Project(Base):
     # contemporaneamente (es. per capire su quale backlog basare
     # l'ordinamento della colonna Next della Kanban Jira).
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Data in cui l'increment e' stato rilasciato: valorizzata = "Rilasciato".
+    release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Posizione della riga nel Gantt della Dashboard generale quando
     # l'ordinamento e' "Manuale" (0 = in alto). None per gli increment mai
     # riordinati a mano: finiscono in fondo, per data di inizio.
