@@ -1,6 +1,15 @@
 import type { BacklogItem } from '../api/types'
 import { workingDaysBetween } from './dates'
 
+// Le due regole usate in tutta l'app (stesse di BacklogItem nel backend):
+// - countsForCodefreeze: i numeri (PBI, completamento, snapshot,
+//   Forecasting) contano solo il lavoro del code freeze;
+// - isInPlan: le liste e il piano (Gantt, issue della Dashboard) mostrano
+//   anche le attivita' di servizio. Le story senza sviluppi restano fuori
+//   da entrambe.
+export const countsForCodefreeze = (i: BacklogItem) => i.in_scope && i.included_in_codefreeze
+export const isInPlan = (i: BacklogItem) => i.in_scope && (i.included_in_codefreeze || i.is_activity)
+
 // Conteggi condivisi tra BacklogPage (riga di stat in cima), ForecastingPage
 // (default di #PBI Remaining su una nuova simulazione) e SnapshotsPage
 // (default di PBI totali/Done/ore loggate su un nuovo snapshot).
@@ -11,7 +20,7 @@ export function countBacklogStats(items: BacklogItem[]) {
   // flag "Incluso in codefreeze"). Done/Rimanenti si basano sul secondo,
   // perche' e' quello rilevante per l'avanzamento del team.
   const totalInScopeCount = items.filter((i) => i.in_scope).length
-  const codefreezeItems = items.filter((i) => i.in_scope && i.included_in_codefreeze)
+  const codefreezeItems = items.filter(countsForCodefreeze)
   const doneCount = codefreezeItems.filter((i) => i.status === 'Done').length
   const remainingCount = codefreezeItems.length - doneCount
   // Somma su TUTTI gli item (non solo in-scope), coerente con la stat "Ore
@@ -61,7 +70,7 @@ export function countPlannedUnplannedDone(items: BacklogItem[], sinceDate: strin
   const plannedKeys: string[] = []
   const unplannedKeys: string[] = []
   for (const item of items) {
-    if (!item.in_scope || !item.included_in_codefreeze || item.status !== 'Done' || !item.actual_finish) continue
+    if (!countsForCodefreeze(item) || item.status !== 'Done' || !item.actual_finish) continue
     if (sinceDate && item.actual_finish < sinceDate) continue
     if (hasLabel(item.labels, 'oos')) unplannedKeys.push(item.jira_key)
     else if (hasLabel(item.labels, 'planned')) plannedKeys.push(item.jira_key)

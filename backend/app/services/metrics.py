@@ -84,11 +84,13 @@ def _used_hours_total(increment: models.Increment) -> float:
 
 def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetrics:
     items = project.backlog_items
-    in_scope_items = [i for i in items if i.in_scope]
-    done_items = [i for i in in_scope_items if i.status == "Done"]
+    # Stessa regola di Backlog, Andamento e Forecasting: solo i PBI del code
+    # freeze (fuori le story senza sviluppi e le attivita' di servizio).
+    codefreeze_items = [i for i in items if i.counts_for_codefreeze]
+    done_items = [i for i in codefreeze_items if i.status == "Done"]
 
     backlog_total = len(items)
-    backlog_in_scope = len(in_scope_items)
+    backlog_in_scope = len(codefreeze_items)
     backlog_done = len(done_items)
 
     # project.snapshots e' ordinato per snapshot_date crescente (vedi models.py),

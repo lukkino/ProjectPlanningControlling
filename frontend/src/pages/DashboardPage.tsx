@@ -18,6 +18,7 @@ import { api, saveBlob } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import type { BacklogItem } from '../api/types'
+import { isInPlan } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
@@ -34,6 +35,11 @@ const COLOR_ACTUAL = '#2f6fed'
 const COLOR_CODE_FREEZE = '#d3402f'
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
+
+const COMPLETION_HELP =
+  'PBI Done su PBI totali del code freeze: item in scope e "Incluso in codefreeze", come nel Backlog, ' +
+  "nell'Andamento e nel Forecasting. Non contano le story senza sviluppi né le attività di servizio.\n\n" +
+  "Se c'è almeno uno snapshot nell'Andamento, il valore è quello dell'ultimo snapshot."
 
 const SPI_HELP =
   "SPI (Schedule Performance Index): % di completamento del backlog diviso % di tempo trascorso dall'inizio al code freeze.\n\n" +
@@ -268,7 +274,7 @@ function recentlyClosedItems(items: BacklogItem[] | undefined, days: number): Ba
   const pad = (n: number) => String(n).padStart(2, '0')
   const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`
   return (items ?? [])
-    .filter((i) => i.in_scope && i.status === 'Done' && i.actual_finish != null && i.actual_finish >= cutoffStr)
+    .filter((i) => isInPlan(i) && i.status === 'Done' && i.actual_finish != null && i.actual_finish >= cutoffStr)
     .sort((a, b) => (b.actual_finish ?? '').localeCompare(a.actual_finish ?? '') || a.priority_order - b.priority_order)
 }
 
@@ -284,14 +290,12 @@ function RecentlyClosedCard({
   setPeriod: (period: RecentlyClosedPeriod) => void
 }) {
   const closed = recentlyClosedItems(items, period.days)
-  // Sotto le chiuse, come nella presentazione: le issue in scope in
-  // lavorazione ora e quelle ancora da iniziare che contano per il code
-  // freeze (in scope e con impatto sul code freeze), nell'ordine del Backlog.
+  // Sotto le chiuse, come nella presentazione: le issue in lavorazione ora e
+  // quelle ancora da iniziare, nell'ordine del Backlog. Tutte e tre le liste
+  // con la regola del piano (code freeze e attivita' di servizio).
   const byBacklogOrder = (a: BacklogItem, b: BacklogItem) => a.priority_order - b.priority_order
-  const inProgress = (items ?? []).filter((i) => i.in_scope && i.status === 'In Progress').sort(byBacklogOrder)
-  const toDo = (items ?? [])
-    .filter((i) => i.in_scope && i.included_in_codefreeze && i.status === 'To Do')
-    .sort(byBacklogOrder)
+  const inProgress = (items ?? []).filter((i) => isInPlan(i) && i.status === 'In Progress').sort(byBacklogOrder)
+  const toDo = (items ?? []).filter((i) => isInPlan(i) && i.status === 'To Do').sort(byBacklogOrder)
   return (
     <div className="card">
       <div
@@ -523,8 +527,11 @@ export function DashboardPage() {
         <div className="grid-4">
           <div className="stat">
             <span className="value">{metrics ? pct(metrics.percent_complete) : '—'}</span>
-            <span className="label">
+            <span className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               Completamento backlog ({metrics?.backlog_done ?? 0}/{metrics?.backlog_in_scope ?? 0})
+              <span className="info-icon" title={COMPLETION_HELP} aria-label={COMPLETION_HELP}>
+                i
+              </span>
             </span>
             {metrics?.completion_source === 'snapshot' && (
               <span className="muted" style={{ fontSize: 11 }}>

@@ -434,6 +434,19 @@ class BacklogItem(Base):
     # Resta fuori dalla pianificazione a cascata degli sviluppi.
     # Implica included_in_codefreeze=False (vedi routers/backlog.py).
     is_activity: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Le due regole usate in tutta l'app (stesse di frontend/src/lib/
+    # backlogStats.ts): i numeri (PBI, completamento, snapshot, Forecasting)
+    # contano solo il lavoro del code freeze; le liste e il piano mostrano
+    # anche le attivita' di servizio.
+    @property
+    def counts_for_codefreeze(self) -> bool:
+        return self.in_scope and self.included_in_codefreeze
+
+    @property
+    def is_in_plan(self) -> bool:
+        return self.in_scope and (self.included_in_codefreeze or self.is_activity)
+
     planned: Mapped[bool] = mapped_column(Boolean, default=False)
     planned_duration_days: Mapped[float | None] = mapped_column(Float, nullable=True)
     dev_estimate_hours: Mapped[float | None] = mapped_column(Float, nullable=True)

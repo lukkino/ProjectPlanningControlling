@@ -14,7 +14,7 @@ import {
 } from 'recharts'
 import { api } from '../api/client'
 import type { ForecastSimulation, Project } from '../api/types'
-import { countBacklogStats, countPlannedUnplannedDone } from '../lib/backlogStats'
+import { countBacklogStats, countPlannedUnplannedDone, countsForCodefreeze } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
@@ -61,7 +61,7 @@ export function ForecastingPage() {
   // prevede di finire - da confrontare con la data stimata da Monte Carlo.
   // null se nessuno di quegli item ha una Fine pian.
   const traditionalForecastIso = (backlogItems ?? [])
-    .filter((i) => i.in_scope && i.included_in_codefreeze && i.status !== 'Done')
+    .filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
     .reduce<string | null>(
       (latest, i) => (i.expected_finish && (!latest || i.expected_finish > latest) ? i.expected_finish : latest),
       null,

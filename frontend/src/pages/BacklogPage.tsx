@@ -14,7 +14,7 @@ import type { BacklogItem } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
-import { countBacklogStats, trimmedMeanDuration } from '../lib/backlogStats'
+import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import {
   addWorkingDays,
@@ -856,7 +856,7 @@ export function BacklogPage() {
   const latestSimulation =
     [...(simulations ?? [])].reverse().find((s) => s.pbi_completed_by_deadline_85pct != null) ?? null
   const forecastTarget = latestSimulation?.pbi_completed_by_deadline_85pct ?? null
-  const forecastCandidates = (items ?? []).filter((i) => i.in_scope && i.included_in_codefreeze && i.status !== 'Done')
+  const forecastCandidates = (items ?? []).filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
   const forecastHighlightIds = new Set(
     forecastTarget != null ? forecastCandidates.slice(0, forecastTarget).map((i) => i.id) : [],
   )
