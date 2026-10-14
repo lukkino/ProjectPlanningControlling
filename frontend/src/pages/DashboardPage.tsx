@@ -545,6 +545,11 @@ export function DashboardPage() {
                 da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
               </span>
             )}
+            {metrics?.logged_hours_source === 'progetti' && (
+              <span className="muted" style={{ fontSize: 11 }}>
+                somma dei progetti collegati
+              </span>
+            )}
           </div>
           <div className="stat">
             <span className={`value ${metrics ? spiTone(metrics.spi) : ''}`}>

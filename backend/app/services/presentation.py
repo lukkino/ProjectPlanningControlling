@@ -566,7 +566,8 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
                 if metrics.percent_budget_used is not None
                 else []
             )
-            + ([(snapshot_note, COLOR_MUTED)] if metrics.logged_hours_source == "snapshot" else []),
+            + ([(snapshot_note, COLOR_MUTED)] if metrics.logged_hours_source == "snapshot" else [])
+            + ([("somma dei progetti collegati", COLOR_MUTED)] if metrics.logged_hours_source == "progetti" else []),
         ),
         (
             f"{metrics.spi:.2f}".replace(".", ",") if metrics.spi is not None else "—",

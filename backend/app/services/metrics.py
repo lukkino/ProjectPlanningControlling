@@ -75,6 +75,13 @@ def _budget_hours_total(increment: models.Increment) -> float:
     )
 
 
+def _used_hours_total(increment: models.Increment) -> float:
+    """Ore usate di un progetto: l'Actual delle voci in ore nell'ultimo
+    snapshot dello Storico (0 finche' e' vuoto)."""
+    hours_lines, _, latest_by_line = _split_budget_lines(increment)
+    return sum(latest_by_line[b.id].actual_value for b in hours_lines if b.id in latest_by_line)
+
+
 def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetrics:
     items = project.backlog_items
     in_scope_items = [i for i in items if i.in_scope]
@@ -97,11 +104,19 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
 
     percent_complete = (backlog_done / backlog_in_scope) if backlog_in_scope else 0.0
 
-    # "Ore usate" riflette lo sforzo reale sul progetto: preferiamo le ore
-    # effettive dello snapshot (actual_hours) alle ore loggate, perche' queste
-    # ultime possono essere solo un sottoinsieme rendicontato su Jira.
+    # "Ore usate" riflette lo sforzo reale sull'increment: con dei progetti
+    # collegati e' la somma delle loro ore usate (come il budget sotto: di
+    # un progetto collegato tramite un sotto-progetto contano solo le ore di
+    # quello). Senza progetti preferiamo le ore effettive dello snapshot
+    # (actual_hours) alle ore loggate, perche' queste ultime possono essere
+    # solo un sottoinsieme rendicontato su Jira.
     logged_hours_source = "backlog"
-    if latest_snapshot is not None and latest_snapshot.actual_hours is not None:
+    if project.progetti or project.sub_projects:
+        logged_hours_total = sum(_used_hours_total(p) for p in project.progetti) + sum(
+            s.actual_hours for s in project.sub_projects
+        )
+        logged_hours_source = "progetti"
+    elif latest_snapshot is not None and latest_snapshot.actual_hours is not None:
         logged_hours_total = latest_snapshot.actual_hours
         logged_hours_source = "snapshot"
     elif latest_snapshot is not None and latest_snapshot.logged_hours is not None:
@@ -117,9 +132,9 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
     dev_logged_hours_total = sum(i.logged_hours or 0 for i in items)
 
     # L'increment non ha un budget suo: e' la somma dei budget ore dei
-    # progetti collegati (i budget si sommano verso l'increment, mentre le
-    # ore usate qui sopra restano quelle dell'increment). Di un progetto
-    # collegato tramite un sotto-progetto conta solo il budget di quello.
+    # progetti collegati (budget e ore usate si sommano verso l'increment).
+    # Di un progetto collegato tramite un sotto-progetto conta solo il
+    # budget di quello.
     budget_hours_total = sum(_budget_hours_total(p) or 0 for p in project.progetti) + sum(
         s.budget_hours or 0 for s in project.sub_projects
     )
@@ -182,7 +197,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         latest_by_line[b.id].budget_value for b in material_lines if b.id in latest_by_line
     ) or increment.estimated_budget_material
 
-    logged_hours_total = sum(latest_by_line[b.id].actual_value for b in hours_lines if b.id in latest_by_line)
+    logged_hours_total = _used_hours_total(increment)
 
     actual_material_total = sum(latest_by_line[b.id].actual_value for b in material_lines if b.id in latest_by_line)
 

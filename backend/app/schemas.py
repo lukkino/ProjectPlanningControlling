@@ -586,6 +586,7 @@ class DashboardMetrics(BaseModel):
     percent_time_elapsed: float | None
     spi: float | None
     completion_source: str
+    # "progetti" (somma dei progetti collegati), "snapshot" o "backlog".
     logged_hours_source: str
     last_snapshot_date: dt.date | None
     phases: list[Phase]

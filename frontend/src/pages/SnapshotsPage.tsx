@@ -24,6 +24,13 @@ export function SnapshotsPage() {
   // PBI totali/completati (e quindi i rimanenti) contano solo i PBI in scope
   // e con impatto sul code freeze, come le stat in cima al Backlog.
   const { codefreezeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
+  // Ore effettive: con dei progetti collegati, la somma dei loro ultimi
+  // Actual ore (le stesse "Ore usate" della Dashboard).
+  const { data: metrics } = useQuery({
+    queryKey: ['dashboard', project.id],
+    queryFn: () => api.dashboard.get(project.id),
+  })
+  const progettiHours = metrics?.logged_hours_source === 'progetti' ? metrics.logged_hours_total : null
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['snapshots', project.id] })
@@ -39,6 +46,7 @@ export function SnapshotsPage() {
       api.snapshots.create(project.id, {
         snapshot_date: new Date().toISOString().slice(0, 10),
         logged_hours: loggedHoursTotal,
+        actual_hours: progettiHours,
         pbi_total: codefreezeCount,
         pbi_done: doneCount,
       }),
@@ -55,6 +63,8 @@ export function SnapshotsPage() {
       <p className="muted">
         Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
         nel grafico della Dashboard).
+        {progettiHours !== null &&
+          ` Un nuovo snapshot prende le Ore effettive dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
       </p>
       <div className="table-wrap">
         <table>

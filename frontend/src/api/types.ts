@@ -304,7 +304,8 @@ export type DashboardMetrics = {
   percent_time_elapsed: number | null
   spi: number | null
   completion_source: 'backlog' | 'snapshot'
-  logged_hours_source: 'backlog' | 'snapshot'
+  // 'progetti': somma delle ore usate dei progetti e sotto-progetti collegati.
+  logged_hours_source: 'backlog' | 'snapshot' | 'progetti'
   last_snapshot_date: string | null
   phases: Phase[]
 }
