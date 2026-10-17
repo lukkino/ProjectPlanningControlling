@@ -635,7 +635,7 @@ export function BacklogPage() {
     },
     {
       key: 'logged_hours',
-      label: 'Ore loggate',
+      label: 'Ore Jira',
       className: 'editable-cell',
       render: (item) => (
         <input
@@ -1213,6 +1213,7 @@ export function BacklogPage() {
           forecastCutoffLabel={forecastCutoffLabel}
           codeFreezeDate={project.code_freeze_date}
           phases={ganttPhases}
+          exportName={`Gantt_${project.code}`}
         />
       )}
 

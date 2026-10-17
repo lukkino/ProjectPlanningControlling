@@ -1,4 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
+import { toPng } from 'html-to-image'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
 import { parsePredecessors } from '../lib/scheduling'
@@ -40,6 +41,12 @@ const MARK_CHAR_WIDTH = 6.5
 // cosi' il calendario si allunga abbastanza da non tagliarlo.
 const LABEL_CHAR_WIDTH = 6.5
 const COLOR_PHASE = '#7c4dbd'
+// Linea di oggi: rossa piena, con l'etichetta "Today" su sfondo rosso nel
+// calendario (anche nel PNG esportato, che mostra il giorno dell'export).
+const COLOR_TODAY = '#d3402f'
+const TODAY_LABEL = 'Today'
+// Lato massimo dell'immagine esportata: oltre, i browser rifiutano il canvas.
+const EXPORT_MAX_SIDE = 16000
 
 const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -111,6 +118,9 @@ type Props = {
   // linea verticale ciascuna, e il calendario arriva fino all'ultima anche
   // senza item che ci arrivano.
   phases?: { name: string; date: string | null }[]
+  // Prefisso del nome del PNG esportato (es. "Gantt_PTBSYS-123"), seguito
+  // dalla data dell'export.
+  exportName?: string
 }
 
 const NO_PHASES: { name: string; date: string | null }[] = []
@@ -122,6 +132,7 @@ export function BacklogGanttChart({
   forecastCutoffLabel,
   codeFreezeDate = null,
   phases = NO_PHASES,
+  exportName = 'Gantt',
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
@@ -176,6 +187,45 @@ export function BacklogGanttChart({
     onPointerCancel: endDrag,
   }
   const dragClassName = dragging ? 'gantt-draggable gantt-draggable--dragging' : 'gantt-draggable'
+
+  // Esporta PNG: per catturare tutto il Gantt e non solo la parte visibile,
+  // durante l'export il componente si allarga all'intero calendario (niente
+  // scroll orizzontale ne' intestazione agganciata), poi torna com'era.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const exportPng = async () => {
+    const savedScroll = wrapRef.current?.scrollLeft ?? 0
+    setExportError(null)
+    setExporting(true)
+    try {
+      // Due frame: il primo applica il layout allargato, il secondo lo disegna.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const node = rootRef.current
+      if (!node) return
+      const width = node.scrollWidth
+      const height = node.scrollHeight
+      const dataUrl = await toPng(node, {
+        width,
+        height,
+        pixelRatio: Math.min(2, EXPORT_MAX_SIDE / width, EXPORT_MAX_SIDE / height),
+        backgroundColor: getComputedStyle(node).getPropertyValue('--surface').trim() || '#ffffff',
+        filter: (n) => !(n instanceof HTMLElement && n.classList.contains('gantt-no-export')),
+      })
+      const link = document.createElement('a')
+      link.download = `${exportName}_${new Date().toLocaleDateString('sv-SE')}.png` // sv-SE = AAAA-MM-GG, data locale
+      link.href = dataUrl
+      link.click()
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setExporting(false)
+      // Calendario e barra "specchio" seguono via onScroll.
+      requestAnimationFrame(() => {
+        if (wrapRef.current) wrapRef.current.scrollLeft = savedScroll
+      })
+    }
+  }
 
   const allDays: number[] = []
   for (const item of items) {
@@ -245,23 +295,31 @@ export function BacklogGanttChart({
 
   // Etichetta a destra della linea (a sinistra a fine calendario, dove a
   // destra non ci starebbe); se toccherebbe quella prima va sulla riga sotto.
-  const laneEnds: number[] = []
+  // "Today" e' centrata sulla sua linea e partecipa allo stesso calcolo,
+  // cosi' non si sovrappone a Code Freeze e fasi vicine.
+  const todayLabelWidth = TODAY_LABEL.length * MARK_CHAR_WIDTH + 8
+  const todaySlot = { start: dayToX(todayDay) - todayLabelWidth / 2, width: todayLabelWidth, lane: 0 }
   const marks = markDays.map((day) => {
     const label = namesByDay.get(day)!.join(' · ')
     const width = label.length * MARK_CHAR_WIDTH
     const alignRight = day > maxDay - 8
-    const start = alignRight ? dayToX(day) - 3 - width : dayToX(day) + 6
-    let lane = laneEnds.findIndex((end) => end + 8 <= start)
-    if (lane === -1) lane = laneEnds.length
-    laneEnds[lane] = start + width
     return {
       day,
       label,
-      lane,
+      start: alignRight ? dayToX(day) - 3 - width : dayToX(day) + 6,
+      width,
+      lane: 0,
       color: day === codeFreezeDay ? 'var(--success)' : COLOR_PHASE,
       position: alignRight ? { right: chartWidth - dayToX(day) + 3 } : { left: dayToX(day) + 6 },
     }
   })
+  const laneEnds: number[] = []
+  for (const slot of [...marks, todaySlot].sort((a, b) => a.start - b.start)) {
+    let lane = laneEnds.findIndex((end) => end + 8 <= slot.start)
+    if (lane === -1) lane = laneEnds.length
+    laneEnds[lane] = slot.start + slot.width
+    slot.lane = lane
+  }
 
   // Frecce dei predecessori, come in Project/Wrike: dalla fine della barra
   // pianificata del predecessore all'inizio di quella del successore. Solo
@@ -300,7 +358,10 @@ export function BacklogGanttChart({
   })
 
   return (
-    <div>
+    <div
+      ref={rootRef}
+      style={exporting ? { width: LABEL_COLUMN_WIDTH + chartWidth + 2, background: 'var(--surface)' } : undefined}
+    >
       <div style={{ display: 'flex', gap: 16, marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_PLANNED, display: 'inline-block' }} />
@@ -323,8 +384,8 @@ export function BacklogGanttChart({
           In progress (da inizio a oggi)
         </span>
         <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 0, height: 12, borderLeft: '1px dashed var(--danger)', display: 'inline-block' }} />
-          Oggi
+          <span style={{ width: 0, height: 12, borderLeft: `2px solid ${COLOR_TODAY}`, display: 'inline-block' }} />
+          Today {formatEpochDaysAsDate(todayDay)}
         </span>
         {codeFreezeDay !== null && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -358,6 +419,12 @@ export function BacklogGanttChart({
             Fine della finestra di forecast
           </span>
         )}
+        <span className="gantt-no-export" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {exportError && <span style={{ color: 'var(--danger)' }}>Export non riuscito: {exportError}</span>}
+          <button className="btn" disabled={exporting} onClick={exportPng} title="Scarica tutto il Gantt come immagine PNG">
+            {exporting ? 'Esportazione…' : 'Esporta PNG'}
+          </button>
+        </span>
       </div>
 
       {/* Calendario e barra "specchio": fuori da .gantt-outer (vedi commento
@@ -365,10 +432,10 @@ export function BacklogGanttChart({
           le date restano visibili anche sulle ultime righe. Il calendario
           scorre in orizzontale solo via JS (nessuna scrollbar propria,
           overflow hidden). */}
-      <div className="gantt-sticky-header">
+      <div className="gantt-sticky-header" style={exporting ? { position: 'static' } : undefined}>
         <div style={{ display: 'flex' }}>
           <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
-          <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <div ref={headerScrollRef} style={{ flex: 1, minWidth: 0, overflow: exporting ? 'visible' : 'hidden' }}>
             <div
               className={dragClassName}
               {...dragHandlers}
@@ -458,13 +525,43 @@ export function BacklogGanttChart({
                   {mark.label}
                 </div>
               ))}
+              {/* Today: etichetta su sfondo rosso centrata sulla linea, che
+                  la collega alle righe sotto. */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: dayToX(todayDay) - 1,
+                  top: HEADER_HEIGHT + todaySlot.lane * MARK_ROW_HEIGHT + MARK_ROW_HEIGHT - 2,
+                  bottom: 0,
+                  borderLeft: `2px solid ${COLOR_TODAY}`,
+                }}
+              />
+              <div
+                title={`Today ${formatEpochDaysAsDate(todayDay)}`}
+                style={{
+                  position: 'absolute',
+                  top: HEADER_HEIGHT + todaySlot.lane * MARK_ROW_HEIGHT + 1,
+                  left: todaySlot.start,
+                  width: todaySlot.width,
+                  height: MARK_ROW_HEIGHT - 2,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  lineHeight: `${MARK_ROW_HEIGHT - 2}px`,
+                  textAlign: 'center',
+                  color: 'white',
+                  background: COLOR_TODAY,
+                  borderRadius: 3,
+                }}
+              >
+                {TODAY_LABEL}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Spacer della stessa larghezza della colonna ID, cosi' la barra
             "specchio" sotto si allinea esattamente sopra la timeline vera. */}
-        <div style={{ display: 'flex' }}>
+        <div className="gantt-no-export" style={{ display: 'flex' }}>
           <div style={{ width: LABEL_COLUMN_WIDTH, flexShrink: 0 }} />
           <div
             className="table-scroll-mirror"
@@ -507,6 +604,7 @@ export function BacklogGanttChart({
         <div
           className="gantt-timeline-col"
           ref={wrapRef}
+          style={exporting ? { overflowX: 'visible' } : undefined}
           onScroll={() => {
             syncScroll(wrapRef, topScrollRef)
             mirrorHeaderScroll(wrapRef)
@@ -530,17 +628,6 @@ export function BacklogGanttChart({
                       style={{ position: 'absolute', left: dayToX(t.day), top: 0, bottom: 0, borderLeft: '1px solid #f0f0f0' }}
                     />
                   ))}
-                  {todayDay >= minDay && todayDay <= maxDay && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: dayToX(todayDay),
-                        top: 0,
-                        bottom: 0,
-                        borderLeft: '1px dashed var(--danger)',
-                      }}
-                    />
-                  )}
                   {marks.map((mark) => (
                     <div
                       key={mark.day}
@@ -631,6 +718,19 @@ export function BacklogGanttChart({
                 </Fragment>
               )
             })}
+            {/* Linea di oggi su tutta l'altezza, sopra le barre (sempre
+                visibile) ma trasparente al mouse. */}
+            <div
+              style={{
+                position: 'absolute',
+                left: dayToX(todayDay) - 1,
+                top: 0,
+                bottom: 0,
+                borderLeft: `2px solid ${COLOR_TODAY}`,
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            />
             {/* Sopra le righe ma trasparente al mouse: tooltip delle barre e
                 trascinamento continuano a funzionare. */}
             {links.length > 0 && (

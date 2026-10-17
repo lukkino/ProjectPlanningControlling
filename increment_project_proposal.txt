@@ -1,4 +1,4 @@
-nellavviaProposta: Increment sopra Project (non ancora implementata)
+Proposta: Increment sopra Project (non ancora implementata)
 ============================================================
 
 Ruolo dei due livelli:
