@@ -319,7 +319,8 @@ def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValue
 # ---------- Ripartizione dell'Actual ore di uno snapshot ----------
 
 # Voci in cui si ripartisce l'Actual di una voce in ore.
-ACTUAL_SPLIT_NAMES = ["Project Management", "Develop", "Testing", "System Testing"]
+# Gli stessi ruoli del Calcolatore e del Dettaglio budget ore.
+ACTUAL_SPLIT_NAMES = models.DEFAULT_RESOURCE_TYPES
 
 
 def _get_value_entry_or_404(db: Session, entry_id: int) -> models.IncrementSnapshotValueEntry:

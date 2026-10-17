@@ -24,8 +24,8 @@ export function SnapshotsPage() {
   // PBI totali/completati (e quindi i rimanenti) contano solo i PBI in scope
   // e con impatto sul code freeze, come le stat in cima al Backlog.
   const { codefreezeCount, doneCount, loggedHoursTotal } = countBacklogStats(backlogItems ?? [])
-  // Ore effettive: con dei progetti collegati, la somma dei loro ultimi
-  // Actual ore (le stesse "Ore usate" della Dashboard).
+  // Ore usate: con dei progetti collegati, la somma dei loro ultimi Actual
+  // ore (le stesse "Ore usate" della Dashboard).
   const { data: metrics } = useQuery({
     queryKey: ['dashboard', project.id],
     queryFn: () => api.dashboard.get(project.id),
@@ -64,15 +64,15 @@ export function SnapshotsPage() {
         Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
         nel grafico della Dashboard).
         {progettiHours !== null &&
-          ` Un nuovo snapshot prende le Ore effettive dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
+          ` Un nuovo snapshot prende le Ore usate dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
       </p>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Data</th>
-              <th>Ore effettive</th>
-              <th>Ore loggate</th>
+              <th title="Ore consuntivate (controlling): con progetti collegati, la somma dei loro Actual ore">Ore usate</th>
+              <th title="Ore loggate dagli sviluppatori sulle issue Jira del backlog">Ore Jira</th>
               <th>PBI totali</th>
               <th>PBI completati</th>
               <th title="PBI totali meno PBI completati: si aggiorna da solo modificando le due colonne">PBI rimanenti</th>

@@ -946,7 +946,7 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
     serial = _date_serial
     chart_data = XyChartData()
     days: list[dt.date] = [start, freeze]
-    for name, attribute in (("Actual (PowerBI) (h)", "actual_hours"), ("Actual logged (dev+test)", "logged_hours")):
+    for name, attribute in (("Ore usate (h)", "actual_hours"), ("Ore Jira (h)", "logged_hours")):
         points = [(s.snapshot_date, getattr(s, attribute)) for s in project.snapshots if getattr(s, attribute) is not None]
         if not points:
             continue
@@ -1196,10 +1196,10 @@ def generate_dashboard_presentation(project: models.Project, closed_days: int = 
     _plan_vs_actual_slides(
         deck,
         project,
-        title="Ore stimate vs Ore loggate",
-        empty_message="Nessun PBI con sia le Ore stimate sia le Ore loggate.",
+        title="Ore stimate vs Ore Jira",
+        empty_message="Nessun PBI con sia le Ore stimate sia le Ore Jira.",
         planned_label="Ore stimate",
-        actual_label="Ore loggate",
+        actual_label="Ore Jira",
         unit="h",
         get_values=lambda i: (i.dev_effort_hours, i.logged_hours),
     )

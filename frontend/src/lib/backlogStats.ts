@@ -12,7 +12,7 @@ export const isInPlan = (i: BacklogItem) => i.in_scope && (i.included_in_codefre
 
 // Conteggi condivisi tra BacklogPage (riga di stat in cima), ForecastingPage
 // (default di #PBI Remaining su una nuova simulazione) e SnapshotsPage
-// (default di PBI totali/Done/ore loggate su un nuovo snapshot).
+// (default di PBI totali/Done/Ore Jira su un nuovo snapshot).
 export function countBacklogStats(items: BacklogItem[]) {
   // Due totali distinti perche' si usano per scopi diversi: "in scope" e'
   // l'intero perimetro del progetto, "code freeze" e' il sottoinsieme che

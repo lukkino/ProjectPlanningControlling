@@ -93,6 +93,17 @@ def run_lightweight_migrations() -> None:
                         {"inc": increment_id, "name": name, "order": order},
                     )
 
+    # Ruoli del Calcolatore e del Dettaglio budget ore: i vecchi nomi di
+    # default (PJM, Dev, ...) diventano quelli della ripartizione
+    # dell'Actual. Idempotente: dopo la prima volta non trova piu' nulla.
+    from app.models import LEGACY_RESOURCE_TYPE_NAMES  # import locale: models importa Base da qui
+
+    for table in ("increment_resource_types", "increment_hours_detail_rows"):
+        if table in table_names:
+            with engine.begin() as conn:
+                for old, new in LEGACY_RESOURCE_TYPE_NAMES.items():
+                    conn.execute(text(f"UPDATE {table} SET name = :new WHERE name = :old"), {"old": old, "new": new})
+
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
         if "architecture_manual" not in complaint_columns:

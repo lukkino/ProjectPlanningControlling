@@ -193,7 +193,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
             <tr>
               <th style={{ minWidth: 180 }}>Tipologia di risorsa (DEV)</th>
               <th className="text-right">N. risorse</th>
-              <th className="text-right">Ore effettive / giorno</th>
+              <th className="text-right">Ore produttive / giorno</th>
               <th className="text-right">Ore disponibili per risorsa</th>
               <th className="text-right">Ore disponibili</th>
               <th />

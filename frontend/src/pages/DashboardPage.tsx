@@ -41,6 +41,11 @@ const COMPLETION_HELP =
   "nell'Andamento e nel Forecasting. Non contano le story senza sviluppi né le attività di servizio.\n\n" +
   "Se c'è almeno uno snapshot nell'Andamento, il valore è quello dell'ultimo snapshot."
 
+const HOURS_HELP =
+  'Ore usate: le ore consuntivate (controlling), inserite nel Consumo risorse dei progetti. Con progetti collegati ' +
+  "sono la somma dei loro ultimi Actual ore; altrimenti vengono dall'ultimo snapshot dell'Andamento.\n\n" +
+  'Da non confondere con le Ore Jira, loggate dagli sviluppatori sulle issue: sono solo una parte del lavoro.'
+
 const SPI_HELP =
   "SPI (Schedule Performance Index): % di completamento del backlog diviso % di tempo trascorso dall'inizio al code freeze.\n\n" +
   '• SPI < 1: in ritardo, il lavoro completato è meno del tempo già passato (es. 0,8 = si va all\'80% del ritmo necessario).\n' +
@@ -469,8 +474,8 @@ export function DashboardPage() {
         : null,
     }))
 
-  // Ore effettive dagli snapshot di Andamento (actual_hours = "Actual
-  // (PowerBI)", logged_hours = "Actual logged") nel tempo.
+  // Ore dagli snapshot di Andamento nel tempo: actual_hours = "Ore usate"
+  // (consuntivate), logged_hours = "Ore Jira" (loggate sulle issue).
 
   let hoursChartData: { x: number; actualHours: number | null; actualLogged: number | null }[] = []
   if (startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch) {
@@ -541,7 +546,12 @@ export function DashboardPage() {
           </div>
           <div className="stat">
             <span className="value">{metrics?.logged_hours_total ?? 0} h</span>
-            <span className="label">Ore usate</span>
+            <span className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              Ore usate
+              <span className="info-icon" title={HOURS_HELP} aria-label={HOURS_HELP}>
+                i
+              </span>
+            </span>
             {metrics?.percent_budget_used != null && (
               <span
                 style={{ fontSize: 13 }}
@@ -596,7 +606,7 @@ export function DashboardPage() {
       <PhasesCard projectId={project.id} currentStatus={project.status} />
 
       <div className="card">
-        <h3>Ore Usate nel Tempo</h3>
+        <h3>Ore usate nel tempo</h3>
         {hoursChartData.length === 0 ? (
           <p className="muted">
             Servono la data di inizio increment e la data di code freeze (scheda increment) per tracciare le ore nel
@@ -620,7 +630,7 @@ export function DashboardPage() {
                 <Line
                   type="monotone"
                   dataKey="actualHours"
-                  name="Actual (PowerBI) (h)"
+                  name="Ore usate (h)"
                   stroke={COLOR_ACTUAL_HOURS}
                   strokeWidth={2}
                   dot={{ r: 4 }}
@@ -629,7 +639,7 @@ export function DashboardPage() {
                 <Line
                   type="monotone"
                   dataKey="actualLogged"
-                  name="Actual logged (dev+test)"
+                  name="Ore Jira (h)"
                   stroke={COLOR_ACTUAL_LOGGED}
                   strokeWidth={2}
                   dot={{ r: 4 }}
@@ -717,10 +727,10 @@ export function DashboardPage() {
         points={planVsActualPoints(backlogItems, (i) => [i.planned_duration_days, workingDaysBetween(i.actual_start, i.actual_finish)])}
       />
       <PlanVsActualCard
-        title="Ore stimate vs Ore loggate"
-        description="Per ogni PBI in scope: Ore stimate (Developer Effort da Jira, solo Story) e Ore loggate, con lo scostamento Ore loggate - Ore stimate."
-        emptyMessage="Nessun PBI con sia le Ore stimate sia le Ore loggate."
-        labels={{ planned: 'Ore stimate', actual: 'Ore loggate', unit: 'h' }}
+        title="Ore stimate vs Ore Jira"
+        description="Per ogni PBI in scope: Ore stimate (Developer Effort da Jira, solo Story) e Ore Jira (loggate sull'issue), con lo scostamento Ore Jira - Ore stimate."
+        emptyMessage="Nessun PBI con sia le Ore stimate sia le Ore Jira."
+        labels={{ planned: 'Ore stimate', actual: 'Ore Jira', unit: 'h' }}
         points={planVsActualPoints(backlogItems, (i) => [i.dev_effort_hours, i.logged_hours])}
       />
     </div>

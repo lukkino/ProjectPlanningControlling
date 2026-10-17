@@ -211,7 +211,18 @@ class IncrementBudgetLine(Base):
 # Tipologie di risorsa di default del Calcolatore ore di un progetto: create
 # alla creazione del progetto (e, una tantum, per quelli gia' esistenti - vedi
 # run_lightweight_migrations), poi liberamente modificabili.
-DEFAULT_RESOURCE_TYPES = ["PJM", "Dev", "Tester", "System Tester"]
+# Sono anche le voci della ripartizione dell'Actual ore (vedi
+# routers/increments.py, ACTUAL_SPLIT_NAMES): stessi nomi, cosi' budget e
+# actual si confrontano ruolo per ruolo.
+DEFAULT_RESOURCE_TYPES = ["Project Management", "Develop", "Testing", "System Testing"]
+# Nomi usati prima dell'unificazione, rinominati una tantum nei dati
+# esistenti (vedi database.run_lightweight_migrations).
+LEGACY_RESOURCE_TYPE_NAMES = {
+    "PJM": "Project Management",
+    "Dev": "Develop",
+    "Tester": "Testing",
+    "System Tester": "System Testing",
+}
 
 
 class IncrementResourceType(Base):
