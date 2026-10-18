@@ -34,8 +34,8 @@ const WEEK_ROW_HEIGHT = 20
 const HEADER_HEIGHT = MONTH_BAND_HEIGHT + WEEK_ROW_HEIGHT
 // Riga del calendario con i nomi di Code Freeze e fasi, sopra le loro linee.
 const MARK_ROW_HEIGHT = 16
-// Larghezza stimata di un carattere delle etichette (11px, grassetto), per
-// capire quando due etichette vicine si sovrapporrebbero.
+// Larghezza stimata di un carattere delle etichette (11px, grassetto): solo
+// se il browser non sa misurare il testo (vedi markTextWidth).
 const MARK_CHAR_WIDTH = 6.5
 // Come sopra, per il summary scritto sopra le barre (11px): stima larga,
 // cosi' il calendario si allunga abbastanza da non tagliarlo.
@@ -45,6 +45,17 @@ const COLOR_PHASE = '#7c4dbd'
 // calendario (anche nel PNG esportato, che mostra il giorno dell'export).
 const COLOR_TODAY = '#d3402f'
 const TODAY_LABEL = 'Today'
+
+// Larghezza reale di un'etichetta del calendario (11px, con il font della
+// pagina), per capire quando due etichette vicine si sovrapporrebbero: una
+// stima per carattere sbaglia con nomi lunghi o pieni di lettere larghe.
+let measureContext: CanvasRenderingContext2D | null | undefined
+function markTextWidth(text: string, fontWeight: number) {
+  if (measureContext === undefined) measureContext = document.createElement('canvas').getContext('2d')
+  if (!measureContext) return text.length * MARK_CHAR_WIDTH
+  measureContext.font = `${fontWeight} 11px ${getComputedStyle(document.body).fontFamily}`
+  return Math.ceil(measureContext.measureText(text).width)
+}
 // Lato massimo dell'immagine esportata: oltre, i browser rifiutano il canvas.
 const EXPORT_MAX_SIDE = 16000
 
@@ -293,16 +304,17 @@ export function BacklogGanttChart({
   const ticks = buildWeekTicks(minDay, maxDay)
   const monthBands = buildMonthBands(minDay, maxDay)
 
-  // Etichetta a destra della linea (a sinistra a fine calendario, dove a
-  // destra non ci starebbe); se toccherebbe quella prima va sulla riga sotto.
-  // "Today" e' centrata sulla sua linea e partecipa allo stesso calcolo,
-  // cosi' non si sovrappone a Code Freeze e fasi vicine.
-  const todayLabelWidth = TODAY_LABEL.length * MARK_CHAR_WIDTH + 8
+  // Etichetta (nomi e data, sempre visibili) a destra della linea, o a
+  // sinistra dove a fine calendario non ci starebbe; se toccherebbe quella
+  // prima va sulla riga sotto. "Today" e' centrata sulla sua linea e
+  // partecipa allo stesso calcolo, cosi' non si sovrappone a Code Freeze e
+  // fasi vicine.
+  const todayLabelWidth = markTextWidth(TODAY_LABEL, 700) + 8
   const todaySlot = { start: dayToX(todayDay) - todayLabelWidth / 2, width: todayLabelWidth, lane: 0 }
   const marks = markDays.map((day) => {
-    const label = namesByDay.get(day)!.join(' · ')
-    const width = label.length * MARK_CHAR_WIDTH
-    const alignRight = day > maxDay - 8
+    const label = `${namesByDay.get(day)!.join(' · ')} ${formatEpochDaysAsDate(day)}`
+    const width = markTextWidth(label, 600)
+    const alignRight = dayToX(day) + 6 + width > chartWidth
     return {
       day,
       label,
@@ -509,7 +521,7 @@ export function BacklogGanttChart({
               {marks.map((mark) => (
                 <div
                   key={mark.day}
-                  title={`${mark.label} ${formatEpochDaysAsDate(mark.day)}`}
+                  title={mark.label}
                   style={{
                     position: 'absolute',
                     top: HEADER_HEIGHT + mark.lane * MARK_ROW_HEIGHT,
@@ -631,7 +643,7 @@ export function BacklogGanttChart({
                   {marks.map((mark) => (
                     <div
                       key={mark.day}
-                      title={`${mark.label} ${formatEpochDaysAsDate(mark.day)}`}
+                      title={mark.label}
                       style={{
                         position: 'absolute',
                         left: dayToX(mark.day),
