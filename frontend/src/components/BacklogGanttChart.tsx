@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import { toPng } from 'html-to-image'
 import type { BacklogItem } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
@@ -17,8 +17,9 @@ const COLOR_IN_PROGRESS = '#d3402f'
 const activityFill = (color: string) =>
   `repeating-linear-gradient(135deg, ${color} 0 4px, color-mix(in srgb, ${color} 35%, white) 4px 8px)`
 
-const DAY_WIDTH = 22
 const LABEL_COLUMN_WIDTH = 110
+// Barre di un giorno ancora visibili con lo zoom al minimo.
+const MIN_BAR_WIDTH = 3
 const ROW_HEIGHT = 60
 const BAR_HEIGHT = 14
 // Distanza della barra "Pianificato" dal bordo superiore della riga.
@@ -41,6 +42,8 @@ const MARK_CHAR_WIDTH = 6.5
 // cosi' il calendario si allunga abbastanza da non tagliarlo.
 const LABEL_CHAR_WIDTH = 6.5
 const COLOR_PHASE = '#7c4dbd'
+// Sabato e domenica con lo zoom sui giorni.
+const COLOR_WEEKEND = 'color-mix(in srgb, var(--border) 30%, transparent)'
 // Linea di oggi: rossa piena, con l'etichetta "Today" su sfondo rosso nel
 // calendario (anche nel PNG esportato, che mostra il giorno dell'export).
 const COLOR_TODAY = '#d3402f'
@@ -63,9 +66,24 @@ const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
 ]
+const WEEKDAY_NAMES = ['Do', 'Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa']
 
-type Tick = { day: number; label: string }
-type MonthBand = { day: number; width: number; label: string }
+// Zoom: larghezza in pixel di un giorno. I pulsanti +/- (e Ctrl + rotellina)
+// la moltiplicano/dividono per ZOOM_STEP; il calendario cambia scala da solo
+// (vedi buildScale) da giorni singoli fino a trimestri e anni.
+// Solo per il primo render: subito dopo si passa a "Oggi ±2 settimane",
+// che dipende dalla larghezza della vista.
+const DEFAULT_DAY_WIDTH = 22
+const MIN_DAY_WIDTH = 0.4
+const MAX_DAY_WIDTH = 60
+const ZOOM_STEP = 1.5
+// Giorni mostrati prima e dopo oggi dallo zoom "Oggi ±2 settimane".
+const STANDARD_ZOOM_DAYS = 14
+const clampDayWidth = (width: number) => Math.min(MAX_DAY_WIDTH, Math.max(MIN_DAY_WIDTH, width))
+
+type Unit = 'day' | 'week' | 'month' | 'quarter' | 'year'
+// Una cella del calendario: dal giorno `day` per `width` pixel.
+type Band = { day: number; width: number; label: string; weekend?: boolean }
 
 // Numero di settimana ISO 8601 (lunedi'-domenica, la settimana 1 e' quella
 // che contiene il primo giovedi' dell'anno) - lo standard usato in Italia.
@@ -79,41 +97,85 @@ function isoWeekNumber(date: Date): number {
   return 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000))
 }
 
-// Un tick per ogni lunedi' nel range, sempre (a qualunque estensione del
-// Gantt - tanto si scorre in orizzontale), con numero di settimana ISO e
-// data, per il massimo dettaglio richiesto.
-function buildWeekTicks(minDay: number, maxDay: number): Tick[] {
-  const ticks: Tick[] = []
-  const startDate = epochDaysToDate(minDay)
-  const dow = startDate.getUTCDay() // 0=domenica..6=sabato
-  const offsetToMonday = dow === 0 ? 1 : (8 - dow) % 7
-  for (let day = minDay + offsetToMonday; day <= maxDay; day += 7) {
-    const label = `S${isoWeekNumber(epochDaysToDate(day))} · ${formatEpochDaysAsDate(day).slice(0, 5)}`
-    ticks.push({ day, label })
-  }
-  return ticks
+// Primo giorno dell'unita' (giorno, settimana da lunedi', mese, trimestre,
+// anno) che contiene `day`, e primo giorno dell'unita' successiva.
+function unitStart(day: number, unit: Unit): number {
+  const date = epochDaysToDate(day)
+  const y = date.getUTCFullYear()
+  const m = date.getUTCMonth()
+  if (unit === 'day') return day
+  if (unit === 'week') return day - ((date.getUTCDay() + 6) % 7)
+  if (unit === 'month') return toEpochDays(new Date(Date.UTC(y, m, 1)))
+  if (unit === 'quarter') return toEpochDays(new Date(Date.UTC(y, m - (m % 3), 1)))
+  return toEpochDays(new Date(Date.UTC(y, 0, 1)))
+}
+function unitNext(start: number, unit: Unit): number {
+  const date = epochDaysToDate(start)
+  const y = date.getUTCFullYear()
+  const m = date.getUTCMonth()
+  if (unit === 'day') return start + 1
+  if (unit === 'week') return start + 7
+  if (unit === 'month') return toEpochDays(new Date(Date.UTC(y, m + 1, 1)))
+  if (unit === 'quarter') return toEpochDays(new Date(Date.UTC(y, m + 3, 1)))
+  return toEpochDays(new Date(Date.UTC(y + 1, 0, 1)))
 }
 
-// Una fascia per ogni mese coperto dal range, per dare contesto sopra le
-// settimane (prima e ultima fascia troncate a minDay/maxDay se il mese e'
-// solo parzialmente coperto).
-function buildMonthBands(minDay: number, maxDay: number): MonthBand[] {
-  const bands: MonthBand[] = []
-  const startDate = epochDaysToDate(minDay)
-  let monthStart = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1))
-  let bandStartDay = minDay
-  while (toEpochDays(monthStart) <= maxDay) {
-    const nextMonthStart = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1))
-    const bandEndDay = Math.min(toEpochDays(nextMonthStart) - 1, maxDay)
-    bands.push({
-      day: bandStartDay,
-      width: (bandEndDay - bandStartDay + 1) * DAY_WIDTH,
-      label: `${MONTH_NAMES[monthStart.getUTCMonth()]} ${monthStart.getUTCFullYear()}`,
-    })
-    bandStartDay = toEpochDays(nextMonthStart)
-    monthStart = nextMonthStart
+// Una cella per ogni unita' coperta dal range (prima e ultima troncate a
+// minDay/maxDay se coperte solo in parte); l'etichetta e' calcolata sul primo
+// giorno dell'unita' intera.
+function buildBands(minDay: number, maxDay: number, unit: Unit, dayWidth: number, label: (start: number) => string): Band[] {
+  const bands: Band[] = []
+  for (let start = unitStart(minDay, unit); start <= maxDay; start = unitNext(start, unit)) {
+    const from = Math.max(start, minDay)
+    const to = Math.min(unitNext(start, unit) - 1, maxDay)
+    const dow = epochDaysToDate(start).getUTCDay()
+    bands.push({ day: from, width: (to - from + 1) * dayWidth, label: label(start), weekend: unit === 'day' && (dow === 0 || dow === 6) })
   }
   return bands
+}
+
+// Le due righe del calendario secondo lo zoom: sopra il contesto (mesi o
+// anni), sotto il dettaglio (giorni, settimane, mesi o trimestri), con
+// etichette scelte per stare nella larghezza delle celle.
+function buildScale(minDay: number, maxDay: number, dayWidth: number) {
+  const monthLabel = (start: number) => {
+    const d = epochDaysToDate(start)
+    return `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  }
+  const yearLabel = (start: number) => String(epochDaysToDate(start).getUTCFullYear())
+  if (dayWidth >= 32) {
+    return {
+      name: 'Giorni',
+      top: buildBands(minDay, maxDay, 'month', dayWidth, monthLabel),
+      bottom: buildBands(minDay, maxDay, 'day', dayWidth, (d) => `${WEEKDAY_NAMES[epochDaysToDate(d).getUTCDay()]} ${epochDaysToDate(d).getUTCDate()}`),
+    }
+  }
+  if (dayWidth >= 5) {
+    const withDate = dayWidth >= 12
+    return {
+      name: 'Settimane',
+      top: buildBands(minDay, maxDay, 'month', dayWidth, monthLabel),
+      bottom: buildBands(minDay, maxDay, 'week', dayWidth, (d) =>
+        withDate ? `S${isoWeekNumber(epochDaysToDate(d))} · ${formatEpochDaysAsDate(d).slice(0, 5)}` : `S${isoWeekNumber(epochDaysToDate(d))}`,
+      ),
+    }
+  }
+  if (dayWidth >= 1.6) {
+    const longNames = dayWidth * 30 >= 80
+    return {
+      name: 'Mesi',
+      top: buildBands(minDay, maxDay, 'year', dayWidth, yearLabel),
+      bottom: buildBands(minDay, maxDay, 'month', dayWidth, (d) => {
+        const name = MONTH_NAMES[epochDaysToDate(d).getUTCMonth()]
+        return longNames ? name : name.slice(0, 3)
+      }),
+    }
+  }
+  return {
+    name: 'Trimestri',
+    top: buildBands(minDay, maxDay, 'year', dayWidth, yearLabel),
+    bottom: buildBands(minDay, maxDay, 'quarter', dayWidth, (d) => `T${Math.floor(epochDaysToDate(d).getUTCMonth() / 3) + 1}`),
+  }
 }
 
 type Props = {
@@ -268,26 +330,97 @@ export function BacklogGanttChart({
   const markDays = [...namesByDay.keys()].sort((a, b) => a - b)
   const rangeDays = [...allDays, todayDay, ...markDays]
   const minDay = Math.min(...rangeDays) - 2
-  // Il summary parte dall'inizio della barra e puo' essere piu' lungo di
-  // quanto resta fino all'ultima data: il calendario si allunga dei giorni
-  // che servono a leggerlo per intero.
-  const labelEndDays = items.map((item) => {
-    const anchor = dateStrToEpochDays(item.planned_start) ?? dateStrToEpochDays(item.actual_start)
-    if (anchor === null) return 0
-    return anchor + Math.ceil(((item.summary ?? item.jira_key).length * LABEL_CHAR_WIDTH + 8) / DAY_WIDTH)
-  })
-  const maxDay = Math.max(Math.max(...rangeDays) + 2, ...labelEndDays)
+  const rangeMaxDay = Math.max(...rangeDays) + 2
 
-  // All'apertura del Gantt la vista e' centrata su oggi, invece di partire
-  // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
-  // mostrare: dopo, lo scroll resta dove l'ha lasciato l'utente (calendario
-  // e barra "specchio" seguono da soli, via onScroll).
-  const hasDates = allDays.length > 0
-  useLayoutEffect(() => {
+  // Zoom. "Intero progetto" (fit) adatta la larghezza del giorno perche'
+  // tutto il range stia nella vista; un qualsiasi altro zoom lo annulla.
+  const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH)
+  const [fit, setFit] = useState(false)
+  // Giorno da tenere fermo nello stesso punto della vista dopo il cambio di
+  // zoom (il centro, o il puntatore con Ctrl + rotellina): applicato dopo il
+  // render, quando la nuova larghezza e' in pagina.
+  const zoomAnchorRef = useRef<{ day: number; offset: number } | null>(null)
+  // Contatore delle richieste di zoom: l'ancora va applicata anche quando la
+  // larghezza non cambia (es. "Oggi ±2 settimane" dopo aver scorso altrove).
+  const [zoomRequest, setZoomRequest] = useState(0)
+  const zoomTo = (width: number, offset?: number) => {
     const wrap = wrapRef.current
     if (!wrap) return
-    wrap.scrollLeft = (todayDay - minDay + 0.5) * DAY_WIDTH - wrap.clientWidth / 2
+    const at = offset ?? wrap.clientWidth / 2
+    // Piu' eventi della rotellina prima del render: resta l'ancora del primo.
+    if (!zoomAnchorRef.current) zoomAnchorRef.current = { day: minDay + (wrap.scrollLeft + at) / dayWidth, offset: at }
+    setDayWidth(clampDayWidth(width))
+    setFit(false)
+    setZoomRequest((n) => n + 1)
+  }
+  const fitToProject = () => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    zoomAnchorRef.current = { day: minDay, offset: 0 }
+    // -2: senza arrotondamenti che farebbero comparire la barra di scroll.
+    setDayWidth(clampDayWidth((wrap.clientWidth - 2) / (rangeMaxDay - minDay + 1)))
+    setFit(true)
+    setZoomRequest((n) => n + 1)
+  }
+  // Zoom "standard": le 2 settimane prima e dopo oggi riempiono la vista,
+  // con oggi al centro.
+  const zoomAroundToday = () => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    zoomAnchorRef.current = { day: todayDay + 0.5, offset: wrap.clientWidth / 2 }
+    setDayWidth(clampDayWidth((wrap.clientWidth - 2) / (2 * STANDARD_ZOOM_DAYS + 1)))
+    setFit(false)
+    setZoomRequest((n) => n + 1)
+  }
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current
+    const anchor = zoomAnchorRef.current
+    zoomAnchorRef.current = null
+    if (wrap && anchor) wrap.scrollLeft = (anchor.day - minDay) * dayWidth - anchor.offset
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomRequest])
+  // Ctrl + rotellina (o pinch sul touchpad) zooma attorno al puntatore invece
+  // di zoomare la pagina: serve un listener non passivo per preventDefault.
+  const zoomToRef = useRef(zoomTo)
+  zoomToRef.current = zoomTo
+  const dayWidthRef = useRef(dayWidth)
+  dayWidthRef.current = dayWidth
+
+  // Il summary parte dall'inizio della barra e puo' essere piu' lungo di
+  // quanto resta fino all'ultima data: il calendario si allunga dei giorni
+  // che servono a leggerlo per intero. Non con "Intero progetto" ne' a scale
+  // larghe (mesi, trimestri), dove allungherebbe il calendario di mesi: li'
+  // il summary si tronca (testo completo nel tooltip).
+  const extendForLabels = !fit && dayWidth >= 5
+  const labelEndDays = extendForLabels
+    ? items.map((item) => {
+        const anchor = dateStrToEpochDays(item.planned_start) ?? dateStrToEpochDays(item.actual_start)
+        if (anchor === null) return 0
+        return anchor + Math.ceil(((item.summary ?? item.jira_key).length * LABEL_CHAR_WIDTH + 8) / dayWidth)
+      })
+    : []
+  const maxDay = Math.max(rangeMaxDay, ...labelEndDays)
+
+  // All'apertura il Gantt parte dallo zoom "Oggi ±2 settimane", invece che
+  // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
+  // mostrare: dopo, zoom e scroll restano dove li ha lasciati l'utente
+  // (calendario e barra "specchio" seguono da soli, via onScroll).
+  const hasDates = allDays.length > 0
+  useLayoutEffect(() => {
+    if (hasDates) zoomAroundToday()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDates])
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || !wrapRef.current) return
+      e.preventDefault()
+      const offset = e.clientX - wrapRef.current.getBoundingClientRect().left
+      zoomToRef.current(dayWidthRef.current * Math.exp(-e.deltaY * 0.002), offset)
+    }
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
   }, [hasDates])
 
   if (!hasDates) {
@@ -299,10 +432,9 @@ export function BacklogGanttChart({
     )
   }
 
-  const chartWidth = (maxDay - minDay + 1) * DAY_WIDTH
-  const dayToX = (day: number) => (day - minDay) * DAY_WIDTH
-  const ticks = buildWeekTicks(minDay, maxDay)
-  const monthBands = buildMonthBands(minDay, maxDay)
+  const chartWidth = (maxDay - minDay + 1) * dayWidth
+  const dayToX = (day: number) => (day - minDay) * dayWidth
+  const scale = buildScale(minDay, maxDay, dayWidth)
 
   // Etichetta (nomi e data, sempre visibili) a destra della linea, o a
   // sinistra dove a fine calendario non ci starebbe; se toccherebbe quella
@@ -310,7 +442,9 @@ export function BacklogGanttChart({
   // partecipa allo stesso calcolo, cosi' non si sovrappone a Code Freeze e
   // fasi vicine.
   const todayLabelWidth = markTextWidth(TODAY_LABEL, 700) + 8
-  const todaySlot = { start: dayToX(todayDay) - todayLabelWidth / 2, width: todayLabelWidth, lane: 0 }
+  // Dentro il calendario anche quando oggi e' vicino a un suo bordo.
+  const todayLabelStart = Math.min(Math.max(0, dayToX(todayDay) - todayLabelWidth / 2), chartWidth - todayLabelWidth)
+  const todaySlot = { start: todayLabelStart, width: todayLabelWidth, lane: 0 }
   const marks = markDays.map((day) => {
     const label = `${namesByDay.get(day)!.join(' · ')} ${formatEpochDaysAsDate(day)}`
     const width = markTextWidth(label, 600)
@@ -351,7 +485,7 @@ export function BacklogGanttChart({
       const pStart = dateStrToEpochDays(predecessor.planned_start)
       const pEnd = dateStrToEpochDays(predecessor.expected_finish)
       if (pStart === null || pEnd === null) return []
-      const x1 = dayToX(Math.max(pStart, pEnd)) + DAY_WIDTH
+      const x1 = dayToX(Math.max(pStart, pEnd)) + dayWidth
       const y1 = barCenterY(predecessorRow)
       const x2 = dayToX(sStart)
       const y2 = barCenterY(successorRow)
@@ -432,6 +566,37 @@ export function BacklogGanttChart({
           </span>
         )}
         <span className="gantt-no-export" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            className="muted"
+            style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+            title="Zoom: anche con Ctrl + rotellina del mouse sul Gantt"
+          >
+            Zoom: {scale.name}
+            <button
+              className="btn"
+              disabled={dayWidth <= MIN_DAY_WIDTH}
+              onClick={() => zoomTo(dayWidth / ZOOM_STEP)}
+              title="Riduci lo zoom: verso mesi, trimestri e anni"
+              aria-label="Riduci lo zoom"
+            >
+              −
+            </button>
+            <button
+              className="btn"
+              disabled={dayWidth >= MAX_DAY_WIDTH}
+              onClick={() => zoomTo(dayWidth * ZOOM_STEP)}
+              title="Aumenta lo zoom: verso i singoli giorni"
+              aria-label="Aumenta lo zoom"
+            >
+              +
+            </button>
+            <button className="btn" onClick={zoomAroundToday} title="Zoom standard: 2 settimane prima e dopo oggi, con oggi al centro">
+              Oggi ±2 settimane
+            </button>
+            <button className="btn" disabled={fit} onClick={fitToProject} title="Adatta lo zoom per vedere tutto il progetto">
+              Intero progetto
+            </button>
+          </span>
           {exportError && <span style={{ color: 'var(--danger)' }}>Export non riuscito: {exportError}</span>}
           <button className="btn" disabled={exporting} onClick={exportPng} title="Scarica tutto il Gantt come immagine PNG">
             {exporting ? 'Esportazione…' : 'Esporta PNG'}
@@ -467,7 +632,7 @@ export function BacklogGanttChart({
                   borderBottom: '1px solid var(--border)',
                 }}
               >
-                {monthBands.map((band) => (
+                {scale.top.map((band) => (
                   <div
                     key={band.day}
                     className="muted"
@@ -500,21 +665,29 @@ export function BacklogGanttChart({
                   borderBottom: '1px solid var(--border)',
                 }}
               >
-                {ticks.map((t) => (
+                {scale.bottom.map((band) => (
                   <div
-                    key={t.day}
+                    key={band.day}
                     className="muted"
+                    title={band.label}
                     style={{
                       position: 'absolute',
-                      left: dayToX(t.day) + 3,
-                      top: 4,
+                      left: dayToX(band.day),
+                      width: band.width,
+                      top: 0,
+                      height: '100%',
+                      lineHeight: `${WEEK_ROW_HEIGHT}px`,
                       fontSize: 11,
                       whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'clip',
+                      textAlign: scale.name === 'Giorni' ? 'center' : undefined,
                       borderLeft: '1px solid var(--border)',
-                      paddingLeft: 3,
+                      paddingLeft: scale.name === 'Giorni' ? 0 : 3,
+                      background: band.weekend ? COLOR_WEEKEND : undefined,
                     }}
                   >
-                    {t.label}
+                    {band.label}
                   </div>
                 ))}
               </div>
@@ -623,6 +796,26 @@ export function BacklogGanttChart({
           }}
         >
           <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
+            {/* Griglia (una linea per cella del calendario, weekend in grigio
+                con lo zoom sui giorni): un solo strato sotto tutte le righe,
+                invece di ripeterla in ognuna (con i giorni sarebbero migliaia
+                di elementi). */}
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {scale.bottom.map((band) => (
+                <div
+                  key={band.day}
+                  style={{
+                    position: 'absolute',
+                    left: dayToX(band.day),
+                    width: band.width,
+                    top: 0,
+                    bottom: 0,
+                    borderLeft: '1px solid #f0f0f0',
+                    background: band.weekend ? COLOR_WEEKEND : undefined,
+                  }}
+                />
+              ))}
+            </div>
             {items.map((item, row) => {
               const pStart = dateStrToEpochDays(item.planned_start)
               const pEnd = dateStrToEpochDays(item.expected_finish)
@@ -634,12 +827,6 @@ export function BacklogGanttChart({
               return (
                 <Fragment key={item.id}>
                 <div className="gantt-timeline-row" style={{ height: ROW_HEIGHT }}>
-                  {ticks.map((t) => (
-                    <div
-                      key={t.day}
-                      style={{ position: 'absolute', left: dayToX(t.day), top: 0, bottom: 0, borderLeft: '1px solid #f0f0f0' }}
-                    />
-                  ))}
                   {marks.map((mark) => (
                     <div
                       key={mark.day}
@@ -665,8 +852,9 @@ export function BacklogGanttChart({
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        maxWidth: Math.max(60, chartWidth - dayToX(labelAnchor) - 6),
+                        maxWidth: Math.max(0, chartWidth - dayToX(labelAnchor) - 6),
                       }}
+                      title={label}
                     >
                       {label}
                     </div>
@@ -678,7 +866,7 @@ export function BacklogGanttChart({
                       style={{
                         position: 'absolute',
                         left: dayToX(pStart),
-                        width: Math.max(DAY_WIDTH, dayToX(pEnd) - dayToX(pStart) + DAY_WIDTH),
+                        width: Math.max(MIN_BAR_WIDTH, dayToX(pEnd) - dayToX(pStart) + dayWidth),
                         top: PLANNED_BAR_TOP,
                         height: BAR_HEIGHT,
                         background: item.is_activity ? activityFill(COLOR_PLANNED) : COLOR_PLANNED,
@@ -693,7 +881,7 @@ export function BacklogGanttChart({
                       style={{
                         position: 'absolute',
                         left: dayToX(aStart),
-                        width: Math.max(DAY_WIDTH, dayToX(aEnd) - dayToX(aStart) + DAY_WIDTH),
+                        width: Math.max(MIN_BAR_WIDTH, dayToX(aEnd) - dayToX(aStart) + dayWidth),
                         top: 22 + BAR_HEIGHT + 4,
                         height: BAR_HEIGHT,
                         background: item.is_activity ? activityFill(COLOR_ACTUAL) : COLOR_ACTUAL,
@@ -711,7 +899,7 @@ export function BacklogGanttChart({
                       style={{
                         position: 'absolute',
                         left: dayToX(aStart),
-                        width: Math.max(DAY_WIDTH, dayToX(Math.max(aStart, todayDay)) - dayToX(aStart) + DAY_WIDTH),
+                        width: Math.max(MIN_BAR_WIDTH, dayToX(Math.max(aStart, todayDay)) - dayToX(aStart) + dayWidth),
                         top: 22 + BAR_HEIGHT + 4,
                         height: BAR_HEIGHT,
                         background: `linear-gradient(to right, ${COLOR_IN_PROGRESS} 0%, ${COLOR_IN_PROGRESS} 70%, transparent 100%)`,
