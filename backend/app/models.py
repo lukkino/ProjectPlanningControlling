@@ -1,4 +1,5 @@
 import datetime as dt
+import re
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -380,6 +381,18 @@ class IncrementSnapshotValueEntry(Base):
     hours: Mapped[float] = mapped_column(Float, default=0)
 
     value: Mapped["IncrementSnapshotValue"] = relationship(back_populates="entries")
+
+
+# Bug di vulnerabilita' (es. "[CVE-2026-9256] The remote Red Hat host is
+# missing..."): in scope, ma di norma senza impatto sul code freeze. Il sync
+# li crea con included_in_codefreeze=False (vedi routers/backlog.py); il flag
+# resta modificabile a mano. Stessa regola di isCveBug in
+# frontend/src/pages/BacklogPage.tsx.
+CVE_PATTERN = re.compile(r"\bCVE\b", re.IGNORECASE)
+
+
+def is_cve_bug(issue_type: str | None, summary: str | None) -> bool:
+    return (issue_type or "").lower() == "bug" and bool(CVE_PATTERN.search(summary or ""))
 
 
 class BacklogItem(Base):

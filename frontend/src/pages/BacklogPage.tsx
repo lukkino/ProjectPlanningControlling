@@ -45,6 +45,12 @@ function formatDateTime(value: string | null): string | null {
 // non corrisponde piu' a priority_order.
 const STATUS_SORT_RANK: Record<string, number> = { Done: 0, 'In Progress': 1, 'To Do': 2 }
 
+// Bug di vulnerabilita' (es. "[CVE-2026-9256] The remote Red Hat host is
+// missing..."): in scope, ma di norma non impattano il code freeze, quindi
+// nascosti di default dal filtro "Nascondi bug CVE".
+const CVE_PATTERN = /\bCVE\b/i
+const isCveBug = (i: BacklogItem) => i.issue_type?.toLowerCase() === 'bug' && CVE_PATTERN.test(i.summary ?? '')
+
 // v2: "Durata effettiva" spostata accanto a "Sizing (gg)". Un ordine gia'
 // salvato con la v1 viene migrato riposizionando solo quella colonna, cosi'
 // il resto dell'ordine personalizzato si conserva.
@@ -120,6 +126,7 @@ export function BacklogPage() {
   const [onlyInScope, setOnlyInScope] = useState(true)
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [hideDone, setHideDone] = useState(true)
+  const [hideCve, setHideCve] = useState(true)
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   // Gantt: di default tutti gli item; il filtro sulla finestra di forecast
@@ -882,11 +889,14 @@ export function BacklogPage() {
     })
   }
 
+  const cveCount = (items ?? []).filter(isCveBug).length
+
   const visibleItems = (items ?? []).filter(
     (i) =>
       (!onlyInScope || i.in_scope) &&
       (!onlyCodefreeze || i.included_in_codefreeze || i.is_activity) &&
       (!hideDone || i.status !== 'Done') &&
+      (!hideCve || !isCveBug(i)) &&
       (!i.issue_type || !hiddenTypes.has(i.issue_type)),
   )
 
@@ -1125,6 +1135,14 @@ export function BacklogPage() {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} />
           Nascondi item "Done"
+        </label>
+
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title="Bug con CVE nel summary: in scope, ma di norma non impattano il code freeze"
+        >
+          <input type="checkbox" checked={hideCve} onChange={(e) => setHideCve(e.target.checked)} />
+          Nascondi bug CVE ({cveCount})
         </label>
 
         <label

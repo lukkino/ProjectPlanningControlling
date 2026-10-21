@@ -172,6 +172,8 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
                 actual_start=issue.actual_start,
                 actual_finish=issue.actual_finish,
                 last_synced_at=now,
+                # Solo alla creazione: dopo, il flag e' dell'utente.
+                included_in_codefreeze=not models.is_cve_bug(issue.issue_type, issue.summary),
             )
             db.add(item)
             created += 1
