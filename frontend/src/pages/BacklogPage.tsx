@@ -1138,7 +1138,12 @@ export function BacklogPage() {
         </p>
       )}
 
-      {sync.isPending && <SyncProgressModal projectId={project.id} />}
+      {sync.isPending && (
+        <SyncProgressModal
+          queryKey={['backlog-sync-progress', project.id]}
+          fetchProgress={() => api.backlog.syncProgress(project.id)}
+        />
+      )}
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>

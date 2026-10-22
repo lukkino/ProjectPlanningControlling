@@ -8,6 +8,7 @@ from collections.abc import Callable
 import httpx
 
 SEARCH_PATH = "/rest/api/3/search/jql"
+APPROXIMATE_COUNT_PATH = "/rest/api/3/search/approximate-count"
 CHANGELOG_PATH = "/rest/api/3/issue/{key}/changelog"
 
 # Nome esatto (case-sensitive) dello stato Jira che segna l'inizio lavorazione
@@ -587,10 +588,32 @@ class ComplaintIssue:
         self.severity = severity
 
 
-def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> list[ComplaintIssue]:
+def _approximate_count(client: httpx.Client, base_url: str, jql: str) -> int:
+    """Numero (approssimato) di issue di una JQL, solo per dare una
+    percentuale di avanzamento: /search/jql non restituisce il totale. Se la
+    chiamata non va a buon fine si torna 0 (totale ignoto), non e' un errore
+    della sync."""
+    try:
+        response = client.post(f"{base_url}{APPROXIMATE_COUNT_PATH}", json={"jql": jql})
+        response.raise_for_status()
+        return int(response.json().get("count") or 0)
+    except (httpx.HTTPError, ValueError):
+        return 0
+
+
+def fetch_complaints(
+    base_url: str,
+    email: str,
+    api_token: str,
+    jql: str,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> list[ComplaintIssue]:
     """Issue di una JQL con i soli campi che servono all'area Complaints:
     niente changelog ne' task collegati, quindi poche chiamate anche con
-    centinaia di issue."""
+    centinaia di issue. on_progress(fase, fatti, totale) come in
+    search_issues, qui solo con la fase "search" (totale dal conteggio
+    approssimato di Jira, 0 se non disponibile)."""
+    report = on_progress or (lambda phase, done, total: None)
     if not (base_url and email and api_token):
         raise JiraClientError(
             "Integrazione Jira non configurata: compila Jira base URL, email e API token "
@@ -618,6 +641,9 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
 
     try:
         with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            report("search", 0, 0)
+            total = _approximate_count(client, base_url, jql)
+            report("search", 0, total)
             while True:
                 payload = {"jql": jql, "maxResults": 100, "fields": fields}
                 if next_page_token:
@@ -656,6 +682,9 @@ def fetch_complaints(base_url: str, email: str, api_token: str, jql: str) -> lis
                             fix_versions=[v["name"] for v in (f.get("fixVersions") or []) if v.get("name")],
                         )
                     )
+                # Il conteggio e' approssimato: il totale non scende mai
+                # sotto quanto gia' letto.
+                report("search", len(results), max(total, len(results)))
 
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):

@@ -1,5 +1,6 @@
 import datetime as dt
 import re
+from collections.abc import Callable
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,6 +47,11 @@ NON_SITE_LABELS = {
 }
 
 JIRA_BROWSE_URL = "https://inpeco.atlassian.net/browse/"
+
+# Avanzamento della sync in corso (una sola alla volta: i complaint non
+# dipendono dal progetto), letto dal popup del frontend mentre la POST di
+# sync e' in attesa. Come per il Backlog, in memoria basta.
+_sync_progress: schemas.SyncProgress | None = None
 
 # Colonne dell'export Excel: le stesse della tabella della pagina, nello
 # stesso ordine (intestazione, larghezza della colonna).
@@ -182,8 +188,26 @@ def update_complaints_settings(payload: schemas.ComplaintsSettings, db: Session 
     return schemas.ComplaintsSettings(base_jql=_base_jql(row))
 
 
+@router.get("/sync/progress", response_model=schemas.SyncProgress)
+def get_sync_progress():
+    return _sync_progress or schemas.SyncProgress(phase="idle")
+
+
 @router.post("/sync", response_model=schemas.SyncResult)
 def sync_complaints_from_jira(db: Session = Depends(get_db)):
+    global _sync_progress
+
+    def on_progress(phase: str, done: int, total: int) -> None:
+        global _sync_progress
+        _sync_progress = schemas.SyncProgress(phase=phase, done=done, total=total)
+
+    try:
+        return _sync_complaints(db, on_progress)
+    finally:
+        _sync_progress = None
+
+
+def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) -> schemas.SyncResult:
     row = _settings_row(db)
     try:
         issues = fetch_complaints(
@@ -191,9 +215,11 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
             (row.jira_email if row else None) or "",
             (row.jira_api_token if row else None) or "",
             _base_jql(row),
+            on_progress,
         )
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    on_progress("saving", len(issues), len(issues))
 
     # Una JQL sbagliata (o troppo stretta) che non trova nulla svuoterebbe la
     # tabella, perdendo gli stati Salesforce e i siti inseriti a mano: in quel

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { NavLink, Outlet } from 'react-router-dom'
 import { api } from '../api/client'
+import { SyncProgressModal } from '../components/SyncProgressModal'
 import { parseBackendDateTime } from '../lib/dates'
 
 function formatDateTime(value: string | null): string | null {
@@ -50,7 +51,10 @@ export function ComplaintsLayout() {
         </NavLink>
       </div>
 
-      {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
+      {sync.isPending && (
+        <SyncProgressModal queryKey={['complaints-sync-progress']} fetchProgress={api.complaints.syncProgress} />
+      )}
+      {sync.isError &&<div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <p className="muted" style={{ marginTop: 0 }}>
           Sync completata: {sync.data.created} nuovi complaint, {sync.data.updated} aggiornati

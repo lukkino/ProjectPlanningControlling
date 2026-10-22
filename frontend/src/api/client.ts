@@ -262,6 +262,7 @@ export const api = {
     update: (id: number, data: Partial<Pick<Complaint, 'salesforce_status' | 'architecture' | 'customer_site'>>) =>
       put<Complaint>(`/complaints/${id}`, data),
     sync: () => post<SyncResult>('/complaints/sync'),
+    syncProgress: () => request<SyncProgress>('/complaints/sync/progress'),
     // Tutti i complaint in un file Excel, con le intestazioni filtrabili.
     exportExcel: () => downloadFile('/complaints/export'),
     getSettings: () => request<ComplaintsSettings>('/complaints/settings'),
