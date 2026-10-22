@@ -14,6 +14,7 @@ import type { BacklogItem } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { StatusBadge } from '../components/StatusBadge'
+import { SyncProgressModal } from '../components/SyncProgressModal'
 import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import {
@@ -1137,6 +1138,7 @@ export function BacklogPage() {
         </p>
       )}
 
+      {sync.isPending && <SyncProgressModal projectId={project.id} />}
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>

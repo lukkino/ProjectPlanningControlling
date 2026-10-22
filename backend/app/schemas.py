@@ -289,6 +289,15 @@ class SyncResult(BaseModel):
     errors: list[str] = []
 
 
+class SyncProgress(BaseModel):
+    """Avanzamento della sync Backlog in corso: phase e' "search", "changelog",
+    "details" o "saving" (vedi search_issues), "idle" se nessuna sync gira."""
+
+    phase: str
+    done: int = 0
+    total: int = 0
+
+
 # ---------- Snapshot ----------
 
 class SnapshotBase(BaseModel):

@@ -7,9 +7,14 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.routers.settings import SETTINGS_ROW_ID
-from app.services.jira_client import JiraClientError, search_issues
+from app.services.jira_client import JiraClientError, JiraIssue, search_issues
 
 router = APIRouter(tags=["backlog"])
+
+# Avanzamento delle sync in corso, per progetto: la POST di sync resta
+# bloccante, intanto il frontend interroga la GET .../sync/progress. In
+# memoria basta: un solo processo backend, e a sync finita non serve piu'.
+_sync_progress: dict[int, schemas.SyncProgress] = {}
 
 
 def _get_project_or_404(db: Session, project_id: int) -> models.Project:
@@ -107,15 +112,34 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Il progetto non ha una JQL configurata")
 
     jira_settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+
+    def on_progress(phase: str, done: int, total: int) -> None:
+        _sync_progress[project_id] = schemas.SyncProgress(phase=phase, done=done, total=total)
+
     try:
         issues = search_issues(
             (jira_settings.jira_base_url if jira_settings else None) or "",
             (jira_settings.jira_email if jira_settings else None) or "",
             (jira_settings.jira_api_token if jira_settings else None) or "",
             project.jira_jql,
+            on_progress,
         )
+        on_progress("saving", len(issues), len(issues))
+        return _save_synced_issues(db, project_id, issues)
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        _sync_progress.pop(project_id, None)
+
+
+@router.get("/api/projects/{project_id}/backlog/sync/progress", response_model=schemas.SyncProgress)
+def get_sync_progress(project_id: int):
+    return _sync_progress.get(project_id) or schemas.SyncProgress(phase="idle")
+
+
+def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -> schemas.SyncResult:
+    """Allinea gli item del backlog alle issue lette da Jira: crea le nuove,
+    aggiorna le esistenti, rimuove quelle non piu' nella JQL."""
 
     existing = {
         item.jira_key: item

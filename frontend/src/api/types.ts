@@ -137,6 +137,13 @@ export type SyncResult = {
   errors: string[]
 }
 
+// Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
+export type SyncProgress = {
+  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving'
+  done: number
+  total: number
+}
+
 export type Snapshot = {
   id: number
   project_id: number

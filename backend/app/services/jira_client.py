@@ -3,6 +3,7 @@ from a JQL query. Only reads issues — never writes anything back to Jira.
 """
 
 import datetime as dt
+from collections.abc import Callable
 
 import httpx
 
@@ -421,7 +422,18 @@ def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> li
     return results
 
 
-def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[JiraIssue]:
+def search_issues(
+    base_url: str,
+    email: str,
+    api_token: str,
+    jql: str,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> list[JiraIssue]:
+    """on_progress(fase, fatti, totale), se passato, viene chiamato durante la
+    sync per mostrare l'avanzamento in UI. Fasi: "search" (pagine della JQL,
+    totale ancora ignoto: 0), "changelog" (una chiamata per issue, la parte
+    lenta, col totale noto), "details" (query batch dei Task collegati)."""
+    report = on_progress or (lambda phase, done, total: None)
     if not (base_url and email and api_token):
         raise JiraClientError(
             "Integrazione Jira non configurata: compila Jira base URL, email e API token "
@@ -453,11 +465,16 @@ def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[J
         DEV_EFFORT_FIELD,
     ]
 
+    raw_issues: list[dict] = []
     issues: list[JiraIssue] = []
     next_page_token: str | None = None
 
     try:
         with httpx.Client(auth=auth, timeout=30.0) as client:
+            # Prima tutte le pagine della JQL (veloci), poi i changelog: cosi'
+            # durante la parte lenta il totale e' gia' noto e l'avanzamento
+            # si puo' dare in percentuale.
+            report("search", 0, 0)
             while True:
                 payload = {"jql": jql, "maxResults": 100, "fields": fields}
                 if next_page_token:
@@ -470,50 +487,56 @@ def search_issues(base_url: str, email: str, api_token: str, jql: str) -> list[J
                     raise JiraClientError(f"JQL non valida: {response.text}")
                 response.raise_for_status()
                 data = response.json()
-
-                for raw in data.get("issues", []):
-                    f = raw.get("fields", {})
-                    key = raw.get("key", "")
-                    issue_type = (f.get("issuetype") or {}).get("name", "")
-                    time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
-                    status = (f.get("status") or {}).get("name", "")
-                    actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
-                    # La Fine eff. vale solo se l'issue e' Done adesso: una
-                    # issue riaperta (passata da Done e tornata in
-                    # lavorazione) ha ancora la vecchia chiusura nel
-                    # changelog, ma non e' conclusa.
-                    if status != DONE_STATUS:
-                        actual_finish = None
-                    parent = f.get("parent") or {}
-                    implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
-                    components = ", ".join(c.get("name", "") for c in (f.get("components") or [])) or None
-                    issues.append(
-                        JiraIssue(
-                            key=key,
-                            issue_type=issue_type,
-                            summary=f.get("summary", ""),
-                            status=status,
-                            labels=f.get("labels") or [],
-                            logged_hours=(time_spent_seconds / 3600) if time_spent_seconds is not None else None,
-                            actual_start=actual_start,
-                            actual_finish=actual_finish,
-                            parent_key=parent.get("key"),
-                            parent_summary=(parent.get("fields") or {}).get("summary"),
-                            implemented_by=implemented_by,
-                            description=_extract_description(f.get("description")),
-                            change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
-                            problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
-                            components=components,
-                            dev_effort_hours=f.get(DEV_EFFORT_FIELD),
-                        )
-                    )
+                raw_issues.extend(data.get("issues", []))
+                report("search", len(raw_issues), 0)
 
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):
                     break
 
+            total = len(raw_issues)
+            report("changelog", 0, total)
+            for index, raw in enumerate(raw_issues, start=1):
+                f = raw.get("fields", {})
+                key = raw.get("key", "")
+                issue_type = (f.get("issuetype") or {}).get("name", "")
+                time_spent_seconds = (f.get("timetracking") or {}).get("timeSpentSeconds")
+                status = (f.get("status") or {}).get("name", "")
+                actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
+                # La Fine eff. vale solo se l'issue e' Done adesso: una
+                # issue riaperta (passata da Done e tornata in
+                # lavorazione) ha ancora la vecchia chiusura nel
+                # changelog, ma non e' conclusa.
+                if status != DONE_STATUS:
+                    actual_finish = None
+                parent = f.get("parent") or {}
+                implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
+                components = ", ".join(c.get("name", "") for c in (f.get("components") or [])) or None
+                issues.append(
+                    JiraIssue(
+                        key=key,
+                        issue_type=issue_type,
+                        summary=f.get("summary", ""),
+                        status=status,
+                        labels=f.get("labels") or [],
+                        logged_hours=(time_spent_seconds / 3600) if time_spent_seconds is not None else None,
+                        actual_start=actual_start,
+                        actual_finish=actual_finish,
+                        parent_key=parent.get("key"),
+                        parent_summary=(parent.get("fields") or {}).get("summary"),
+                        implemented_by=implemented_by,
+                        description=_extract_description(f.get("description")),
+                        change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
+                        problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
+                        components=components,
+                        dev_effort_hours=f.get(DEV_EFFORT_FIELD),
+                    )
+                )
+                report("changelog", index, total)
+
             # Una sola query batch per fix version/labels/components di tutti
             # i Task collegati trovati, invece di una chiamata per task.
+            report("details", total, total)
             all_task_keys = [t["key"] for issue in issues for t in issue.implemented_by if t.get("key")]
             task_details = _fetch_task_details(client, base_url, all_task_keys)
             for issue in issues:

@@ -29,6 +29,7 @@ import type {
   ProjectDetail,
   Snapshot,
   SubProject,
+  SyncProgress,
   SyncResult,
   Team,
   TestConnectionResult,
@@ -254,6 +255,7 @@ export const api = {
       put<BacklogItem[]>(`/projects/${projectId}/backlog/bulk`, data),
     remove: (id: number) => del(`/backlog/${id}`),
     sync: (projectId: number) => post<SyncResult>(`/projects/${projectId}/backlog/sync`),
+    syncProgress: (projectId: number) => request<SyncProgress>(`/projects/${projectId}/backlog/sync/progress`),
   },
   complaints: {
     list: () => request<Complaint[]>('/complaints'),
