@@ -318,11 +318,12 @@ tbody tr:hover { background: var(--bg); }
      il totale supera lo schermo, e' .table-wrap a farla scorrere. */
 }
 .backlog-table--fixed th {
-  /* sticky (non solo relative): serve alle colonne congelate a sinistra
-     nello scroll orizzontale. In verticale la tabella scorre con la pagina
-     (niente .table-wrap--scroll), quindi l'intestazione non resta in vista. */
+  /* sticky: serve alle colonne congelate a sinistra nello scroll
+     orizzontale. In verticale la tabella scorre con la pagina (niente
+     .table-wrap--scroll): --thead-top, aggiornato da BacklogPage allo
+     scroll, tiene comunque l'intestazione in cima alla finestra. */
   position: sticky;
-  top: 0;
+  top: var(--thead-top, 0);
   z-index: 2;
   background: var(--surface);
   white-space: normal;

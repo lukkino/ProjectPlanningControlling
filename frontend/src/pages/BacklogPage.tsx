@@ -149,6 +149,31 @@ export function BacklogPage() {
   // Evita il loop infinito: sincronizzare scrollLeft da A a B scatena anche
   // l'evento onScroll di B, che altrimenti tenterebbe di risincronizzare A.
   const syncingScrollRef = useRef(false)
+
+  // Intestazione della tabella sempre in vista scorrendo la pagina. Lo sticky
+  // CSS da solo non basta: per l'overflow-x di .table-wrap si aggancia a
+  // quel contenitore (che in verticale non scorre mai), non alla pagina.
+  // Quindi il "top" delle intestazioni (--thead-top, vedi CSS) e' quanto la
+  // tabella e' gia' uscita dal bordo superiore della finestra - o da sotto la
+  // .bulk-bar, sticky anche lei in cima; il browser lo limita da se' alla fine
+  // della tabella.
+  useEffect(() => {
+    const update = () => {
+      const wrap = tableWrapRef.current
+      if (!wrap) return
+      const bulkBar = document.querySelector('.bulk-bar')
+      const stickTop = bulkBar ? Math.max(0, bulkBar.getBoundingClientRect().bottom) : 0
+      const offset = Math.max(0, stickTop - wrap.getBoundingClientRect().top)
+      wrap.style.setProperty('--thead-top', `${offset}px`)
+    }
+    update()
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [view, selectedIds.size])
   const syncScroll = (source: RefObject<HTMLDivElement | null>, target: RefObject<HTMLDivElement | null>) => {
     if (syncingScrollRef.current) {
       syncingScrollRef.current = false
