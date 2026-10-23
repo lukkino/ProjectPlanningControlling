@@ -75,6 +75,9 @@ function markTextWidth(text: string, fontWeight: number) {
 }
 // Lato massimo dell'immagine esportata: oltre, i browser rifiutano il canvas.
 const EXPORT_MAX_SIDE = 16000
+// Margine attorno all'immagine esportata e ingrandimento della legenda.
+const EXPORT_PADDING = 16
+const EXPORT_LEGEND_ZOOM = 1.6
 
 const MONTH_NAMES = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -520,9 +523,27 @@ export function BacklogGanttChart({
   return (
     <div
       ref={rootRef}
-      style={exporting ? { width: LABEL_COLUMN_WIDTH + chartWidth + 2, background: 'var(--surface)' } : undefined}
+      // Nell'export un margine attorno (altrimenti la legenda tocca il bordo
+      // dell'immagine) e la legenda piu' grande: l'immagine e' larga quanto
+      // tutto il calendario e a 12px la legenda si perdeva.
+      style={
+        exporting
+          ? { width: LABEL_COLUMN_WIDTH + chartWidth + 2, background: 'var(--surface)', padding: EXPORT_PADDING }
+          : undefined
+      }
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px 16px',
+          marginBottom: 8,
+          fontSize: 12,
+          alignItems: 'center',
+          // zoom e non fontSize: ingrandisce anche i quadratini colorati.
+          zoom: exporting ? EXPORT_LEGEND_ZOOM : undefined,
+        }}
+      >
         {Object.entries(TYPE_COLORS).map(([type, color]) => (
           <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ width: 12, height: 12, borderRadius: 3, background: color, display: 'inline-block' }} />

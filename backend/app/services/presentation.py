@@ -28,7 +28,7 @@ from pptx.enum.chart import (
     XL_MARKER_STYLE,
     XL_TICK_LABEL_POSITION,
 )
-from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR
+from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_PATTERN, MSO_THEME_COLOR
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
@@ -67,6 +67,17 @@ COLOR_GRID = RGBColor(0xE2, 0xE5, 0xEA)
 # della Dashboard generale (OverviewDashboardPage).
 COLOR_PHASE_PLANNED = RGBColor(0x2A, 0x78, 0xD6)
 COLOR_PHASE_ACTUAL = RGBColor(0xEB, 0x68, 0x34)
+# Gantt del Backlog: stessi colori di BacklogGanttChart (colore = tipo Jira;
+# attivita' di servizio a righe, blu il pianificato e arancio l'effettivo).
+GANTT_TYPE_COLORS = {
+    "Story": RGBColor(0x2E, 0xCC, 0x40),
+    "Bug": RGBColor(0xD3, 0x40, 0x2F),
+    "Activity": RGBColor(0x2F, 0x6F, 0xED),
+}
+COLOR_GANTT_OTHER = RGBColor(0x5B, 0x64, 0x72)
+COLOR_GANTT_SERVICE_PLANNED = RGBColor(0x2F, 0x6F, 0xED)
+COLOR_GANTT_SERVICE_ACTUAL = RGBColor(0xEB, 0x68, 0x34)
+COLOR_GANTT_PHASE = RGBColor(0x7C, 0x4D, 0xBD)
 MONTH_NAMES = ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
 # Evidenziatore (giallo chiaro) delle voci dello Scope in lavorazione.
 COLOR_HIGHLIGHT = "FFE98A"
@@ -908,6 +919,289 @@ def _timeline_slide(deck: _Deck, project: models.Project) -> None:
         cell(x, legend_top, Inches(2.5), Inches(0.3), "In grassetto la fase corrente", size=10, color=COLOR_MUTED)
 
 
+def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
+    """Gantt del Backlog, come la vista Gantt della pagina Backlog coi filtri
+    di default: item del piano (code freeze e attivita' di servizio) non
+    ancora Done, senza i Bug CVE, nell'ordine del Backlog. Per ogni item la
+    barra pianificata (chiara, col bordo) sopra quella effettiva (piena, o
+    sfumata fino a oggi se e' in corso), nel colore del tipo Jira; le
+    attivita' di servizio a righe oblique, blu/arancio. Linee verticali per
+    oggi, Code Freeze e fasi. Tutto in una slide: con tanti item le righe si
+    stringono, mentre le date dell'asse restano grandi."""
+    title = "Gantt Backlog"
+    today = dt.date.today()
+    items = sorted(
+        (
+            i
+            for i in project.backlog_items
+            if i.is_in_plan and i.status != "Done" and not models.is_cve_bug(i.issue_type, i.summary)
+        ),
+        key=lambda i: i.priority_order,
+    )
+    def bar_end(item) -> dt.date | None:
+        """Fine della barra effettiva: la fine effettiva, oppure oggi se
+        l'item e' in corso; None se la barra non si disegna."""
+        if item.actual_start is None:
+            return None
+        if item.actual_finish is not None:
+            return item.actual_finish
+        return max(item.actual_start, today) if item.status == "In Progress" else None
+
+    def bars(item) -> list[tuple[dt.date, dt.date]]:
+        result = []
+        if item.planned_start and item.expected_finish and item.expected_finish >= item.planned_start:
+            result.append((item.planned_start, item.expected_finish))
+        end = bar_end(item)
+        if end is not None and end >= item.actual_start:
+            result.append((item.actual_start, end))
+        return result
+
+    # Solo gli item con almeno una barra, e l'asse solo sulle barre
+    # disegnate: un vecchio inizio effettivo di un item non in corso (senza
+    # barra) allargherebbe l'asse di anni.
+    items = [i for i in items if bars(i)]
+    if not items:
+        slide, box = deck.add_slide(title)
+        _text(
+            slide,
+            box,
+            "Nessun item da mostrare: servono item del piano non ancora chiusi, con le date pianificate o "
+            "almeno l'inizio effettivo.",
+            color=COLOR_MUTED,
+        )
+        return
+
+    # Le fasi come nel Gantt del Backlog: alla data effettiva se c'e' gia',
+    # altrimenti a quella pianificata.
+    marks = [(p.actual_date or p.planned_date, p.name, COLOR_GANTT_PHASE) for p in project.phases]
+    if project.code_freeze_date is not None:
+        marks.append((project.code_freeze_date, "Code Freeze", COLOR_SUCCESS))
+    marks = [m for m in marks if m[0] is not None]
+
+    item_days = [d for i in items for bar in bars(i) for d in bar]
+    first, last = min(item_days + [today]), max(item_days + [today])
+    # Item ancora "In Progress" su Jira da anni allargherebbero l'asse fino a
+    # schiacciare tutto il resto: l'asse parte al massimo 3 mesi prima del
+    # primo inizio pianificato (o di oggi), e le barre che iniziano prima
+    # partono dal bordo sinistro, con scritto da quando (vedi sotto).
+    planned_starts = [i.planned_start for i in items if i.planned_start]
+    first = max(first, min(planned_starts + [today]) - dt.timedelta(days=90))
+    # Asse a settimane (dal lunedi') se il periodo e' breve, altrimenti a mesi.
+    weekly = (last - first).days <= 120
+    if weekly:
+        axis_start = first - dt.timedelta(days=first.weekday())
+        axis_end = last + dt.timedelta(days=7 - last.weekday())
+    else:
+        axis_start, axis_end = _month_start(first), _month_start(last, 1)
+    span = (axis_end - axis_start).days
+    marks = sorted((m for m in marks if axis_start <= m[0] <= axis_end), key=lambda m: m[0])
+
+    mark_lane_height = Inches(0.21)
+    slide, box = deck.add_slide(title)
+    label_width = int(box.width * 0.24)
+    chart_left = box.left + label_width
+    chart_width = box.left + box.width - chart_left
+
+    def x_of(day: dt.date) -> int:
+        return chart_left + int(chart_width * (day - axis_start).days / span)
+
+    # Nomi di Code Freeze e fasi su piu' righe quando si toccherebbero
+    # (come nel Gantt del Backlog): ognuno nella prima riga libera.
+    lane_ends: list[int] = []
+    mark_lanes = []
+    for day, name, color in marks:
+        text_width = Inches(0.075) * len(name)
+        left = x_of(day) + Inches(0.03)
+        # Vicino al bordo destro il nome va a sinistra della linea.
+        if left + text_width > box.left + box.width:
+            left = x_of(day) - Inches(0.03) - text_width
+        lane = next((n for n, end in enumerate(lane_ends) if end < left), len(lane_ends))
+        if lane == len(lane_ends):
+            lane_ends.append(0)
+        lane_ends[lane] = left + text_width
+        mark_lanes.append((left, text_width, name, color, lane))
+    axis_label_height = Inches(0.32)
+    header_height = axis_label_height + Inches(0.04) + mark_lane_height * len(lane_ends)
+    legend_height = Inches(0.45)
+    row_height = min(Inches(0.42), int((box.height - header_height - legend_height) / len(items)))
+    # Testo delle righe proporzionato all'altezza della riga.
+    row_font = max(5.5, min(9.0, round(row_height / 12700 * 0.62 * 2) / 2))
+    rows_top = box.top + header_height
+    rows_bottom = rows_top + row_height * len(items)
+
+    def line(x1: int, y1: int, x2: int, y2: int, color: RGBColor, width: float = 0.75, dashed: bool = False):
+        connector = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, y1, x2, y2)
+        connector.line.color.rgb = color
+        connector.line.width = Pt(width)
+        if dashed:
+            connector.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+
+    def cell(left: int, top: int, width: int, height: int, text: str, **style):
+        frame = _text(slide, _Box(left, top, width, height), text, **style)
+        frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        return frame
+
+    # Intestazione: tacche dell'asse (settimane o mesi) e, sotto, i nomi
+    # di Code Freeze e fasi sopra le rispettive linee.
+    if weekly:
+        ticks = [axis_start + dt.timedelta(days=7 * n) for n in range(span // 7 + 1)]
+        step = math.ceil(len(ticks) / 14)
+        labels = [(d, f"{d:%d}/{d:%m}") for d in ticks[:-1][::step]]
+        grid = ticks
+    else:
+        month_count = (axis_end.year - axis_start.year) * 12 + axis_end.month - axis_start.month
+        grid = [_month_start(axis_start, n) for n in range(month_count + 1)]
+        step = math.ceil(month_count / 12)
+        labels = [(d, f"{MONTH_NAMES[d.month - 1]} {d:%y}") for d in grid[:-1][::step]]
+    for day in grid:
+        line(x_of(day), rows_top, x_of(day), rows_bottom, COLOR_GRID)
+    label_slot = int(chart_width * (7 * step if weekly else 30 * step) / span)
+    for day, text in labels:
+        cell(x_of(day) + Inches(0.03), box.top, max(label_slot, Inches(0.7)), axis_label_height, text, size=13, bold=True, color=COLOR_MUTED).word_wrap = False
+    for left, text_width, name, color, lane in mark_lanes:
+        top = box.top + axis_label_height + Inches(0.04) + lane * mark_lane_height
+        cell(left, top, text_width, mark_lane_height, name, size=9, bold=True, color=color).word_wrap = False
+    for n in range(len(items) + 1):
+        y = rows_top + n * row_height
+        line(box.left, y, box.left + box.width, y, COLOR_GRID)
+
+    bar_height = int(row_height * 0.3)
+    for row, item in enumerate(items):
+        top = rows_top + row * row_height
+        frame = cell(box.left, top, label_width - Inches(0.1), row_height, "", size=row_font)
+        frame.word_wrap = False
+        paragraph = frame.paragraphs[0]
+        key_run = _run(paragraph, item.jira_key, size=row_font, bold=True)
+        key_run.hyperlink.address = f"{JIRA_BROWSE_URL}{item.jira_key}"
+        summary = item.summary or ""
+        # Il summary quanto ci sta nella colonna, al corpo del testo.
+        max_chars = int(label_width / 12700 / (row_font * 0.5)) - len(item.jira_key) - 4
+        if len(summary) > max_chars:
+            summary = summary[: max(max_chars - 1, 0)] + "…"
+        _run(paragraph, "  " + summary, size=row_font, color=COLOR_MUTED)
+
+        color = GANTT_TYPE_COLORS.get(item.issue_type or "", COLOR_GANTT_OTHER)
+
+        def bar(start: dt.date, end: dt.date, y: int):
+            start = max(start, axis_start)
+            left = x_of(start)
+            # Estremi inclusi: la barra copre anche il giorno di fine.
+            width = max(x_of(end + dt.timedelta(days=1)) - left, Inches(0.04))
+            return slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, y, width, bar_height)
+
+        if item.planned_start and item.expected_finish and item.expected_finish >= item.planned_start:
+            shape = bar(item.planned_start, item.expected_finish, top + int(row_height * 0.14))
+            if item.is_activity:
+                _striped(shape, COLOR_GANTT_SERVICE_PLANNED)
+            else:
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = _tint(color, 0.3)
+                shape.line.color.rgb = color
+                shape.line.width = Pt(0.75)
+            shape.shadow.inherit = False
+            if item.is_activity:
+                shape.line.fill.background()
+        end = bar_end(item)
+        if item.actual_start is not None and end is not None and end >= item.actual_start:
+            shape = bar(item.actual_start, end, top + int(row_height * 0.56))
+            in_progress = item.actual_finish is None
+            if in_progress:
+                _fading(shape, COLOR_DANGER if item.is_activity else color)
+            elif item.is_activity:
+                _striped(shape, COLOR_GANTT_SERVICE_ACTUAL)
+            else:
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = color
+            shape.line.fill.background()
+            shape.shadow.inherit = False
+            if item.actual_start < axis_start:
+                # Iniziata prima dell'inizio dell'asse: la data vera, sopra
+                # la barra (sulla barra, sottile, non si leggerebbe).
+                note = cell(
+                    x_of(axis_start) + Inches(0.04),
+                    top,
+                    Inches(1.4),
+                    int(row_height * 0.55),
+                    f"◀ dal {_date(item.actual_start)}",
+                    size=max(5.5, row_font - 1),
+                    bold=True,
+                    color=COLOR_MUTED,
+                )
+                note.word_wrap = False
+
+    for day, _, color in marks:
+        line(x_of(day), rows_top, x_of(day), rows_bottom, color, width=1.25, dashed=True)
+    if axis_start <= today <= axis_end:
+        line(x_of(today), rows_top, x_of(today), rows_bottom, COLOR_DANGER, width=1.5)
+
+    # Legenda, sotto le righe.
+    legend_top = rows_bottom + Inches(0.12)
+    swatch = Inches(0.16)
+    x = box.left
+
+    def legend_entry(label: str, fill, width: int = Inches(1.1)) -> None:
+        nonlocal x
+        shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, legend_top + Inches(0.07), swatch, swatch)
+        fill(shape)
+        shape.shadow.inherit = False
+        cell(x + swatch + Inches(0.06), legend_top, width, Inches(0.3), label, size=9, color=COLOR_MUTED)
+        x += swatch + Inches(0.06) + width
+
+    def solid(color: RGBColor):
+        def apply(shape):
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = color
+            shape.line.fill.background()
+
+        return apply
+
+    def outlined(shape):
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _tint(COLOR_GANTT_OTHER, 0.3)
+        shape.line.color.rgb = COLOR_GANTT_OTHER
+        shape.line.width = Pt(0.75)
+
+    for type_name, color in GANTT_TYPE_COLORS.items():
+        legend_entry(type_name, solid(color), Inches(0.7))
+    legend_entry("Pianificato", outlined, Inches(0.85))
+    legend_entry("Effettivo", solid(COLOR_GANTT_OTHER), Inches(0.75))
+    legend_entry("In corso (fino a oggi)", lambda s: (_fading(s, COLOR_GANTT_OTHER), s.line.fill.background()), Inches(1.5))
+    if any(i.is_activity for i in items):
+        legend_entry(
+            "Attività di servizio",
+            lambda s: (_striped(s, COLOR_GANTT_SERVICE_PLANNED), s.line.fill.background()),
+            Inches(1.35),
+        )
+    line(x, legend_top + Inches(0.15), x + Inches(0.25), legend_top + Inches(0.15), COLOR_DANGER, width=1.5)
+    cell(x + Inches(0.3), legend_top, Inches(1.3), Inches(0.3), f"Oggi {_date(today)}", size=9, color=COLOR_MUTED)
+
+
+def _tint(color: RGBColor, amount: float) -> RGBColor:
+    """Il colore schiarito verso il bianco: amount = quota del colore
+    originale (come color-mix(... amount%, white) nel frontend)."""
+    return RGBColor(*(round(c * amount + 255 * (1 - amount)) for c in color))
+
+
+def _striped(shape, color: RGBColor) -> None:
+    """Righe oblique: attivita' di servizio, come nel Gantt del Backlog."""
+    shape.fill.patterned()
+    shape.fill.pattern = MSO_PATTERN.WIDE_UPWARD_DIAGONAL
+    shape.fill.fore_color.rgb = color
+    shape.fill.back_color.rgb = _tint(color, 0.35)
+
+
+def _fading(shape, color: RGBColor) -> None:
+    """Pieno a sinistra, sfumato a destra: item in corso, senza ancora una
+    fine effettiva."""
+    shape.fill.gradient()
+    shape.fill.gradient_angle = 0
+    stops = shape.fill.gradient_stops
+    stops[0].position = 0.7
+    stops[0].color.rgb = color
+    stops[1].position = 1.0
+    stops[1].color.rgb = _tint(color, 0.1)
+
+
 def _date_serial(day: dt.date) -> int:
     """Data come numero seriale di Excel: l'asse X dei grafici nel tempo."""
     return (day - EXCEL_EPOCH).days
@@ -1178,6 +1472,7 @@ def generate_dashboard_presentation(project: models.Project, closed_days: int = 
     _recently_closed_slides(deck, project, closed_days)
     _phases_slide(deck, project)
     _timeline_slide(deck, project)
+    _backlog_gantt_slides(deck, project)
     _hours_slide(deck, project)
     _completion_slide(deck, project)
     _plan_vs_actual_slides(
