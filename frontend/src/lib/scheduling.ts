@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../api/types'
+import type { BacklogItem, NonWorkingDay } from '../api/types'
 
 export function toIsoLocal(d: Date): string {
   const yyyy = d.getFullYear()
@@ -7,19 +7,48 @@ export function toIsoLocal(d: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+// Giorni non lavorativi (ferie, malattia, chiusure: vedi NonWorkingDay) come
+// insieme di date ISO, da passare ai calcoli qui sotto: li saltano come i
+// sabati e le domeniche.
+export type DaysOff = ReadonlySet<string>
+export const NO_DAYS_OFF: DaysOff = new Set()
+
+export function daysOffSet(ranges: Pick<NonWorkingDay, 'start_date' | 'end_date'>[]): Set<string> {
+  const result = new Set<string>()
+  for (const range of ranges) {
+    const cursor = new Date(`${range.start_date}T00:00:00`)
+    const end = new Date(`${range.end_date}T00:00:00`)
+    while (cursor <= end) {
+      result.add(toIsoLocal(cursor))
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+  return result
+}
+
+function isWorkingDay(d: Date, off: DaysOff): boolean {
+  const day = d.getDay() // 0 = domenica, 6 = sabato
+  return day !== 0 && day !== 6 && !off.has(toIsoLocal(d))
+}
+
+export function isWorkingDayIso(dateStr: string, off: DaysOff): boolean {
+  return isWorkingDay(new Date(`${dateStr}T00:00:00`), off)
+}
+
 // Inverso di workingDaysBetween: data di fine tale che ci siano esattamente
 // "days" giorni lavorativi da startStr a fine, estremi inclusi (es. days=1 ->
 // fine=inizio). Usata per calcolare "Fine pian." da "Start pian." + "Sizing
-// (gg)". Restituisce null se manca la data di inizio o i giorni non sono un
-// numero positivo.
-export function addWorkingDays(startStr: string | null, days: number | null): string | null {
+// (gg)". Uno Start pian. in un giorno non lavorativo conta dal primo giorno
+// lavorativo dopo. Restituisce null se manca la data di inizio o i giorni non
+// sono un numero positivo.
+export function addWorkingDays(startStr: string | null, days: number | null, off: DaysOff = NO_DAYS_OFF): string | null {
   if (!startStr || days == null || days <= 0) return null
   const cursor = new Date(`${startStr}T00:00:00`)
+  while (!isWorkingDay(cursor, off)) cursor.setDate(cursor.getDate() + 1)
   let remaining = days - 1
   while (remaining > 0) {
     cursor.setDate(cursor.getDate() + 1)
-    const day = cursor.getDay() // 0 = domenica, 6 = sabato
-    if (day !== 0 && day !== 6) remaining--
+    if (isWorkingDay(cursor, off)) remaining--
   }
   return toIsoLocal(cursor)
 }
@@ -27,11 +56,11 @@ export function addWorkingDays(startStr: string | null, days: number | null): st
 // Primo giorno lavorativo successivo a startStr - usato per far ripartire un
 // item subito dopo la Fine pian. di quello che lo precede (pianificazione a
 // cascata e predecessori).
-export function nextWorkingDay(startStr: string): string {
+export function nextWorkingDay(startStr: string, off: DaysOff = NO_DAYS_OFF): string {
   const cursor = new Date(`${startStr}T00:00:00`)
   do {
     cursor.setDate(cursor.getDate() + 1)
-  } while (cursor.getDay() === 0 || cursor.getDay() === 6)
+  } while (!isWorkingDay(cursor, off))
   return toIsoLocal(cursor)
 }
 
@@ -82,7 +111,11 @@ export type BacklogPatch = Partial<BacklogItem> & { id: number }
 // resta finche' lo Start non si sposta. Un predecessore senza Fine pian. non
 // vincola nulla. Restituisce tutte le modifiche da salvare (quelle richieste
 // piu' quelle propagate), pronte per il salvataggio in blocco.
-export function scheduleFromPredecessors(items: BacklogItem[], patches: Map<number, Partial<BacklogItem>>): BacklogPatch[] {
+export function scheduleFromPredecessors(
+  items: BacklogItem[],
+  patches: Map<number, Partial<BacklogItem>>,
+  off: DaysOff = NO_DAYS_OFF,
+): BacklogPatch[] {
   const changes = new Map<number, Partial<BacklogItem>>()
   for (const [id, patch] of patches) changes.set(id, { ...patch })
   const state = items.map((i) => ({ ...i, ...patches.get(i.id) }))
@@ -100,10 +133,10 @@ export function scheduleFromPredecessors(items: BacklogItem[], patches: Map<numb
     for (const p of predecessors) resolve(p)
     const finishes = predecessors.map((p) => p.expected_finish).filter((f): f is string => !!f)
     if (finishes.length > 0) {
-      const planned_start = nextWorkingDay(finishes.reduce((a, b) => (a > b ? a : b)))
+      const planned_start = nextWorkingDay(finishes.reduce((a, b) => (a > b ? a : b)), off)
       if (planned_start !== item.planned_start) {
         const change: Partial<BacklogItem> = { planned_start }
-        const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
+        const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, off)
         if (expected_finish) change.expected_finish = expected_finish
         Object.assign(item, change)
         changes.set(item.id, { ...changes.get(item.id), ...change })

@@ -1,3 +1,13 @@
+// Giorni non lavorativi del team (ferie, malattia, chiusure), estremi
+// compresi: la pianificazione del Backlog li salta come i weekend.
+export type NonWorkingDay = {
+  id: number
+  project_id: number
+  start_date: string
+  end_date: string
+  description: string | null
+}
+
 export type Phase = {
   id: number
   project_id: number

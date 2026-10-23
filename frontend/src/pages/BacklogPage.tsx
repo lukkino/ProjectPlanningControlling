@@ -10,16 +10,19 @@ import {
   type RefObject,
 } from 'react'
 import { api } from '../api/client'
-import type { BacklogItem } from '../api/types'
+import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
+import { NonWorkingDaysModal, type NewNonWorkingDay } from '../components/NonWorkingDaysModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import {
   addWorkingDays,
+  daysOffSet,
   indexByKey,
+  isWorkingDayIso,
   nextWorkingDay,
   parsePredecessors,
   resolvePredecessors,
@@ -27,6 +30,7 @@ import {
   toIsoLocal,
   wouldCreateCycle,
   type BacklogPatch,
+  type DaysOff,
 } from '../lib/scheduling'
 import { useProjectContext } from './useProjectContext'
 
@@ -140,6 +144,7 @@ export function BacklogPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false)
   const [bulkSizing, setBulkSizing] = useState('')
+  const [nonWorkingOpen, setNonWorkingOpen] = useState(false)
 
   // Barra di scroll orizzontale "specchio" sopra la tabella (vedi CSS
   // .table-scroll-mirror): tiene la stessa scrollLeft di .table-wrap, cosi'
@@ -206,6 +211,14 @@ export function BacklogPage() {
   })
   const ganttPhases = (phases ?? []).map((p) => ({ name: p.name, date: p.actual_date ?? p.planned_date }))
 
+  // Giorni non lavorativi del team (ferie, malattia, chiusure): tutti i
+  // calcoli delle date pianificate qui sotto li saltano come i weekend.
+  const { data: nonWorkingDays } = useQuery({
+    queryKey: ['non-working-days', project.id],
+    queryFn: () => api.nonWorkingDays.list(project.id),
+  })
+  const offDays = daysOffSet(nonWorkingDays ?? [])
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
     queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
@@ -270,12 +283,12 @@ export function BacklogPage() {
     patches: Map<number, Partial<BacklogItem>>,
   ) => {
     for (const item of chain.slice(fromIndex + 1)) {
-      const planned_start = nextWorkingDay(prevFinish)
+      const planned_start = nextWorkingDay(prevFinish, offDays)
       if (!item.planned_duration_days) {
         patches.set(item.id, { planned_start })
         break
       }
-      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)!
+      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, offDays)!
       patches.set(item.id, { planned_start, expected_finish })
       prevFinish = expected_finish
     }
@@ -284,10 +297,50 @@ export function BacklogPage() {
   // Salva le modifiche richieste insieme a quelle che ne derivano lungo i
   // predecessori, in una sola chiamata (tutto o niente).
   const saveWithDependencies = async (patches: Map<number, Partial<BacklogItem>>) => {
-    const updates = scheduleFromPredecessors(items ?? [], patches)
+    const updates = scheduleFromPredecessors(items ?? [], patches, offDays)
     if (updates.length > 0) await api.backlog.bulkUpdate(project.id, updates)
   }
   const saveSchedule = useMutation({ mutationFn: saveWithDependencies, onSuccess: invalidate })
+
+  // Dopo aver aggiunto o tolto un periodo non lavorativo: gli item non Done
+  // con Start pian. e Sizing la cui pianificazione tocca il periodo
+  // ricalcolano la Fine pian. (e lo Start pian., se ora cade in un giorno non
+  // lavorativo), poi la propagazione ai successori lungo i predecessori. Gli
+  // item che seguono solo per posizione in lista non si spostano (spesso il
+  // lavoro e' in parallelo): per riallinearli c'e' "Pianificazione a
+  // cascata". Restituisce quanti item sono stati ripianificati.
+  const replanForDaysOff = async (range: Pick<NonWorkingDay, 'start_date' | 'end_date'>, off: DaysOff) => {
+    const patches = new Map<number, Partial<BacklogItem>>()
+    for (const item of items ?? []) {
+      if (item.status === 'Done' || !item.planned_start || !item.planned_duration_days) continue
+      const finish = item.expected_finish ?? item.planned_start
+      if (item.planned_start > range.end_date || finish < range.start_date) continue
+      const planned_start = isWorkingDayIso(item.planned_start, off)
+        ? item.planned_start
+        : nextWorkingDay(item.planned_start, off)
+      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, off)
+      if (planned_start !== item.planned_start || expected_finish !== item.expected_finish) {
+        patches.set(item.id, { planned_start, expected_finish })
+      }
+    }
+    const updates = scheduleFromPredecessors(items ?? [], patches, off)
+    if (updates.length > 0) await api.backlog.bulkUpdate(project.id, updates)
+    return updates.length
+  }
+  const afterDaysOffChange = (replanned: number) => {
+    queryClient.invalidateQueries({ queryKey: ['non-working-days', project.id] })
+    if (replanned > 0) invalidate()
+    return replanned
+  }
+  const addNonWorkingDay = async (day: NewNonWorkingDay) => {
+    await api.nonWorkingDays.create(project.id, day)
+    return afterDaysOffChange(await replanForDaysOff(day, daysOffSet([...(nonWorkingDays ?? []), day])))
+  }
+  const removeNonWorkingDay = async (day: NonWorkingDay) => {
+    await api.nonWorkingDays.remove(day.id)
+    const rest = (nonWorkingDays ?? []).filter((d) => d.id !== day.id)
+    return afterDaysOffChange(await replanForDaysOff(day, daysOffSet(rest)))
+  }
 
   const cascadeSchedule = useMutation({
     mutationFn: async () => {
@@ -312,7 +365,7 @@ export function BacklogPage() {
   // c'e' nulla da propagare in cascata.
   const reschedule = useMutation({
     mutationFn: async ({ item, planned_start }: { item: BacklogItem; planned_start: string | null }) => {
-      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days)
+      const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, offDays)
       const patches = new Map<number, Partial<BacklogItem>>([
         [item.id, expected_finish ? { planned_start, expected_finish } : { planned_start }],
       ])
@@ -490,7 +543,7 @@ export function BacklogPage() {
           defaultValue={item.planned_duration_days ?? ''}
           onBlur={(e) => {
             const planned_duration_days = num(e.target.value)
-            const expected_finish = addWorkingDays(item.planned_start, planned_duration_days)
+            const expected_finish = addWorkingDays(item.planned_start, planned_duration_days, offDays)
             saveSchedule.mutate(
               new Map([[item.id, expected_finish ? { planned_duration_days, expected_finish } : { planned_duration_days }]]),
             )
@@ -1028,7 +1081,7 @@ export function BacklogPage() {
         items ?? [],
         new Map(
           selectedItems.map((item) => {
-            const expected_finish = addWorkingDays(item.planned_start, bulkSizingValue)
+            const expected_finish = addWorkingDays(item.planned_start, bulkSizingValue, offDays)
             return [
               item.id,
               expected_finish
@@ -1037,6 +1090,7 @@ export function BacklogPage() {
             ]
           }),
         ),
+        offDays,
       ),
     )
     setBulkSizing('')
@@ -1083,6 +1137,13 @@ export function BacklogPage() {
             disabled={cascadeSchedule.isPending}
           >
             {cascadeSchedule.isPending ? 'Calcolo...' : '📐 Pianificazione a cascata'}
+          </button>
+          <button
+            className="btn"
+            title="Ferie, malattia, chiusure: giorni che la pianificazione salta come i weekend"
+            onClick={() => setNonWorkingOpen(true)}
+          >
+            🏖️ Giorni non lavorativi{nonWorkingDays && nonWorkingDays.length > 0 && ` (${nonWorkingDays.length})`}
           </button>
           <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={!project.jira_jql || sync.isPending}>
             {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
@@ -1136,6 +1197,15 @@ export function BacklogPage() {
           Code Freeze — la linea
           segna il taglio.
         </p>
+      )}
+
+      {nonWorkingOpen && (
+        <NonWorkingDaysModal
+          days={nonWorkingDays ?? []}
+          onAdd={addNonWorkingDay}
+          onRemove={removeNonWorkingDay}
+          onClose={() => setNonWorkingOpen(false)}
+        />
       )}
 
       {sync.isPending && (
@@ -1263,6 +1333,7 @@ export function BacklogPage() {
           forecastCutoffLabel={forecastCutoffLabel}
           codeFreezeDate={project.code_freeze_date}
           phases={ganttPhases}
+          nonWorkingDays={nonWorkingDays}
           exportName={`Gantt_${project.code}`}
         />
       )}

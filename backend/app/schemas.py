@@ -32,6 +32,30 @@ class Phase(PhaseBase):
     project_id: int
 
 
+# ---------- NonWorkingDay ----------
+
+class NonWorkingDayBase(BaseModel):
+    start_date: dt.date
+    end_date: dt.date
+    description: str | None = None
+
+
+class NonWorkingDayCreate(NonWorkingDayBase):
+    pass
+
+
+class NonWorkingDayUpdate(BaseModel):
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    description: str | None = None
+
+
+class NonWorkingDay(NonWorkingDayBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+
+
 # ---------- IncrementBudgetLine ----------
 
 class IncrementBudgetLineBase(BaseModel):

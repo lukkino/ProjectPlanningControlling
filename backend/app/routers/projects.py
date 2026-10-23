@@ -121,3 +121,54 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Fase non trovata")
     db.delete(phase)
     db.commit()
+
+
+# ---------- Giorni non lavorativi ----------
+
+def _check_range(day: models.NonWorkingDay) -> None:
+    if day.end_date < day.start_date:
+        raise HTTPException(status_code=422, detail="La data di fine precede quella di inizio")
+
+
+@router.get("/{project_id}/non-working-days", response_model=list[schemas.NonWorkingDay])
+def list_non_working_days(project_id: int, db: Session = Depends(get_db)):
+    _get_project_or_404(db, project_id)
+    return (
+        db.query(models.NonWorkingDay)
+        .filter(models.NonWorkingDay.project_id == project_id)
+        .order_by(models.NonWorkingDay.start_date)
+        .all()
+    )
+
+
+@router.post("/{project_id}/non-working-days", response_model=schemas.NonWorkingDay, status_code=201)
+def create_non_working_day(project_id: int, payload: schemas.NonWorkingDayCreate, db: Session = Depends(get_db)):
+    _get_project_or_404(db, project_id)
+    day = models.NonWorkingDay(project_id=project_id, **payload.model_dump())
+    _check_range(day)
+    db.add(day)
+    db.commit()
+    db.refresh(day)
+    return day
+
+
+@router.put("/non-working-days/{day_id}", response_model=schemas.NonWorkingDay)
+def update_non_working_day(day_id: int, payload: schemas.NonWorkingDayUpdate, db: Session = Depends(get_db)):
+    day = db.get(models.NonWorkingDay, day_id)
+    if day is None:
+        raise HTTPException(status_code=404, detail="Giorno non lavorativo non trovato")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(day, field, value)
+    _check_range(day)
+    db.commit()
+    db.refresh(day)
+    return day
+
+
+@router.delete("/non-working-days/{day_id}", status_code=204)
+def delete_non_working_day(day_id: int, db: Session = Depends(get_db)):
+    day = db.get(models.NonWorkingDay, day_id)
+    if day is None:
+        raise HTTPException(status_code=404, detail="Giorno non lavorativo non trovato")
+    db.delete(day)
+    db.commit()

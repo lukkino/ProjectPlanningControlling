@@ -156,6 +156,9 @@ class Project(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     phases: Mapped[list["Phase"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Phase.order")
+    non_working_days: Mapped[list["NonWorkingDay"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="NonWorkingDay.start_date"
+    )
     backlog_items: Mapped[list["BacklogItem"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BacklogItem.priority_order")
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Snapshot.snapshot_date")
     forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
@@ -179,6 +182,23 @@ class Phase(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="phases")
+
+
+class NonWorkingDay(Base):
+    """Giorni non lavorativi del team di un increment (ferie, malattia,
+    chiusure), dal primo all'ultimo giorno compresi: la pianificazione del
+    Backlog (Sizing -> Fine pian., cascata, predecessori) li salta come i
+    sabati e le domeniche."""
+
+    __tablename__ = "non_working_days"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    start_date: Mapped[dt.date] = mapped_column(Date)
+    end_date: Mapped[dt.date] = mapped_column(Date)
+    description: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    project: Mapped["Project"] = relationship(back_populates="non_working_days")
 
 
 class IncrementBudgetLine(Base):

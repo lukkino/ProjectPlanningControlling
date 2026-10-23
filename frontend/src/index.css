@@ -765,3 +765,24 @@ tr.phase-current input { background: #e6eefc; }
 
 .muted { color: var(--text-muted); }
 .text-right { text-align: right; }
+
+/* Calendario del popup "Giorni non lavorativi" (Backlog). */
+.nwd-calendar { table-layout: fixed; }
+.nwd-calendar th { font-size: 11px; font-weight: 600; color: var(--text-muted); text-align: center; padding: 2px 0; border: none; background: none; }
+.nwd-calendar td { padding: 1px; border: none; text-align: center; }
+.nwd-day {
+  width: 100%;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.nwd-day:hover { border-color: var(--primary); }
+.nwd-weekend { color: var(--text-muted); background: #f3f4f6; }
+.nwd-off { background: #fde4cc; color: #9a4f05; font-weight: 600; }
+.nwd-today { border-color: var(--danger); }
+.nwd-selected { background: var(--primary); color: white; }

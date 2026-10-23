@@ -20,6 +20,7 @@ import type {
   IncrementResourceType,
   IncrementSnapshot,
   IncrementSnapshotValue,
+  NonWorkingDay,
   OverviewMetrics,
   OverviewPeriod,
   Phase,
@@ -188,6 +189,12 @@ export const api = {
     create: (projectId: number, data: Partial<Phase>) => post<Phase>(`/projects/${projectId}/phases`, data),
     update: (id: number, data: Partial<Phase>) => put<Phase>(`/projects/phases/${id}`, data),
     remove: (id: number) => del(`/projects/phases/${id}`),
+  },
+  nonWorkingDays: {
+    list: (projectId: number) => request<NonWorkingDay[]>(`/projects/${projectId}/non-working-days`),
+    create: (projectId: number, data: Pick<NonWorkingDay, 'start_date' | 'end_date' | 'description'>) =>
+      post<NonWorkingDay>(`/projects/${projectId}/non-working-days`, data),
+    remove: (id: number) => del(`/projects/non-working-days/${id}`),
   },
   incrementBudgetLines: {
     list: (incrementId: number) => request<IncrementBudgetLine[]>(`/increments/${incrementId}/budget-lines`),

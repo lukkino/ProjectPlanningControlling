@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import { toPng } from 'html-to-image'
-import type { BacklogItem } from '../api/types'
-import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays } from '../lib/dates'
+import type { BacklogItem, NonWorkingDay } from '../api/types'
+import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 import { parsePredecessors } from '../lib/scheduling'
 
 // Stessa coppia di colori usata per Budget/Actual in IncrementHistoryCard:
@@ -58,6 +58,10 @@ const LABEL_CHAR_WIDTH = 6.5
 const COLOR_PHASE = '#7c4dbd'
 // Sabato e domenica con lo zoom sui giorni.
 const COLOR_WEEKEND = 'color-mix(in srgb, var(--border) 30%, transparent)'
+// Giorni non lavorativi (ferie, malattia, chiusure): fasce arancio a righe,
+// visibili a ogni zoom.
+const NON_WORKING_FILL =
+  'repeating-linear-gradient(135deg, rgba(235, 104, 52, 0.16) 0 4px, rgba(235, 104, 52, 0.06) 4px 8px)'
 // Linea di oggi: rossa piena, con l'etichetta "Today" su sfondo rosso nel
 // calendario (anche nel PNG esportato, che mostra il giorno dell'export).
 const COLOR_TODAY = '#d3402f'
@@ -208,12 +212,15 @@ type Props = {
   // linea verticale ciascuna, e il calendario arriva fino all'ultima anche
   // senza item che ci arrivano.
   phases?: { name: string; date: string | null }[]
+  // Giorni non lavorativi del team: una fascia per periodo.
+  nonWorkingDays?: NonWorkingDay[]
   // Prefisso del nome del PNG esportato (es. "Gantt_PTBSYS-123"), seguito
   // dalla data dell'export.
   exportName?: string
 }
 
 const NO_PHASES: { name: string; date: string | null }[] = []
+const NO_NON_WORKING_DAYS: NonWorkingDay[] = []
 
 export function BacklogGanttChart({
   items,
@@ -222,6 +229,7 @@ export function BacklogGanttChart({
   forecastCutoffLabel,
   codeFreezeDate = null,
   phases = NO_PHASES,
+  nonWorkingDays = NO_NON_WORKING_DAYS,
   exportName = 'Gantt',
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
@@ -596,6 +604,18 @@ export function BacklogGanttChart({
             Fasi dell'increment
           </span>
         )}
+        {nonWorkingDays.length > 0 && (
+          <span
+            className="muted"
+            style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'help' }}
+            title={nonWorkingDays
+              .map((d) => `${formatIsoDate(d.start_date)} → ${formatIsoDate(d.end_date)}${d.description ? `: ${d.description}` : ''}`)
+              .join('\n')}
+          >
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: NON_WORKING_FILL, display: 'inline-block' }} />
+            Giorni non lavorativi
+          </span>
+        )}
         {items.some((item) => item.is_activity) && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span
@@ -869,6 +889,24 @@ export function BacklogGanttChart({
                   }}
                 />
               ))}
+              {nonWorkingDays.map((range) => {
+                const from = Math.max(dateStrToEpochDays(range.start_date)!, minDay)
+                const to = Math.min(dateStrToEpochDays(range.end_date)!, maxDay)
+                if (to < from) return null
+                return (
+                  <div
+                    key={range.id}
+                    style={{
+                      position: 'absolute',
+                      left: dayToX(from),
+                      width: (to - from + 1) * dayWidth,
+                      top: 0,
+                      bottom: 0,
+                      background: NON_WORKING_FILL,
+                    }}
+                  />
+                )
+              })}
             </div>
             {items.map((item, row) => {
               const pStart = dateStrToEpochDays(item.planned_start)
