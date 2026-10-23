@@ -17,6 +17,20 @@ const COLOR_IN_PROGRESS = '#d3402f'
 const activityFill = (color: string) =>
   `repeating-linear-gradient(135deg, ${color} 0 4px, color-mix(in srgb, ${color} 35%, white) 4px 8px)`
 
+// Tutti gli altri item: il colore dice il tipo Jira, la tinta dice cosa e'
+// la barra - chiara col bordo = pianificato, piena = effettivo, piena e
+// sfumata in coda = in corso. (Le attivita' di servizio restano coi colori
+// pianificato/effettivo sopra, a righe.)
+const TYPE_COLORS: Record<string, string> = {
+  Story: '#2ecc40',
+  Bug: '#d3402f',
+  Activity: '#2f6fed',
+}
+const COLOR_OTHER_TYPE = '#5b6472'
+const typeColor = (issueType: string | null) => TYPE_COLORS[issueType ?? ''] ?? COLOR_OTHER_TYPE
+const plannedFill = (color: string) => `color-mix(in srgb, ${color} 30%, white)`
+const inProgressFill = (color: string) => `linear-gradient(to right, ${color} 0%, ${color} 70%, transparent 100%)`
+
 const LABEL_COLUMN_WIDTH = 110
 // Barre di un giorno ancora visibili con lo zoom al minimo.
 const MIN_BAR_WIDTH = 3
@@ -508,24 +522,40 @@ export function BacklogGanttChart({
       ref={rootRef}
       style={exporting ? { width: LABEL_COLUMN_WIDTH + chartWidth + 2, background: 'var(--surface)' } : undefined}
     >
-      <div style={{ display: 'flex', gap: 16, marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_PLANNED, display: 'inline-block' }} />
-          Pianificato
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_ACTUAL, display: 'inline-block' }} />
-          Effettivo
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
+        {Object.entries(TYPE_COLORS).map(([type, color]) => (
+          <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: color, display: 'inline-block' }} />
+            {type}
+          </span>
+        ))}
+        {items.some((item) => !item.is_activity && !(item.issue_type && item.issue_type in TYPE_COLORS)) && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_OTHER_TYPE, display: 'inline-block' }} />
+            Altri tipi
+          </span>
+        )}
+        <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span
             style={{
               width: 12,
               height: 12,
               borderRadius: 3,
-              background: `linear-gradient(to right, ${COLOR_IN_PROGRESS} 0%, ${COLOR_IN_PROGRESS} 55%, transparent 100%)`,
+              background: plannedFill(COLOR_OTHER_TYPE),
+              border: `1px solid ${COLOR_OTHER_TYPE}`,
+              boxSizing: 'border-box',
               display: 'inline-block',
             }}
+          />
+          Pianificato
+        </span>
+        <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_OTHER_TYPE, display: 'inline-block' }} />
+          Effettivo
+        </span>
+        <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span
+            style={{ width: 12, height: 12, borderRadius: 3, background: inProgressFill(COLOR_OTHER_TYPE), display: 'inline-block' }}
           />
           In progress (da inizio a oggi)
         </span>
@@ -550,7 +580,10 @@ export function BacklogGanttChart({
             <span
               style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_PLANNED), display: 'inline-block' }}
             />
-            Attività di servizio (fuori code freeze)
+            <span
+              style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_ACTUAL), display: 'inline-block' }}
+            />
+            Attività di servizio (fuori code freeze): pianificato / effettivo
           </span>
         )}
         {links.length > 0 && (
@@ -823,6 +856,7 @@ export function BacklogGanttChart({
               const aEnd = dateStrToEpochDays(item.actual_finish)
               const labelAnchor = pStart ?? aStart
               const label = item.summary ?? item.jira_key
+              const color = typeColor(item.issue_type)
 
               return (
                 <Fragment key={item.id}>
@@ -869,7 +903,9 @@ export function BacklogGanttChart({
                         width: Math.max(MIN_BAR_WIDTH, dayToX(pEnd) - dayToX(pStart) + dayWidth),
                         top: PLANNED_BAR_TOP,
                         height: BAR_HEIGHT,
-                        background: item.is_activity ? activityFill(COLOR_PLANNED) : COLOR_PLANNED,
+                        background: item.is_activity ? activityFill(COLOR_PLANNED) : plannedFill(color),
+                        border: item.is_activity ? undefined : `1px solid ${color}`,
+                        boxSizing: 'border-box',
                         borderRadius: 3,
                       }}
                     />
@@ -884,15 +920,16 @@ export function BacklogGanttChart({
                         width: Math.max(MIN_BAR_WIDTH, dayToX(aEnd) - dayToX(aStart) + dayWidth),
                         top: 22 + BAR_HEIGHT + 4,
                         height: BAR_HEIGHT,
-                        background: item.is_activity ? activityFill(COLOR_ACTUAL) : COLOR_ACTUAL,
+                        background: item.is_activity ? activityFill(COLOR_ACTUAL) : color,
                         borderRadius: 3,
                       }}
                     />
                   )}
 
                   {/* In Progress senza Fine eff.: l'inizio e' certo, la fine
-                      no - barra rossa fino a oggi, sfumata in coda per
-                      segnalare che non e' ancora conclusa. */}
+                      no - barra fino a oggi (rossa per le attivita' di
+                      servizio, del colore del tipo per le altre), sfumata in
+                      coda per segnalare che non e' ancora conclusa. */}
                   {aStart !== null && aEnd === null && item.status === 'In Progress' && (
                     <div
                       title={`In corso dal ${formatEpochDaysAsDate(aStart)} (nessuna Fine eff. impostata)`}
@@ -902,7 +939,7 @@ export function BacklogGanttChart({
                         width: Math.max(MIN_BAR_WIDTH, dayToX(Math.max(aStart, todayDay)) - dayToX(aStart) + dayWidth),
                         top: 22 + BAR_HEIGHT + 4,
                         height: BAR_HEIGHT,
-                        background: `linear-gradient(to right, ${COLOR_IN_PROGRESS} 0%, ${COLOR_IN_PROGRESS} 70%, transparent 100%)`,
+                        background: inProgressFill(item.is_activity ? COLOR_IN_PROGRESS : color),
                         borderRadius: 3,
                       }}
                     />
