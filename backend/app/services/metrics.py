@@ -1,5 +1,6 @@
 import datetime as dt
 import math
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
@@ -299,7 +300,9 @@ def _percentile(sorted_values: list[float], p: float) -> float | None:
     return sorted_values[f] * (c - k) + sorted_values[c] * (k - f)
 
 
-def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTimeMetrics:
+def compute_cycle_time_metrics(
+    db: Session, team: str = "sw", on_progress: Callable[[str, int, int], None] | None = None
+) -> schemas.CycleTimeMetrics:
     """Scatterplot Cycle Time della Dashboard generale (e dati sorgente del
     Throughput, che li aggrega per mese lato frontend): un punto per PBI
     sulla JQL base del team scelto + finestra ultimi 12 mesi, asse Y il
@@ -321,6 +324,7 @@ def compute_cycle_time_metrics(db: Session, team: str = "sw") -> schemas.CycleTi
             (settings.jira_email if settings else None) or "",
             (settings.jira_api_token if settings else None) or "",
             jql,
+            on_progress,
         )
     except JiraClientError as exc:
         return schemas.CycleTimeMetrics(points=[], error=str(exc))

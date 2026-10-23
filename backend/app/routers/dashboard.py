@@ -20,6 +20,10 @@ router = APIRouter(tags=["dashboard"])
 Team = Literal["sw", "embedded"]
 Period = Literal["current", "previous"]
 
+# Avanzamento dell'estrazione Cycle Time in corso, per team (un changelog per
+# issue: lenta), letto dal popup di Monte Carlo come per la sync Backlog.
+_cycle_time_progress: dict[str, schemas.SyncProgress] = {}
+
 
 @router.get("/api/projects/{project_id}/dashboard", response_model=schemas.DashboardMetrics)
 def get_dashboard(project_id: int, db: Session = Depends(get_db)):
@@ -55,7 +59,18 @@ def get_overview_dashboard(team: Team = "sw", period: Period = "current", db: Se
 
 @router.get("/api/dashboard/cycle-time", response_model=schemas.CycleTimeMetrics)
 def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
-    return compute_cycle_time_metrics(db, team)
+    def on_progress(phase: str, done: int, total: int) -> None:
+        _cycle_time_progress[team] = schemas.SyncProgress(phase=phase, done=done, total=total)
+
+    try:
+        return compute_cycle_time_metrics(db, team, on_progress)
+    finally:
+        _cycle_time_progress.pop(team, None)
+
+
+@router.get("/api/dashboard/cycle-time/progress", response_model=schemas.SyncProgress)
+def get_cycle_time_progress(team: Team = "sw"):
+    return _cycle_time_progress.get(team) or schemas.SyncProgress(phase="idle")
 
 
 @router.get("/api/dashboard/bugs-opened", response_model=schemas.BugsOpenedMetrics)

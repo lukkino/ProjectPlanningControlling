@@ -284,6 +284,7 @@ export const api = {
     overview: (team: Team, period: OverviewPeriod = 'current') =>
       request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
     cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
+    cycleTimeProgress: (team: Team) => request<SyncProgress>(`/dashboard/cycle-time/progress?team=${team}`),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
   },
   dashboardSnapshots: {

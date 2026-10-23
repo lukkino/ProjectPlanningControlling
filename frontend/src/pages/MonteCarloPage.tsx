@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
+import { SyncProgressModal } from '../components/SyncProgressModal'
 import type { Team } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
@@ -130,12 +131,16 @@ export function MonteCarloPage() {
   // casuale anche a parametri invariati.
   const [runId, setRunId] = useState(0)
 
-  // L'estrazione Jira e' lenta (un changelog per issue): la si tiene in
-  // cache finche' non la si aggiorna a mano, invece dei 10s di default.
+  // L'estrazione Jira e' lenta (un changelog per issue): parte solo dal
+  // pulsante "Aggiorna da Jira", mai da sola all'apertura della pagina, e
+  // resta in cache finche' non la si aggiorna di nuovo. La cache e' la
+  // stessa della Dashboard generale: se li' i dati sono gia' stati
+  // estratti, qui si vedono subito.
   const cycleTime = useQuery({
     queryKey: ['dashboard', 'cycle-time', team],
     queryFn: () => api.dashboard.cycleTime(team),
     staleTime: Infinity,
+    enabled: false,
   })
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
@@ -305,15 +310,13 @@ export function MonteCarloPage() {
               Solo giorni lavorativi (i weekend non contano né nello storico né nella simulazione)
             </label>
 
-            <div style={{ marginTop: 12, fontSize: 13 }}>
-              {cycleTime.isLoading ? (
-                <span className="muted">Estrazione dati da Jira in corso (può richiedere qualche minuto)...</span>
+            <div style={{ marginTop: 12, fontSize: 13, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {cycleTime.isError ? (
+                <span style={{ color: 'var(--danger)' }}>{(cycleTime.error as Error).message}</span>
               ) : cycleTime.data?.error ? (
                 <span style={{ color: 'var(--danger)' }}>{cycleTime.data.error}</span>
-              ) : cycleTime.isError ? (
-                <span style={{ color: 'var(--danger)' }}>{(cycleTime.error as Error).message}</span>
-              ) : (
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              ) : cycleTime.data ? (
+                <>
                   <span>
                     <strong>{history.itemCount}</strong> item completati · <strong>{history.perWeek.toFixed(1)}</strong>/settimana
                   </span>
@@ -323,17 +326,26 @@ export function MonteCarloPage() {
                       {history.p95?.toFixed(1)}g
                     </span>
                   )}
-                  <button
-                    className="btn"
-                    onClick={() => cycleTime.refetch()}
-                    disabled={cycleTime.isFetching}
-                    style={{ fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {cycleTime.isFetching ? 'Aggiornamento...' : '⟳ Aggiorna da Jira'}
-                  </button>
-                </div>
+                </>
+              ) : (
+                <span className="muted">Dati storici non ancora caricati: premi "Aggiorna da Jira".</span>
               )}
+              <button
+                className={cycleTime.data ? 'btn' : 'btn btn-primary'}
+                onClick={() => cycleTime.refetch()}
+                disabled={cycleTime.isFetching}
+                style={{ fontSize: 12, padding: '4px 10px' }}
+              >
+                {cycleTime.isFetching ? 'Aggiornamento...' : '⟳ Aggiorna da Jira'}
+              </button>
             </div>
+            {cycleTime.isFetching && (
+              <SyncProgressModal
+                title="Estrazione dati da Jira"
+                queryKey={['cycle-time-progress', team]}
+                fetchProgress={() => api.dashboard.cycleTimeProgress(team)}
+              />
+            )}
           </div>
 
           <div>

@@ -42,9 +42,11 @@ function formatSeconds(seconds: number): string {
 export function SyncProgressModal({
   queryKey,
   fetchProgress,
+  title = 'Sincronizzazione da Jira',
 }: {
   queryKey: unknown[]
   fetchProgress: () => Promise<SyncProgress>
+  title?: string
 }) {
   const { data: progress } = useQuery({
     queryKey,
@@ -80,7 +82,7 @@ export function SyncProgressModal({
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ width: 460 }}>
-        <h3 style={{ marginTop: 0 }}>Sincronizzazione da Jira</h3>
+        <h3 style={{ marginTop: 0 }}>{title}</h3>
         <div className="sync-progress-bar">
           <div className="sync-progress-fill" style={{ width: `${percent}%` }} />
         </div>

@@ -374,12 +374,21 @@ class CycleTimeIssue:
         self.is_cve = is_cve
 
 
-def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> list[CycleTimeIssue]:
+def fetch_cycle_times(
+    base_url: str,
+    email: str,
+    api_token: str,
+    jql: str,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> list[CycleTimeIssue]:
     """Come search_issues, ma solo issuetype/reporter + le date effettive dal
     changelog (niente description/task collegati/campi custom): usata dal
     grafico Cycle Time della Dashboard generale, dove serve solo la coppia
     (actual_start, actual_finish) per PBI, piu' il reporter per distinguere i
-    Bug CVE del security-pipeline (vedi CVE_BUG_REPORTER_EMAIL)."""
+    Bug CVE del security-pipeline (vedi CVE_BUG_REPORTER_EMAIL).
+    on_progress(fase, fatti, totale) come in search_issues: "changelog" per
+    ogni issue letta, col totale dal conteggio approssimato di Jira."""
+    report = on_progress or (lambda phase, done, total: None)
     if not (base_url and email and api_token):
         raise JiraClientError(
             "Integrazione Jira non configurata: compila Jira base URL, email e API token "
@@ -392,6 +401,9 @@ def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> li
 
     try:
         with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            report("search", 0, 0)
+            total = _approximate_count(client, base_url, jql)
+            report("changelog", 0, total)
             while True:
                 payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype", "reporter"]}
                 if next_page_token:
@@ -413,6 +425,9 @@ def fetch_cycle_times(base_url: str, email: str, api_token: str, jql: str) -> li
                     is_cve = issue_type == "Bug" and reporter_email == CVE_BUG_REPORTER_EMAIL
                     actual_start, actual_finish = _fetch_status_dates(client, base_url, key, issue_type)
                     results.append(CycleTimeIssue(key, issue_type, actual_start, actual_finish, is_cve))
+                    # Il conteggio e' approssimato: il totale non scende mai
+                    # sotto quanto gia' letto.
+                    report("changelog", len(results), max(total, len(results)))
 
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):
