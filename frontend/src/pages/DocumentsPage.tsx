@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useRef, useState } from 'react'
 import { api, saveBlob, type WorkbookExportResult } from '../api/client'
 import type {
+  BacklogItem,
   DocumentRevisionMeta,
   ImplementedByTask,
   PprDeliverable,
@@ -13,7 +14,14 @@ import type {
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
-const DOCUMENT_TYPES = ['Story', 'Bug']
+// Filtro tipo della tabella in fondo alla pagina. "CVE" sono i Bug di
+// vulnerabilita' (stessa regola di isCveBug in BacklogPage.tsx), filtrati a
+// parte rispetto agli altri Bug. Le Activity sono nascoste di default.
+const DOCUMENT_TYPES = ['Story', 'Bug', 'CVE', 'Activity']
+const DEFAULT_HIDDEN_TYPES = ['Activity']
+const CVE_PATTERN = /\bCVE\b/i
+const documentType = (i: BacklogItem) =>
+  i.issue_type?.toLowerCase() === 'bug' && CVE_PATTERN.test(i.summary ?? '') ? 'CVE' : i.issue_type
 
 // Una sottosezione della pagina per ogni review, ognuna con il proprio
 // documento PPR e gli altri documenti che servono per quella review.
@@ -943,7 +951,7 @@ function parseImplementedBy(json: string | null): ImplementedByTask[] {
 export function DocumentsPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
-  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN_TYPES))
   // Box di configurazione del Change Order: aperto di default solo se non
   // ancora configurato, altrimenti la pagina mostra solo il nome cliccabile
   // (si riapre col bottone "Modifica").
@@ -970,9 +978,10 @@ export function DocumentsPage() {
     })
   }
 
-  const documentItems = (items ?? []).filter(
-    (i) => i.in_scope && i.issue_type && DOCUMENT_TYPES.includes(i.issue_type) && !hiddenTypes.has(i.issue_type),
-  )
+  const documentItems = (items ?? []).filter((i) => {
+    const type = documentType(i)
+    return i.in_scope && type && DOCUMENT_TYPES.includes(type) && !hiddenTypes.has(type)
+  })
 
   return (
     <div>
@@ -981,7 +990,7 @@ export function DocumentsPage() {
           <div>
             <h3 style={{ margin: 0 }}>Documents</h3>
             <span className="sub muted">
-              Story e Bug in scope del Backlog, con il parent (Epic) e i Task collegati che li implementano (link
+              Story, Bug e Activity in scope del Backlog, con il parent (Epic) e i Task collegati che li implementano (link
               Jira "is implemented by").
             </span>
           </div>
@@ -1210,7 +1219,7 @@ export function DocumentsPage() {
             {documentItems.length === 0 && (
               <tr>
                 <td colSpan={8} className="muted">
-                  Nessun item Story/Bug in scope trovato (o nascosto dal filtro tipo).
+                  Nessun item in scope trovato (o nascosto dal filtro tipo).
                 </td>
               </tr>
             )}
