@@ -1,4 +1,5 @@
-import json
+import base64
+import binascii
 import re
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -21,14 +22,18 @@ from app.services.design_input import (
     read_ids,
 )
 from app.services.document_generator import (
-    PPR_DOCUMENT_TYPES,
-    generate_ppr_document,
     generate_regression_analysis,
     generate_release_report,
-    get_ppr_defaults,
-    get_ppr_deliverables_defaults,
     get_regression_analysis_defaults,
     get_release_report_defaults,
+)
+from app.services.ppr_document import (
+    PPR_DOCUMENT_TYPES,
+    PprError,
+    generate_ppr_deliverables_txt,
+    generate_ppr_document,
+    get_ppr_defaults,
+    inspect_ppr_file,
 )
 from app.services.jira_client import JiraClientError, fetch_requirement_issues
 from app.services.kickoff_presentation import generate_kickoff_presentation
@@ -120,36 +125,77 @@ def _get_ppr_type_or_404(doc_type: str) -> None:
 
 @router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/meta", response_model=schemas.PprDocumentMeta)
 def ppr_meta(project_id: int, doc_type: str, db: Session = Depends(get_db)):
+    """Valori proposti all'apertura del popup, prima di caricare i documenti
+    precedenti (versione e Deliverable Check si aggiornano poi da quelli,
+    vedi ppr_inspect)."""
     _get_ppr_type_or_404(doc_type)
     project = _get_project_or_404(db, project_id)
-    next_version, last_revision_text = get_ppr_defaults(project, doc_type)
-    return schemas.PprDocumentMeta(
-        next_version=next_version,
-        last_revision_text=last_revision_text,
-        deliverables=get_ppr_deliverables_defaults(),
-    )
+    return schemas.PprDocumentMeta(**get_ppr_defaults(project, doc_type))
 
 
-@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}")
-def download_ppr_document(
-    project_id: int,
-    doc_type: str,
-    version: int | None = Query(None),
-    revision_text: str | None = Query(None),
-    deliverables: str | None = Query(None, description="Lista JSON di {row, included, filename, notes}"),
-    db: Session = Depends(get_db),
-):
-    _get_ppr_type_or_404(doc_type)
-    project = _get_project_or_404(db, project_id)
-    resolved_version, resolved_text = _resolve(version, revision_text, get_ppr_defaults(project, doc_type))
+def _decode_b64(value: str, what: str) -> bytes:
     try:
-        deliverables_list = json.loads(deliverables) if deliverables else None
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Parametro deliverables non valido") from exc
-    content, filename_stem = generate_ppr_document(
-        project, doc_type, resolved_version, resolved_text, deliverables_list
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"{what}: file non valido") from exc
+
+
+@router.post("/api/projects/{project_id}/documents/ppr/{doc_type}/inspect", response_model=schemas.PprInspection)
+def ppr_inspect(project_id: int, doc_type: str, payload: schemas.PprInspectRequest, db: Session = Depends(get_db)):
+    """Controlla un documento scelto nel popup (che sia del tipo giusto, coi
+    fogli che servono) e ne legge ultima versione e descrizione della
+    Revision History, per proporre la prossima. Il file non viene salvato."""
+    _get_ppr_type_or_404(doc_type)
+    _get_project_or_404(db, project_id)
+    try:
+        return inspect_ppr_file(doc_type, payload.role, _decode_b64(payload.file_b64, "Documento"))
+    except PprError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/projects/{project_id}/documents/ppr/{doc_type}")
+def download_ppr_document(
+    project_id: int, doc_type: str, payload: schemas.PprGenerateRequest, db: Session = Depends(get_db)
+):
+    """Genera il documento PPR (vedi services/ppr_document.py) dai documenti
+    precedenti caricati nel popup, in base64 nel corpo: nessun file viene
+    salvato sul server."""
+    _get_ppr_type_or_404(doc_type)
+    project = _get_project_or_404(db, project_id)
+    previous = _decode_b64(payload.previous_b64, "Ultima versione") if payload.previous_b64 else None
+    previous_phase = (
+        _decode_b64(payload.previous_phase_b64, "Fase precedente") if payload.previous_phase_b64 else None
     )
+    try:
+        content, filename_stem = generate_ppr_document(
+            project,
+            doc_type,
+            payload.version,
+            payload.revision_text,
+            [d.model_dump() for d in payload.deliverables or []],
+            previous,
+            previous_phase,
+        )
+    except PprError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _xlsx_response(content, filename_stem)
+
+
+@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/deliverables-txt")
+def download_ppr_deliverables_txt(project_id: int, doc_type: str, db: Session = Depends(get_db)):
+    """Elenco dei documenti attesi alla review con il loro owner (dal Task
+    Guideline), scaricato insieme al documento PPR. Non c'e' per il
+    Planning, i cui Deliverable Check si compilano nel popup."""
+    _get_ppr_type_or_404(doc_type)
+    if doc_type == "planning":
+        raise HTTPException(status_code=404, detail="Elenco non previsto per il Planning")
+    project = _get_project_or_404(db, project_id)
+    content, filename = generate_ppr_deliverables_txt(project, doc_type)
+    return Response(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/api/projects/{project_id}/documents/kickoff-presentation")

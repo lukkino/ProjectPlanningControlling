@@ -26,6 +26,8 @@ import type {
   Phase,
   PprDeliverable,
   PprDocumentMeta,
+  PprFileRole,
+  PprInspection,
   Project,
   ProjectDetail,
   Snapshot,
@@ -130,9 +132,13 @@ const checkWorkbook = (projectId: number, document: string, file: File) =>
 // Scarica un file binario (es. un documento .xlsx generato dal backend),
 // leggendo il nome file dall'header Content-Disposition invece di doverlo
 // ricostruire lato client.
-async function downloadFile(path: string, params?: Record<string, string>): Promise<{ blob: Blob; filename: string }> {
+async function downloadFile(
+  path: string,
+  params?: Record<string, string>,
+  init?: RequestInit,
+): Promise<{ blob: Blob; filename: string }> {
   const qs = params ? `?${new URLSearchParams(params).toString()}` : ''
-  const response = await fetch(`/api${path}${qs}`)
+  const response = await fetch(`/api${path}${qs}`, init)
   if (!response.ok) {
     let detail = response.statusText
     try {
@@ -337,18 +343,29 @@ export const api = {
       }),
     pprMeta: (projectId: number, docType: string) =>
       request<PprDocumentMeta>(`/projects/${projectId}/documents/ppr/${docType}/meta`),
+    // Documenti PPR precedenti in base64 (vedi PprDownloadButton): niente
+    // viene salvato sul server.
+    pprInspect: (projectId: number, docType: string, role: PprFileRole, fileB64: string) =>
+      post<PprInspection>(`/projects/${projectId}/documents/ppr/${docType}/inspect`, { role, file_b64: fileB64 }),
     ppr: (
       projectId: number,
       docType: string,
-      version: number,
-      revisionText: string,
-      deliverables: PprDeliverable[],
+      data: {
+        version: number
+        revision_text: string
+        deliverables: PprDeliverable[] | null
+        previous_b64: string | null
+        previous_phase_b64: string | null
+      },
     ) =>
-      downloadFile(`/projects/${projectId}/documents/ppr/${docType}`, {
-        version: String(version),
-        revision_text: revisionText,
-        deliverables: JSON.stringify(deliverables),
+      downloadFile(`/projects/${projectId}/documents/ppr/${docType}`, undefined, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
       }),
+    // Elenco dei documenti attesi alla review con gli owner (.txt), non per il Planning.
+    pprDeliverablesTxt: (projectId: number, docType: string) =>
+      downloadFile(`/projects/${projectId}/documents/ppr/${docType}/deliverables-txt`),
   },
   settings: {
     get: () => request<AppSettings>('/settings'),

@@ -1,6 +1,6 @@
 """Genera documenti Excel formali a partire da template statici (cartella
-app/templates/): Regression Analysis, Release Report e i verbali di review
-Planning/Execution/Deployment/Release to Market."""
+app/templates/): Regression Analysis e Release Report. I verbali di review
+Planning/Execution/Deployment/Release to Market sono in ppr_document.py."""
 
 import datetime as dt
 import json
@@ -10,7 +10,6 @@ from io import BytesIO
 from pathlib import Path
 
 import openpyxl
-from openpyxl.utils.cell import get_column_letter, range_boundaries
 
 from app import models
 
@@ -30,7 +29,6 @@ DEV_MANAGER = "Alberto Vidili"
 PRODUCT_COMPLIANCE_ENGINEER_SENIOR = "Francesca Marchese"
 PRODUCT_MANAGER_TTP = "Antimo Bianco"
 HEAD_OF_SW_INTEGRATED_SYSTEM = "Elisa Simoncini"
-HEAD_OF_MECHATRONICS = "n.a."
 
 CHANGE_ORDER_RE = re.compile(r"^CO(\d{4})-(\d+)$")
 # Codice del Release Report: sempre lo stesso (non dipende dal Change
@@ -46,72 +44,6 @@ INCREMENT_RE = re.compile(r"PTBSYS-\d{2}-\d{3}")
 # Report: layout fisso del template, come le altre celle hardcoded qui sopra.
 REVISION_HISTORY_HEADER_ROW = 28
 REVISION_HISTORY_FIRST_ROW = 29
-
-# Master corporate (blank) da cui si generano i verbali di review
-# Planning/Execution/Deployment/Release to Market: a differenza di REA/RR
-# non c'e' uno storico reale da cui dedurre il formato, e i fogli di review
-# sono verbali di riunione da compilare a mano (partecipanti, minute,
-# domande SI/NO che richiedono giudizio umano) quindi generiamo solo la
-# Cover, lasciando le review cosi' come sono nel template.
-PPR_TEMPLATE_FILENAME = "ppr_template.xlsx"
-
-# Ogni tipo di documento include cumulativamente le review dei tipi
-# precedenti, oltre a Task Guideline/Cover (sempre in testa) e Action Items
-# (sempre in coda), nell'ordine originale del master.
-PPR_DOCUMENT_TYPES = {
-    "planning": {
-        "reviews": ["Planning Review"],
-        "title_word": "PLANNING REVIEW",
-        "filename": "TIH-PLANNING-PTBSYS",
-    },
-    "execution": {
-        "reviews": ["Planning Review", "Execution Review"],
-        "title_word": "EXECUTION REVIEW",
-        "filename": "TIH-EXECUTION-PTBSYS",
-    },
-    "deployment": {
-        "reviews": ["Planning Review", "Execution Review", "Deployment Review"],
-        "title_word": "DEPLOYMENT REVIEW",
-        "filename": "TIH-DEPLOYMENT-PTBSYS",
-    },
-    "release-to-market": {
-        "reviews": ["Planning Review", "Execution Review", "Deployment Review", "Release to Market Review"],
-        "title_word": "RELEASE TO MARKET REVIEW",
-        "filename": "TIH-RELEASE_TO_MARKET-PTBSYS",
-    },
-}
-PPR_LEADING_SHEETS = ["Task Guideline", "Cover"]
-PPR_TRAILING_SHEETS = ["Action Items"]
-# Riga della Cover in cui scrivere la prima (e unica, per ora) voce della
-# Revision History: A=Version, B:C=Author (merged), D:L=Change Description
-# (merged) - stesso layout osservato nel master.
-PPR_REVISION_ROW = 31
-
-# Sezione "Deliverable Check" del foglio Planning Review (presente in tutti
-# e 4 i tipi di documento, essendo il foglio Planning Review sempre
-# incluso): un elenco fisso di documenti di progetto, ciascuno con colonna
-# A=nome (statica, gia' nel template), F=File (merged F:G, codice+versione
-# del documento), H=Note (merged H:J, motivo di non applicabilita' se non
-# consegnato). Riga per riga, popolata dal popup di generazione.
-PPR_DELIVERABLE_ROWS: list[tuple[int, str]] = [
-    (40, "User Needs"),
-    (41, "Product Qualification and Classification"),
-    (42, "Product Description"),
-    (43, "Change Order draft"),
-    (44, "Change Impact Assessment"),
-    (45, "Performance Evaluation Plan"),
-    (46, "Essential Requirement Checklist"),
-    (47, "Design Input"),
-    (48, "Risk Management Plan"),
-    (49, "Safety FMEA"),
-    (50, "Safety Risk Analysis"),
-    (51, "Security Risk Analysis"),
-    (52, "Product Lifecycle Risk Analysis"),
-    (53, "Production Process Risk Analysis"),
-    (54, "Criticality Matrix"),
-    (55, "Design FMEA"),
-    (56, "Other additional deliverable"),
-]
 
 # Stima dell'altezza riga in base alla lunghezza del testo in colonna D
 # (larghezza ~100 unita', wrap_text attivo nel template): non e' un calcolo
@@ -168,33 +100,6 @@ def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
         dst.alignment = copy(src.alignment)
     if ws.row_dimensions[src_row].height:
         ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
-
-
-def _delete_rows_preserving_merges(ws, rows_to_delete: list[int]) -> None:
-    """ws.delete_rows() chiamato piu' volte per righe non contigue lascia a
-    volte celle unite non aggiornate (bug osservato in openpyxl 3.1.5:
-    alcuni merge non vengono spostati e finiscono per coprire celle di
-    un'altra riga, rendendole di fatto non scrivibili). Per sicurezza
-    smerge tutto, elimina le righe, poi ricrea le unioni nelle posizioni
-    corrette (le righe eliminate stesse non vengono ovviamente ricreate)."""
-    original_merges = [str(m) for m in ws.merged_cells.ranges]
-    for rng in original_merges:
-        ws.unmerge_cells(rng)
-
-    for row in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(row, 1)
-
-    deleted = set(rows_to_delete)
-    for rng in original_merges:
-        min_col, min_row, max_col, max_row = range_boundaries(rng)
-        if min_row in deleted:
-            continue  # la riga (e la sua unione) e' stata eliminata
-        new_min_row = min_row - sum(1 for r in deleted if r < min_row)
-        new_max_row = max_row - sum(1 for r in deleted if r < max_row)
-        new_rng = (
-            f"{get_column_letter(min_col)}{new_min_row}:{get_column_letter(max_col)}{new_max_row}"
-        )
-        ws.merge_cells(new_rng)
 
 
 def _find_last_revision_row(cover) -> tuple[int, int | None, str | None]:
@@ -436,112 +341,3 @@ def generate_release_report(project: models.Project, version: int, revision_text
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue(), RELEASE_REPORT_CODE
-
-
-def get_ppr_defaults(project: models.Project, doc_type: str) -> tuple[int, str]:
-    """Versione e testo di revisione proposti (modificabili) per il form di
-    generazione: come la REA, ogni tipo di documento PPR e' nuovo per ogni
-    incremento (non uno storico cumulativo di sistema come la RR), quindi
-    propone sempre versione 1 senza bisogno di un contatore persistito."""
-    increment = _increment_code(project)
-    return 1, f"Initial issue for increment {increment}"
-
-
-def get_ppr_deliverables_defaults() -> list[dict]:
-    """Elenco proposto (modificabile) per la sezione "Deliverable Check"
-    del popup di generazione: tutti inclusi di default, nome file e note
-    vuoti. Uguale per tutti e 4 i tipi di documento (la sezione vive sul
-    foglio Planning Review, sempre incluso)."""
-    return [
-        {"row": row, "name": name, "included": True, "filename": "", "notes": ""}
-        for row, name in PPR_DELIVERABLE_ROWS
-    ]
-
-
-def generate_ppr_document(
-    project: models.Project,
-    doc_type: str,
-    version: int,
-    revision_text: str,
-    deliverables: list[dict] | None = None,
-) -> tuple[bytes, str]:
-    """Planning/Execution/Deployment/Release to Market Review: dal master
-    "Copy of MOD-PPR.xlsx" tiene solo i fogli richiesti per questo tipo di
-    documento (cumulativi: ogni tipo include anche le review dei tipi
-    precedenti) e compila la Cover (titolo, 3 firmatari fissi, prima riga
-    di Revision History) e, sul foglio Planning Review (sempre incluso),
-    la sezione "Deliverable Check" (righe 40-56): per ciascun documento,
-    scelto dal popup di generazione, se "included" scrive il nome file in
-    F e le note in H, altrimenti "N/A" in F e la nota (tipicamente il
-    motivo di non applicabilita') in H. I fogli di review restano
-    altrimenti com'erano nel template: sono verbali di riunione da
-    compilare a mano (partecipanti, minute, domande SI/NO che richiedono
-    giudizio umano), non dati ricavabili dal Backlog Jira come per
-    REA/RR."""
-    config = PPR_DOCUMENT_TYPES[doc_type]
-    wb = openpyxl.load_workbook(TEMPLATES_DIR / PPR_TEMPLATE_FILENAME)
-
-    keep = set(PPR_LEADING_SHEETS) | set(config["reviews"]) | set(PPR_TRAILING_SHEETS)
-    for name in list(wb.sheetnames):
-        if name not in keep:
-            del wb[name]
-
-    increment = _increment_code(project)
-    filename_stem = config["filename"]
-    document_id = f"{filename_stem}.{version}"
-
-    cover = wb["Cover"]
-    cover["D5"] = f"{config['title_word']}\n {SYSTEM_NAME} - Increment {increment}"
-    cover["D12"] = PROJECT_MANAGER
-    normal_font = copy(cover["B13"].font)
-    cover["B13"] = "Product Compliance Engineer Senior"
-    cover["D13"] = PRODUCT_COMPLIANCE_ENGINEER_SENIOR
-    cover["D17"] = DEV_MANAGER
-
-    # B15/B17 nel template hanno testo condizionale ("only for...") in un
-    # colore diverso (arancione) da B13: essendo sempre applicabili a
-    # questo progetto, riportiamo solo il nome del ruolo con lo stesso
-    # font "normale" di B13.
-    cover["B15"] = "Product Manager TTP"
-    cover["B15"].font = copy(normal_font)
-    cover["D15"] = PRODUCT_MANAGER_TTP
-    cover["B17"] = "Product Development Manager"
-    cover["B17"].font = copy(normal_font)
-    cover["B19"] = "Head of SW & Integrated System"
-    cover["B19"].font = copy(normal_font)
-    cover["D19"] = HEAD_OF_SW_INTEGRATED_SYSTEM
-    # A differenza delle altre righe firmatario, nel template D19 non e'
-    # unita a F19 (probabile disallineamento del template originale): la
-    # uniamo qui, il testo eredita l'allineamento gia' centrato di D19.
-    cover.merge_cells("D19:F19")
-    cover["B20"] = "Head of Mechatronics"
-    cover["B20"].font = copy(normal_font)
-    cover["D20"] = HEAD_OF_MECHATRONICS
-    cover.merge_cells("D20:F20")
-
-    cover.cell(row=PPR_REVISION_ROW, column=1, value=version)
-    cover.cell(row=PPR_REVISION_ROW, column=2, value=PROJECT_MANAGER)
-    cover.cell(row=PPR_REVISION_ROW, column=4, value=revision_text)
-
-    # Ruoli non applicabili a questo progetto (Production Quality Manager
-    # per la Pre-Serie Launch Review, Head of Development per progetti AP,
-    # Medical Affairs, Third Party): rimossi dalla Cover.
-    _delete_rows_preserving_merges(cover, [22, 21, 18, 16])
-
-    planning_review = wb["Planning Review"]
-    for item in deliverables or []:
-        row = item.get("row")
-        if row is None:
-            continue
-        included = item.get("included", True)
-        filename = (item.get("filename") or "").strip()
-        notes = (item.get("notes") or "").strip()
-        planning_review.cell(row=row, column=6, value=filename if included else "N/A")
-        planning_review.cell(row=row, column=8, value=notes)
-
-    for sheet in wb.worksheets:
-        sheet.oddHeader.right.text = document_id
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue(), filename_stem

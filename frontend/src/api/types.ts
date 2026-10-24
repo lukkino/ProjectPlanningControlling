@@ -310,6 +310,20 @@ export type PprDocumentMeta = DocumentRevisionMeta & {
   deliverables: PprDeliverable[]
 }
 
+// Documento PPR caricato nel popup: "previous" = ultima versione dello
+// stesso documento, "previous_phase" = ultimo documento della fase precedente.
+export type PprFileRole = 'previous' | 'previous_phase'
+
+export type PprInspection = {
+  title: string
+  last_version: number | null
+  last_description: string | null
+  // Solo per l'ultimo Planning: i Deliverable Check gia' compilati.
+  deliverables: PprDeliverable[] | null
+  // Documento col vecchio template: se ne usano solo versione e history.
+  old_template: boolean
+}
+
 export type DashboardMetrics = {
   backlog_total: number
   backlog_in_scope: number

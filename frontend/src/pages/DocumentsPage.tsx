@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useRef, useState } from 'react'
 import { api, saveBlob, type WorkbookExportResult } from '../api/client'
-import type { DocumentRevisionMeta, ImplementedByTask, PprDeliverable, Project, RequirementCheckItem, RequirementsCheck } from '../api/types'
+import type {
+  DocumentRevisionMeta,
+  ImplementedByTask,
+  PprDeliverable,
+  PprInspection,
+  Project,
+  RequirementCheckItem,
+  RequirementsCheck,
+} from '../api/types'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -15,6 +23,11 @@ const PPR_TYPES: { docType: string; label: string }[] = [
   { docType: 'deployment', label: 'Deployment Review' },
   { docType: 'release-to-market', label: 'Release to Market Review' },
 ]
+
+// "Execution Review" -> "Execution" e il nome del suo file
+// ("TIH-EXECUTION-PTBSYS.xlsx"), per dire chiaramente cosa caricare.
+const pprDocName = (label: string) => label.replace(/ Review$/, '')
+const pprFileName = (label: string) => `TIH-${pprDocName(label).toUpperCase().replace(/ /g, '_')}-PTBSYS.xlsx`
 
 // Popup unico (stessa UI per tutti i documenti generati) per inserire
 // versione e testo di revisione prima del download: i valori proposti
@@ -291,61 +304,267 @@ function DocumentInfoButton({ label, info }: { label: string; info: DocumentInfo
   )
 }
 
-// Come DocumentDownloadButton, ma con in piu' la sezione "Deliverable
-// Check" del foglio Planning Review (righe 40-56, sempre presente in
-// tutti e 4 i tipi di documento PPR): per ciascun documento, un flag
-// incluso/escluso, il nome file e una nota, che vanno a popolare
-// rispettivamente le colonne F e H (unite H:J) di quella riga.
+// File scelto dall'utente -> base64 (senza il prefisso "data:...;base64,"),
+// per mandarlo al backend dentro un JSON.
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '')
+    reader.onerror = () => reject(reader.error ?? new Error('Lettura del file non riuscita'))
+    reader.readAsDataURL(file)
+  })
+}
+
+type PprUpload = { name: string; b64: string; info: PprInspection }
+
+// Scelta di un documento PPR precedente (.xlsx): appena scelto, il backend
+// controlla che sia del tipo giusto e ne legge l'ultima versione.
+function PprFilePicker({
+  docLabel,
+  fileName,
+  purpose,
+  hint,
+  upload,
+  inspect,
+  onLoad,
+  onClear,
+}: {
+  docLabel: string
+  fileName: string
+  purpose: string
+  hint: string
+  upload: PprUpload | null
+  inspect: (fileB64: string) => Promise<PprInspection>
+  onLoad: (upload: PprUpload) => void
+  onClear: () => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const check = useMutation({
+    mutationFn: async (file: File) => {
+      const b64 = await fileToBase64(file)
+      return { name: file.name, b64, info: await inspect(b64) }
+    },
+    onSuccess: onLoad,
+  })
+
+  return (
+    // Riquadro col tipo di documento ben in vista: i file da caricare si
+    // somigliano (TIH-PLANNING-PTBSYS, TIH-EXECUTION-PTBSYS...).
+    <div
+      className="form-row"
+      style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span>Ultimo</span>
+        <strong
+          style={{
+            fontSize: 15,
+            textTransform: 'uppercase',
+            padding: '1px 8px',
+            borderRadius: 4,
+            background: 'var(--primary)',
+            color: '#fff',
+          }}
+        >
+          {docLabel}
+        </strong>
+        <span className="muted">
+          ({fileName}) · {purpose}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13 }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''
+            if (file) check.mutate(file)
+          }}
+        />
+        <button className="btn" type="button" disabled={check.isPending} onClick={() => fileRef.current?.click()}>
+          {check.isPending ? 'Controllo…' : upload ? 'Cambia file' : 'Scegli file…'}
+        </button>
+        {upload ? (
+          <>
+            <span>📄 {upload.name}</span>
+            <span className="muted">
+              · ultima versione {upload.info.last_version ?? '—'}
+              {upload.info.last_description && `: ${upload.info.last_description}`}
+            </span>
+            {upload.info.old_template && (
+              <span className="muted" style={{ color: '#b45309' }}>
+                · vecchio template: presi solo versione e Revision History
+              </span>
+            )}
+            <button className="link-btn" type="button" title="Togli il file" onClick={onClear}>
+              ✕
+            </button>
+          </>
+        ) : (
+          <span className="muted">{hint}</span>
+        )}
+      </div>
+      {check.isError && (
+        <div className="error-banner" style={{ marginTop: 6 }}>
+          {(check.error as Error).message}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Documento PPR (Planning, Execution, Deployment, Release to Market): si
+// caricano l'ultima versione dello stesso documento (Cover e Revision
+// History, facoltativa la prima volta) e, tranne che per il Planning,
+// l'ultimo documento della fase precedente (fogli delle review precedenti
+// e Action Items). Per il Planning anche la sezione "Deliverable Check",
+// precompilata dall'ultimo Planning se caricato.
 function PprDownloadButton({
   projectId,
   docType,
   label,
+  previousLabel,
 }: {
   projectId: number
   docType: string
   label: string
+  previousLabel: string | null
 }) {
   const [open, setOpen] = useState(false)
+  const [defaultVersion, setDefaultVersion] = useState(1)
   const [version, setVersion] = useState('')
   const [revisionText, setRevisionText] = useState('')
   const [deliverables, setDeliverables] = useState<PprDeliverable[]>([])
+  const [defaultDeliverables, setDefaultDeliverables] = useState<PprDeliverable[]>([])
+  const [previous, setPrevious] = useState<PprUpload | null>(null)
+  const [previousPhase, setPreviousPhase] = useState<PprUpload | null>(null)
+  const isPlanning = docType === 'planning'
 
   const prepare = useMutation({
     mutationFn: () => api.documents.pprMeta(projectId, docType),
     onSuccess: (meta) => {
+      setDefaultVersion(meta.next_version)
       setVersion(String(meta.next_version))
       setRevisionText(meta.last_revision_text)
       setDeliverables(meta.deliverables)
+      setDefaultDeliverables(meta.deliverables)
+      setPrevious(null)
+      setPreviousPhase(null)
+      setGenerated(null)
       setOpen(true)
     },
   })
 
+  // Tranne che per il Planning, col documento si prepara anche l'elenco dei
+  // documenti attesi alla review con i loro owner (.txt). Non lo si scarica
+  // in automatico: un secondo download senza clic, a fine generazione,
+  // viene bloccato dal browser. Il popup resta aperto col pulsante.
+  const [generated, setGenerated] = useState<{
+    filename: string
+    list: { blob: Blob; filename: string }
+  } | null>(null)
+
   const confirm = useMutation({
-    mutationFn: () => api.documents.ppr(projectId, docType, Number(version) || 1, revisionText, deliverables),
-    onSuccess: ({ blob, filename }) => {
-      saveBlob(blob, filename)
-      setOpen(false)
+    mutationFn: async () => {
+      const document = await api.documents.ppr(projectId, docType, {
+        version: Number(version) || 1,
+        revision_text: revisionText,
+        deliverables: isPlanning ? deliverables : null,
+        previous_b64: previous?.b64 ?? null,
+        previous_phase_b64: previousPhase?.b64 ?? null,
+      })
+      const list = isPlanning ? null : await api.documents.pprDeliverablesTxt(projectId, docType)
+      return { document, list }
+    },
+    onSuccess: ({ document, list }) => {
+      saveBlob(document.blob, document.filename)
+      if (list) setGenerated({ filename: document.filename, list })
+      else setOpen(false)
     },
   })
 
   const close = () => {
-    if (!confirm.isPending) setOpen(false)
+    if (!confirm.isPending) {
+      setOpen(false)
+      setGenerated(null)
+    }
   }
 
   const updateDeliverable = (row: number, patch: Partial<PprDeliverable>) => {
     setDeliverables((prev) => prev.map((d) => (d.row === row ? { ...d, ...patch } : d)))
   }
 
+  const missingPreviousPhase = previousLabel !== null && previousPhase === null
+
   return (
     <>
       <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
         {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
       </button>
-      {open && (
+      {open && generated && (
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+          <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>{label}</h3>
+            <p style={{ marginTop: 0 }}>✓ Scaricato {generated.filename}</p>
+            <p className="muted">
+              Elenco dei documenti attesi alla review, con l'owner di ciascuno preso dal Task Guideline.
+            </p>
+            <div className="form-actions">
+              <button className="btn" onClick={close}>
+                Chiudi
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  saveBlob(generated.list.blob, generated.list.filename)
+                  close()
+                }}
+              >
+                ⬇ Scarica {generated.list.filename}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {open && !generated && (
         // onMouseDown (non onClick): vedi commento in DocumentDownloadButton.
         <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>{label}</h3>
+            <h3 style={{ marginTop: 0 }}>Genera {label}</h3>
+            <p className="muted" style={{ marginTop: 0 }}>Documenti precedenti da caricare:</p>
+            <PprFilePicker
+              docLabel={pprDocName(label)}
+              fileName={pprFileName(label)}
+              purpose="firmatari e Revision History"
+              hint="Facoltativo: senza, la Revision History parte dalla versione indicata sotto (primo documento di questo tipo)"
+              upload={previous}
+              inspect={(b64) => api.documents.pprInspect(projectId, docType, 'previous', b64)}
+              onLoad={(upload) => {
+                setPrevious(upload)
+                setVersion(String((upload.info.last_version ?? 0) + 1))
+                if (upload.info.deliverables) setDeliverables(upload.info.deliverables)
+              }}
+              onClear={() => {
+                setPrevious(null)
+                setVersion(String(defaultVersion))
+                setDeliverables(defaultDeliverables)
+              }}
+            />
+            {previousLabel && (
+              <PprFilePicker
+                docLabel={pprDocName(previousLabel)}
+                fileName={pprFileName(previousLabel)}
+                purpose="fogli delle review precedenti e Action Items"
+                hint="Obbligatorio"
+                upload={previousPhase}
+                inspect={(b64) => api.documents.pprInspect(projectId, docType, 'previous_phase', b64)}
+                onLoad={setPreviousPhase}
+                onClear={() => setPreviousPhase(null)}
+              />
+            )}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <div className="form-row" style={{ width: 100 }}>
                 <label>Versione</label>
@@ -356,56 +575,66 @@ function PprDownloadButton({
                 <textarea rows={2} value={revisionText} onChange={(e) => setRevisionText(e.target.value)} />
               </div>
             </div>
-            <div className="form-row">
-              <label>Deliverable Check (foglio Planning Review)</label>
-              <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 28 }}></th>
-                      <th>Documento</th>
-                      <th style={{ width: 150 }}>Nome file</th>
-                      <th style={{ width: 200 }}>Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deliverables.map((d) => (
-                      <tr key={d.row}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={d.included}
-                            onChange={(e) => updateDeliverable(d.row, { included: e.target.checked })}
-                          />
-                        </td>
-                        <td style={{ whiteSpace: 'normal' }}>{d.name}</td>
-                        <td>
-                          <input
-                            value={d.filename}
-                            disabled={!d.included}
-                            placeholder={d.included ? 'es. FL-UN.1' : 'N/A'}
-                            onChange={(e) => updateDeliverable(d.row, { filename: e.target.value })}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={d.notes}
-                            onChange={(e) => updateDeliverable(d.row, { notes: e.target.value })}
-                          />
-                        </td>
+            {isPlanning && (
+              <div className="form-row">
+                <label>
+                  Deliverable Check (foglio Planning Review)
+                  {previous?.info.deliverables && <span className="muted"> · precompilato dall'ultimo Planning</span>}
+                </label>
+                <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 28 }}></th>
+                        <th>Documento</th>
+                        <th style={{ width: 150 }}>Nome file</th>
+                        <th style={{ width: 200 }}>Note</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {deliverables.map((d) => (
+                        <tr key={d.row}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={d.included}
+                              onChange={(e) => updateDeliverable(d.row, { included: e.target.checked })}
+                            />
+                          </td>
+                          <td style={{ whiteSpace: 'normal' }}>{d.name}</td>
+                          <td>
+                            <input
+                              value={d.filename}
+                              disabled={!d.included}
+                              placeholder={d.included ? 'es. FL-UN.1' : 'N/A'}
+                              onChange={(e) => updateDeliverable(d.row, { filename: e.target.value })}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={d.notes}
+                              onChange={(e) => updateDeliverable(d.row, { notes: e.target.value })}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            )}
             {confirm.isError && <div className="error-banner">{(confirm.error as Error).message}</div>}
             <div className="form-actions">
               <button className="btn" onClick={close} disabled={confirm.isPending}>
                 Annulla
               </button>
-              <button className="btn btn-primary" onClick={() => confirm.mutate()} disabled={confirm.isPending}>
-                {confirm.isPending ? 'Generazione…' : 'Genera e scarica'}
+              <button
+                className="btn btn-primary"
+                title={missingPreviousPhase ? `Carica prima l'ultimo ${previousLabel}` : undefined}
+                onClick={() => confirm.mutate()}
+                disabled={confirm.isPending || missingPreviousPhase}
+              >
+                {confirm.isPending ? 'Generazione… (Excel, qualche secondo)' : 'Genera e scarica'}
               </button>
             </div>
           </div>
@@ -816,13 +1045,18 @@ export function DocumentsPage() {
           <h3 style={{ marginTop: 0 }}>{label}</h3>
           <p className="muted" style={{ marginTop: 0 }}>
             {index === 0
-              ? 'Documento di review: viene compilata solo la Cover (titolo, firmatari, prima revisione); i fogli di review restano come nel template, da compilare a mano durante la riunione.'
-              : `Documento di review: include anche le review precedenti (${PPR_TYPES.slice(0, index)
+              ? "Documento di review dal template MOD-PPR: Cover e Revision History proseguono dall'ultimo Planning caricato, il foglio Planning Review è nuovo, col Deliverable Check compilato dal popup."
+              : `Documento di review dal template MOD-PPR: Cover e Revision History proseguono dall'ultimo ${label} caricato, il foglio ${label} è nuovo, mentre ${PPR_TYPES.slice(0, index)
                   .map((t) => t.label)
-                  .join(', ')}). Viene compilata solo la Cover.`}
+                  .join(', ')} e Action Items vengono dall'ultimo ${PPR_TYPES[index - 1].label}.`}
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <PprDownloadButton projectId={project.id} docType={docType} label={label} />
+            <PprDownloadButton
+              projectId={project.id}
+              docType={docType}
+              label={label}
+              previousLabel={index > 0 ? PPR_TYPES[index - 1].label : null}
+            />
             {docType === 'planning' && (
               <>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

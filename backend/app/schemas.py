@@ -591,8 +591,8 @@ class RequirementsCheck(BaseModel):
 
 class PprDeliverable(BaseModel):
     """Una riga della sezione "Deliverable Check" del foglio Planning
-    Review: row/name sono fissi (letti dal template), included/filename/
-    notes sono scelti dall'utente nel popup di generazione."""
+    Review: row (posizione nell'elenco) e name sono fissi, included/
+    filename/notes sono scelti dall'utente nel popup di generazione."""
 
     row: int
     name: str
@@ -603,6 +603,33 @@ class PprDeliverable(BaseModel):
 
 class PprDocumentMeta(DocumentRevisionMeta):
     deliverables: list[PprDeliverable]
+
+
+class PprInspectRequest(BaseModel):
+    """Un documento caricato nel popup, in base64: "previous" = ultima
+    versione dello stesso documento, "previous_phase" = ultimo documento
+    della fase precedente."""
+
+    role: Literal["previous", "previous_phase"]
+    file_b64: str
+
+
+class PprInspection(BaseModel):
+    title: str
+    last_version: int | None = None
+    last_description: str | None = None
+    # Solo per l'ultimo Planning: i Deliverable Check gia' compilati.
+    deliverables: list[PprDeliverable] | None = None
+    # Documento col vecchio template: se ne usano solo versione e history.
+    old_template: bool = False
+
+
+class PprGenerateRequest(BaseModel):
+    version: int
+    revision_text: str
+    deliverables: list[PprDeliverable] | None = None
+    previous_b64: str | None = None
+    previous_phase_b64: str | None = None
 
 
 # ---------- Dashboard ----------
