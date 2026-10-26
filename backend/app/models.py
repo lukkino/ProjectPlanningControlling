@@ -136,6 +136,11 @@ class Project(Base):
     # testo alternativo opzionale da mostrare al posto dell'URL.
     change_order_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     change_order_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Cartelle su file system (create a mano dall'utente, qui solo il
+    # percorso): presentazioni degli scenari delle Story (colonna Scenarios
+    # del Backlog) e documenti delle review.
+    scenarios_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_documents_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ultima versione e ultimo testo di revisione usati per generare il
     # Release Report da questa app: propongono i valori di default (versione
     # incrementata, testo da modificare) alla generazione successiva. None
@@ -478,6 +483,11 @@ class BacklogItem(Base):
     # Resta fuori dalla pianificazione a cascata degli sviluppi.
     # Implica included_in_codefreeze=False (vedi routers/backlog.py).
     is_activity: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Presentazione degli scenari collegata a mano (Story gia' fatte prima
+    # della cartella Scenarios, o file altrove): percorso di un file o URL
+    # (es. SharePoint). Se manca vale il pptx trovato nella cartella
+    # Scenarios dell'increment (vedi services/scenarios.py).
+    scenarios_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Le due regole usate in tutta l'app (stesse di frontend/src/lib/
     # backlogStats.ts): i numeri (PBI, completamento, snapshot, Forecasting)

@@ -18,6 +18,8 @@ const emptyForm = {
   code_freeze_date: '',
   planned_finish_date: '',
   jira_jql: '',
+  scenarios_folder: '',
+  review_documents_folder: '',
 }
 
 export function ProjectFormModal({ project, onClose }: Props) {
@@ -32,6 +34,8 @@ export function ProjectFormModal({ project, onClose }: Props) {
           code_freeze_date: project.code_freeze_date ?? '',
           planned_finish_date: project.planned_finish_date ?? '',
           jira_jql: project.jira_jql ?? '',
+          scenarios_folder: project.scenarios_folder ?? '',
+          review_documents_folder: project.review_documents_folder ?? '',
         }
       : emptyForm,
   )
@@ -47,6 +51,8 @@ export function ProjectFormModal({ project, onClose }: Props) {
         planned_finish_date: form.planned_finish_date || null,
         scope: form.scope || null,
         jira_jql: form.jira_jql || null,
+        scenarios_folder: form.scenarios_folder.trim() || null,
+        review_documents_folder: form.review_documents_folder.trim() || null,
       }
       // Lo Scope di un increment esistente si modifica direttamente dalla
       // Dashboard (ScopeCard, con formattazione): qui solo alla creazione.
@@ -119,6 +125,24 @@ export function ProjectFormModal({ project, onClose }: Props) {
             value={form.jira_jql}
             onChange={(e) => set('jira_jql', e.target.value)}
             placeholder='project = PTBSYS AND fixVersion = "03-003 - October"'
+          />
+        </div>
+
+        {/* Cartelle gia' create a mano su file system: qui solo il percorso. */}
+        <div className="form-row">
+          <label>Cartella Scenarios (presentazioni degli scenari delle Story)</label>
+          <input
+            value={form.scenarios_folder}
+            onChange={(e) => set('scenarios_folder', e.target.value)}
+            placeholder="C:\...\PTBSYS-03-003\Scenarios"
+          />
+        </div>
+        <div className="form-row">
+          <label>Cartella documenti delle review</label>
+          <input
+            value={form.review_documents_folder}
+            onChange={(e) => set('review_documents_folder', e.target.value)}
+            placeholder="C:\...\PTBSYS-03-003\Review"
           />
         </div>
 

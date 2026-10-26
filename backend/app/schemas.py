@@ -237,6 +237,7 @@ class BacklogItemBase(BaseModel):
     in_scope: bool = True
     included_in_codefreeze: bool = True
     is_activity: bool = False
+    scenarios_link: str | None = None
     planned: bool = False
     planned_duration_days: float | None = None
     dev_estimate_hours: float | None = None
@@ -264,6 +265,7 @@ class BacklogItemUpdate(BaseModel):
     in_scope: bool | None = None
     included_in_codefreeze: bool | None = None
     is_activity: bool | None = None
+    scenarios_link: str | None = None
     planned: bool | None = None
     planned_duration_days: float | None = None
     dev_estimate_hours: float | None = None
@@ -412,6 +414,8 @@ class ProjectBase(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    scenarios_folder: str | None = None
+    review_documents_folder: str | None = None
     is_current: bool = False
     release_date: dt.date | None = None
 
@@ -437,6 +441,8 @@ class ProjectUpdate(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    scenarios_folder: str | None = None
+    review_documents_folder: str | None = None
     is_current: bool | None = None
     release_date: dt.date | None = None
 
@@ -448,6 +454,24 @@ class ProjectListItem(ProjectBase):
     gantt_order: int | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
+
+
+class ScenariosStatus(BaseModel):
+    # Cartella Scenarios dell'increment (None = non impostata) e se esiste
+    # davvero su file system.
+    folder: str | None
+    folder_exists: bool
+    # Chiave Jira -> nome del file pptx degli scenari gia' presente.
+    files: dict[str, str]
+
+
+class ScenarioFile(BaseModel):
+    filename: str
+
+
+class ScenarioBrowseResult(BaseModel):
+    # None = finestra chiusa senza scegliere un file.
+    path: str | None
 
 
 # ---------- Increment ----------

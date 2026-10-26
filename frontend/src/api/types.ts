@@ -120,6 +120,9 @@ export type BacklogItem = {
   // Attivita' di servizio: fuori dal code freeze ma visibile in tabella e
   // nel Gantt, fuori dalla cascata. Implica included_in_codefreeze=false.
   is_activity: boolean
+  // Presentazione degli scenari collegata a mano (percorso di un file o
+  // URL); se manca vale quella trovata nella cartella Scenarios.
+  scenarios_link: string | null
   planned: boolean
   planned_duration_days: number | null
   dev_estimate_hours: number | null
@@ -145,6 +148,14 @@ export type SyncResult = {
   removed: number
   total_matched: number
   errors: string[]
+}
+
+// Presentazioni degli scenari delle Story nella cartella Scenarios
+// dell'increment: files va da chiave Jira a nome del file pptx.
+export type ScenariosStatus = {
+  folder: string | null
+  folder_exists: boolean
+  files: Record<string, string>
 }
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
@@ -197,6 +208,10 @@ export type Project = {
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
+  // Percorsi delle cartelle (create a mano su file system) per gli scenari
+  // delle Story e per i documenti delle review.
+  scenarios_folder: string | null
+  review_documents_folder: string | null
   is_current: boolean
   // Data di rilascio: valorizzata = increment "Rilasciato".
   release_date: string | null

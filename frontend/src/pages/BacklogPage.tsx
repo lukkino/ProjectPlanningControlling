@@ -14,6 +14,7 @@ import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { BacklogGanttChart } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { NonWorkingDaysModal, type NewNonWorkingDay } from '../components/NonWorkingDaysModal'
+import { ScenarioLinkModal } from '../components/ScenarioLinkModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
@@ -105,6 +106,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   dev_effort_hours: 90,
   progetto_id: 130,
   notes: 160,
+  scenarios: 170,
 }
 const HANDLE_COLUMN_WIDTH = 30
 const SELECT_COLUMN_WIDTH = 30
@@ -145,6 +147,7 @@ export function BacklogPage() {
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false)
   const [bulkSizing, setBulkSizing] = useState('')
   const [nonWorkingOpen, setNonWorkingOpen] = useState(false)
+  const [scenarioLinkItem, setScenarioLinkItem] = useState<BacklogItem | null>(null)
 
   // Barra di scroll orizzontale "specchio" sopra la tabella (vedi CSS
   // .table-scroll-mirror): tiene la stessa scrollLeft di .table-wrap, cosi'
@@ -223,6 +226,23 @@ export function BacklogPage() {
     queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
     queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
   }
+
+  // Presentazioni degli scenari gia' presenti nella cartella Scenarios
+  // dell'increment, per chiave Jira (solo Story).
+  const { data: scenarios } = useQuery({
+    queryKey: ['scenarios', project.id],
+    queryFn: () => api.scenarios.status(project.id),
+  })
+  const createScenarios = useMutation({
+    mutationFn: (itemId: number) => api.scenarios.create(itemId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['scenarios', project.id] }),
+  })
+  const openScenarios = useMutation({ mutationFn: (itemId: number) => api.scenarios.open(itemId) })
+  const scenariosDisabledReason = !scenarios?.folder
+    ? 'Cartella Scenarios non impostata: impostala da Modifica increment'
+    : !scenarios.folder_exists
+      ? `La cartella Scenarios non esiste: ${scenarios.folder}`
+      : null
 
   const update = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<BacklogItem> }) => api.backlog.update(id, data),
@@ -774,6 +794,79 @@ export function BacklogPage() {
         />
       ),
     },
+    {
+      key: 'scenarios',
+      label: 'Scenarios',
+      // Solo per le Story: link alla presentazione degli scenari, quella
+      // collegata a mano o altrimenti il pptx trovato nella cartella
+      // Scenarios dell'increment; se non c'e', i pulsanti per crearla dal
+      // template o collegarne una gia' fatta.
+      render: (item) => {
+        if (item.issue_type !== 'Story') return null
+        if (item.scenarios_link) {
+          const isUrl = /^https?:\/\//i.test(item.scenarios_link)
+          return (
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <a
+                href={isUrl ? item.scenarios_link : '#'}
+                target={isUrl ? '_blank' : undefined}
+                rel="noreferrer"
+                title={item.scenarios_link}
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                onClick={(e) => {
+                  if (isUrl) return
+                  e.preventDefault()
+                  openScenarios.mutate(item.id)
+                }}
+              >
+                {isUrl ? 'Link scenari' : item.scenarios_link.split(/[\\/]/).pop()}
+              </a>
+              <button
+                className="btn"
+                title="Scollega la presentazione (il file non viene cancellato)"
+                onClick={() => update.mutate({ id: item.id, data: { scenarios_link: null } })}
+              >
+                ✕
+              </button>
+            </span>
+          )
+        }
+        const filename = scenarios?.files[item.jira_key]
+        if (filename) {
+          return (
+            <a
+              href="#"
+              title={`Apri ${filename}`}
+              onClick={(e) => {
+                e.preventDefault()
+                openScenarios.mutate(item.id)
+              }}
+            >
+              {filename}
+            </a>
+          )
+        }
+        return (
+          <span style={{ display: 'flex', gap: 4 }}>
+            <button
+              className="btn"
+              disabled={!!scenariosDisabledReason || createScenarios.isPending}
+              title={scenariosDisabledReason ?? 'Crea la presentazione degli scenari dal template, nella cartella Scenarios'}
+              onClick={() => createScenarios.mutate(item.id)}
+            >
+              {createScenarios.isPending && createScenarios.variables === item.id ? 'Creazione...' : 'Crea'}
+            </button>
+            <button
+              className="btn"
+              title="Collega una presentazione degli scenari gia' fatta (file o URL)"
+              onClick={() => setScenarioLinkItem(item)}
+            >
+              Aggiungi
+            </button>
+          </span>
+        )
+      },
+    },
   ]
   const defaultColumnOrder = columns.map((c) => c.key)
 
@@ -1199,6 +1292,18 @@ export function BacklogPage() {
         </p>
       )}
 
+      {scenarioLinkItem && (
+        <ScenarioLinkModal
+          projectId={project.id}
+          jiraKey={scenarioLinkItem.jira_key}
+          onSave={(link) => {
+            update.mutate({ id: scenarioLinkItem.id, data: { scenarios_link: link } })
+            setScenarioLinkItem(null)
+          }}
+          onClose={() => setScenarioLinkItem(null)}
+        />
+      )}
+
       {nonWorkingOpen && (
         <NonWorkingDaysModal
           days={nonWorkingDays ?? []}
@@ -1340,6 +1445,12 @@ export function BacklogPage() {
 
       {view === 'table' && (
       <>
+      {createScenarios.isError && (
+        <div className="error-banner">Creazione scenari non riuscita: {(createScenarios.error as Error).message}</div>
+      )}
+      {openScenarios.isError && (
+        <div className="error-banner">Apertura scenari non riuscita: {(openScenarios.error as Error).message}</div>
+      )}
       {bulkUpdate.isError && (
         <div className="error-banner">
           Azione in blocco non riuscita, nessun item modificato: {(bulkUpdate.error as Error).message}

@@ -30,6 +30,7 @@ import type {
   PprInspection,
   Project,
   ProjectDetail,
+  ScenariosStatus,
   Snapshot,
   SubProject,
   SyncProgress,
@@ -269,6 +270,16 @@ export const api = {
     remove: (id: number) => del(`/backlog/${id}`),
     sync: (projectId: number) => post<SyncResult>(`/projects/${projectId}/backlog/sync`),
     syncProgress: (projectId: number) => request<SyncProgress>(`/projects/${projectId}/backlog/sync/progress`),
+  },
+  scenarios: {
+    status: (projectId: number) => request<ScenariosStatus>(`/projects/${projectId}/scenarios`),
+    create: (itemId: number) => post<{ filename: string }>(`/backlog/${itemId}/scenarios`),
+    // Apre il pptx in PowerPoint sulla macchina del backend (quella
+    // dell'utente): un link file:// verrebbe bloccato dal browser.
+    open: (itemId: number) => post<void>(`/backlog/${itemId}/scenarios/open`),
+    // Finestra "Apri file" di Windows aperta dal backend: path null se
+    // chiusa senza scegliere.
+    browse: (projectId: number) => post<{ path: string | null }>(`/projects/${projectId}/scenarios/browse`),
   },
   complaints: {
     list: () => request<Complaint[]>('/complaints'),

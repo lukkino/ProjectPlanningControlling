@@ -130,6 +130,9 @@ def run_lightweight_migrations() -> None:
         if "is_activity" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN is_activity BOOLEAN DEFAULT 0"))
+        if "scenarios_link" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN scenarios_link TEXT"))
 
     if "increment_budget_lines" in table_names:
         budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}
@@ -240,6 +243,10 @@ def run_lightweight_migrations() -> None:
         if "release_date" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN release_date DATE"))
+        if "scenarios_folder" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN scenarios_folder TEXT"))
+                conn.execute(text("ALTER TABLE projects ADD COLUMN review_documents_folder TEXT"))
 
         # estimated_budget_hours/estimated_budget_material sono relitti di
         # uno schema precedente allo split Project/Increment (il budget vive
