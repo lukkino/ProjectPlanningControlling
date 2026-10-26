@@ -62,6 +62,32 @@ export type IncrementResourceType = {
   resource_count: number
   hours_per_day: number
   order: number
+  // Persone della tipologia (composizione del team di progetto): se ce ne
+  // sono, le ore della tipologia sono la somma delle loro.
+  members: TeamMember[]
+}
+
+// Una persona del team, con le ore disponibili al giorno e le ferie.
+export type TeamMember = {
+  id: number
+  resource_type_id: number
+  name: string
+  hours_per_day: number
+  order: number
+  absences: MemberAbsence[]
+}
+
+export type AbsenceKind = 'Ferie' | 'Malattia' | 'Altro'
+
+// Assenza di una persona: dal primo all'ultimo giorno compresi (ISO
+// yyyy-mm-dd). Il tipo e' solo informativo: tutte tolgono ore.
+export type MemberAbsence = {
+  id: number
+  member_id: number
+  start_date: string
+  end_date: string
+  kind: AbsenceKind
+  note: string | null
 }
 
 export type HoursCalculator = {

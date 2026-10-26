@@ -269,6 +269,52 @@ class IncrementResourceType(Base):
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     increment: Mapped["Increment"] = relationship(back_populates="resource_types")
+    # Persone della tipologia (composizione del team di progetto). Se ce ne
+    # sono, le ore della tipologia sono la somma delle loro (ognuna con le
+    # proprie ore/giorno e ferie) e resource_count/hours_per_day non contano
+    # piu' per il calcolo: hours_per_day resta il default delle persone nuove.
+    members: Mapped[list["IncrementTeamMember"]] = relationship(
+        back_populates="resource_type", cascade="all, delete-orphan", order_by="IncrementTeamMember.order"
+    )
+
+
+class IncrementTeamMember(Base):
+    """Una persona del team di progetto, in una tipologia di risorsa del
+    Capacity Planner: le ore disponibili al giorno e le ferie nel periodo."""
+
+    __tablename__ = "increment_team_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_type_id: Mapped[int] = mapped_column(ForeignKey("increment_resource_types.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    hours_per_day: Mapped[float] = mapped_column(Float, default=8)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    resource_type: Mapped["IncrementResourceType"] = relationship(back_populates="members")
+    absences: Mapped[list["IncrementMemberAbsence"]] = relationship(
+        back_populates="member", cascade="all, delete-orphan", order_by="IncrementMemberAbsence.start_date"
+    )
+
+
+ABSENCE_KINDS = ["Ferie", "Malattia", "Altro"]
+
+
+class IncrementMemberAbsence(Base):
+    """Assenza (ferie, malattia...) di una persona del team: dal primo
+    all'ultimo giorno compresi, anche un giorno solo. Solo i lun-ven dentro il
+    periodo del Capacity Planner tolgono ore."""
+
+    __tablename__ = "increment_member_absences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("increment_team_members.id", ondelete="CASCADE"))
+    start_date: Mapped[dt.date] = mapped_column(Date)
+    end_date: Mapped[dt.date] = mapped_column(Date)
+    # Uno di ABSENCE_KINDS: solo informativo, tutte tolgono ore allo stesso modo.
+    kind: Mapped[str] = mapped_column(String(32), default="Ferie")
+    note: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    member: Mapped["IncrementTeamMember"] = relationship(back_populates="absences")
 
 
 # Colonne di revisione del Dettaglio budget ore di un progetto che non ne ha

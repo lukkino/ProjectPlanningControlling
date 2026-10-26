@@ -467,6 +467,47 @@ tbody tr:hover .sticky-col { background: var(--bg); }
 .badge.done { background: #e3f6ea; color: var(--success); }
 .badge.current { background: var(--primary); color: white; }
 
+/* Capacity Planner: tipologie di risorsa espandibili nelle persone del team,
+   ognuna con le sue ferie. */
+.expand-btn {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.expand-btn:hover { color: var(--primary); }
+tr.capacity-member-row td { background: #f7f9fc; }
+tr.capacity-member-row input { background: #f7f9fc; }
+.absence-form { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.absence-form input[type='date'] { width: 130px; padding: 2px 4px; font-size: 12px; }
+.absence-form .btn { padding: 2px 8px; font-size: 12px; }
+.member-chip.kind-malattia { background: #fde8e8; }
+.member-chip.kind-altro { background: #eef0f3; }
+.absence-form select { padding: 2px 4px; font-size: 12px; }
+.member-chip.outside { background: #eef0f3; color: var(--text-muted); text-decoration: line-through; }
+.member-list { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: #e6eefc;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.member-chip button {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.member-chip button:hover { color: var(--danger, #c0392b); }
+
 tr.phase-current td { background: #e6eefc; }
 tr.phase-current input { background: #e6eefc; }
 

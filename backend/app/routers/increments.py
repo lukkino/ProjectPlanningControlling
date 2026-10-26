@@ -447,6 +447,78 @@ def delete_resource_type(resource_type_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+def _get_member_or_404(db: Session, member_id: int) -> models.IncrementTeamMember:
+    member = db.get(models.IncrementTeamMember, member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Persona non trovata")
+    return member
+
+
+@router.post(
+    "/resource-types/{resource_type_id}/members", response_model=schemas.TeamMember, status_code=201
+)
+def create_team_member(resource_type_id: int, payload: schemas.TeamMemberCreate, db: Session = Depends(get_db)):
+    resource_type = _get_resource_type_or_404(db, resource_type_id)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Il nome della persona è obbligatorio")
+    member = models.IncrementTeamMember(
+        resource_type_id=resource_type.id,
+        name=name,
+        hours_per_day=resource_type.hours_per_day if payload.hours_per_day is None else payload.hours_per_day,
+        order=max((m.order for m in resource_type.members), default=0) + 1,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+@router.put("/members/{member_id}", response_model=schemas.TeamMember)
+def update_team_member(member_id: int, payload: schemas.TeamMemberUpdate, db: Session = Depends(get_db)):
+    member = _get_member_or_404(db, member_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "name":
+            value = (value or "").strip()
+            if not value:
+                raise HTTPException(status_code=400, detail="Il nome della persona è obbligatorio")
+        setattr(member, field, value)
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+@router.delete("/members/{member_id}", status_code=204)
+def delete_team_member(member_id: int, db: Session = Depends(get_db)):
+    db.delete(_get_member_or_404(db, member_id))
+    db.commit()
+
+
+@router.post("/members/{member_id}/absences", response_model=schemas.MemberAbsence, status_code=201)
+def create_member_absence(member_id: int, payload: schemas.MemberAbsenceCreate, db: Session = Depends(get_db)):
+    _get_member_or_404(db, member_id)
+    absence = models.IncrementMemberAbsence(
+        member_id=member_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        kind=payload.kind,
+        note=(payload.note or "").strip() or None,
+    )
+    db.add(absence)
+    db.commit()
+    db.refresh(absence)
+    return absence
+
+
+@router.delete("/absences/{absence_id}", status_code=204)
+def delete_member_absence(absence_id: int, db: Session = Depends(get_db)):
+    absence = db.get(models.IncrementMemberAbsence, absence_id)
+    if absence is None:
+        raise HTTPException(status_code=404, detail="Ferie non trovate")
+    db.delete(absence)
+    db.commit()
+
+
 # ---------- Dettaglio budget ore progetto ----------
 
 def _hours_detail(increment: models.Increment) -> schemas.HoursDetail:

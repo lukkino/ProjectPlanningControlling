@@ -104,6 +104,14 @@ def run_lightweight_migrations() -> None:
                 for old, new in LEGACY_RESOURCE_TYPE_NAMES.items():
                     conn.execute(text(f"UPDATE {table} SET name = :new WHERE name = :old"), {"old": old, "new": new})
 
+    # Tipo di assenza (Ferie/Malattia/Altro) delle persone del Capacity
+    # Planner: la tabella esisteva gia' senza.
+    if "increment_member_absences" in table_names:
+        absence_columns = {col["name"] for col in inspector.get_columns("increment_member_absences")}
+        if "kind" not in absence_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_member_absences ADD COLUMN kind VARCHAR(32) DEFAULT 'Ferie'"))
+
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
         if "architecture_manual" not in complaint_columns:

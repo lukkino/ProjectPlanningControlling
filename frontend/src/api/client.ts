@@ -18,7 +18,10 @@ import type {
   Increment,
   IncrementBudgetLine,
   IncrementDetail,
+  AbsenceKind,
   IncrementResourceType,
+  MemberAbsence,
+  TeamMember,
   IncrementSnapshot,
   IncrementSnapshotValue,
   NonWorkingDay,
@@ -280,6 +283,18 @@ export const api = {
     updateResourceType: (id: number, data: Partial<IncrementResourceType>) =>
       put<IncrementResourceType>(`/increments/resource-types/${id}`, data),
     removeResourceType: (id: number) => del(`/increments/resource-types/${id}`),
+    // Persone del team di una tipologia e le loro ferie.
+    addMember: (resourceTypeId: number, data: { name: string; hours_per_day?: number }) =>
+      post<TeamMember>(`/increments/resource-types/${resourceTypeId}/members`, data),
+    updateMember: (id: number, data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'order'>>) =>
+      put<TeamMember>(`/increments/members/${id}`, data),
+    removeMember: (id: number) => del(`/increments/members/${id}`),
+    addAbsence: (
+      memberId: number,
+      data: { start_date: string; end_date: string; kind: AbsenceKind; note?: string | null },
+    ) =>
+      post<MemberAbsence>(`/increments/members/${memberId}/absences`, data),
+    removeAbsence: (id: number) => del(`/increments/absences/${id}`),
   },
   hoursDetail: {
     get: (incrementId: number) => request<HoursDetail>(`/increments/${incrementId}/hours-detail`),

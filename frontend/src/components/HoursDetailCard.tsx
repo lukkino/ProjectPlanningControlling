@@ -69,7 +69,7 @@ export function HoursDetailCard({ incrementId }: Props) {
         </button>
       </div>
       <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
-        Le ore per tipologia di risorsa vengono dal Calcolatore ore progetto (più in basso), quando premi "Aggiorna
+        Le ore per tipologia di risorsa vengono dal Capacity Planner (più in basso), quando premi "Aggiorna
         ore progetto": puoi correggerle a mano, ad esempio per arrotondarle. Nelle colonne di review inserisci le ore
         rivedute.
       </p>
@@ -77,7 +77,7 @@ export function HoursDetailCard({ incrementId }: Props) {
 
       {rows.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>
-          Nessun dettaglio ancora: prepara i calcoli nel Calcolatore ore progetto e premi "Aggiorna ore progetto".
+          Nessun dettaglio ancora: prepara i calcoli nel Capacity Planner e premi "Aggiorna ore progetto".
         </p>
       ) : (
         <div className="table-wrap">
@@ -127,7 +127,7 @@ export function HoursDetailCard({ incrementId }: Props) {
                       className="text-right"
                       style={{ fontWeight: 600 }}
                       defaultValue={fmt(row.hours)}
-                      title="Ore dal calcolatore: puoi correggerle (es. arrotondarle)"
+                      title="Ore dal Capacity Planner: puoi correggerle (es. arrotondarle)"
                       aria-label={`Ore ${row.name}`}
                       onBlur={(e) => {
                         // Il campo mostra le ore col separatore delle migliaia ("2.885").

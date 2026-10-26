@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------- Phase ----------
@@ -162,10 +162,53 @@ class IncrementResourceTypeUpdate(BaseModel):
     order: int | None = None
 
 
+class MemberAbsenceCreate(BaseModel):
+    start_date: dt.date
+    end_date: dt.date
+    kind: Literal["Ferie", "Malattia", "Altro"] = "Ferie"
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _check_range(self):
+        if self.end_date < self.start_date:
+            raise ValueError("La data di fine delle ferie è precedente alla data di inizio")
+        return self
+
+
+class MemberAbsence(MemberAbsenceCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    member_id: int
+
+
+class TeamMemberCreate(BaseModel):
+    name: str
+    # None = le ore/giorno di default della tipologia.
+    hours_per_day: float | None = Field(default=None, ge=0, le=24)
+
+
+class TeamMemberUpdate(BaseModel):
+    name: str | None = None
+    hours_per_day: float | None = Field(default=None, ge=0, le=24)
+    order: int | None = None
+
+
+class TeamMember(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    resource_type_id: int
+    name: str
+    hours_per_day: float
+    order: int
+    absences: list[MemberAbsence] = []
+
+
 class IncrementResourceType(IncrementResourceTypeBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     increment_id: int
+    # Persone della tipologia: la composizione del team di progetto.
+    members: list[TeamMember] = []
 
 
 class HoursCalculatorUpdate(BaseModel):
