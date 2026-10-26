@@ -104,6 +104,14 @@ def run_lightweight_migrations() -> None:
                 for old, new in LEGACY_RESOURCE_TYPE_NAMES.items():
                     conn.execute(text(f"UPDATE {table} SET name = :new WHERE name = :old"), {"old": old, "new": new})
 
+    # Parametri Monte Carlo di una simulazione del Forecasting, per poterla
+    # ricalcolare quando se ne cambia la deadline.
+    if "forecast_simulations" in table_names:
+        forecast_columns = {col["name"] for col in inspector.get_columns("forecast_simulations")}
+        if "mc_params" not in forecast_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE forecast_simulations ADD COLUMN mc_params TEXT"))
+
     # Tipo di assenza (Ferie/Malattia/Altro) delle persone del Capacity
     # Planner: la tabella esisteva gia' senza.
     if "increment_member_absences" in table_names:

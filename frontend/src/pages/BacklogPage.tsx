@@ -1043,7 +1043,16 @@ export function BacklogPage() {
     forecastTarget != null && forecastCandidates.length > 0
       ? forecastCandidates[Math.min(forecastTarget, forecastCandidates.length) - 1]?.id
       : undefined
-  const forecastCutoffLabel = `Forecasting - Code Freeze ${formatIsoDate(project.code_freeze_date) ?? '(data non impostata)'}`
+  // L'etichetta mostra la deadline della simulazione che ha deciso la
+  // posizione della linea (puo' essere uno scenario diverso dal code freeze
+  // dell'increment): posizione ed etichetta restano coerenti, e se le due
+  // date differiscono lo si dice.
+  const forecastDeadline = latestSimulation?.code_freeze_deadline ?? project.code_freeze_date
+  const forecastCutoffLabel =
+    `Forecasting - Code Freeze ${formatIsoDate(forecastDeadline) ?? '(data non impostata)'}` +
+    (latestSimulation && forecastDeadline !== project.code_freeze_date
+      ? ` (deadline della simulazione del ${formatIsoDate(latestSimulation.simulation_date) ?? '?'}; code freeze dell'increment: ${formatIsoDate(project.code_freeze_date) ?? 'non impostato'})`
+      : '')
 
   const availableTypes = Array.from(
     new Set((items ?? []).map((i) => i.issue_type).filter((t): t is string => !!t)),

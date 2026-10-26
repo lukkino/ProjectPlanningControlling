@@ -620,8 +620,26 @@ class ForecastSimulation(Base):
     completion_date_85pct: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     pbi_completed_by_deadline_85pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_date_85pct_with_holidays: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Parametri Monte Carlo con cui le previsioni sono state calcolate
+    # ("+ Aggiungi simulazione"), come JSON gestito dal frontend: servono a
+    # ricalcolarle se si cambia la deadline della riga. Null per le righe
+    # inserite a mano.
+    mc_params: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="forecast_simulations")
+
+
+class CachedExtraction(Base):
+    """Ultima estrazione Jira lenta andata a buon fine (es. "cycle-time:sw",
+    i PBI Done dei 12 mesi usati da Cycle Time e Monte Carlo), come JSON
+    della risposta: resta disponibile anche dopo un riavvio o ricaricando la
+    pagina, finche' non la si aggiorna di nuovo."""
+
+    __tablename__ = "cached_extractions"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text)
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class Snapshot(Base):

@@ -5,14 +5,22 @@ import { api } from '../api/client'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import type { Team } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 import {
-  dailyThroughputSamples,
-  interpolatedPercentile,
+  dateStrToEpochDays,
+  formatEpochDaysAsDate,
+  formatIsoDate,
+  parseBackendDateTime,
+  toEpochDays,
+} from '../lib/dates'
+import {
+  buildHistory,
+  DEFAULT_HISTORY_OPTIONS,
+  DEFAULT_ITERATIONS,
   nearestRank,
   simulateHowMany,
   simulateWhen,
 } from '../lib/monteCarlo'
+import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { useProjectContext } from './useProjectContext'
 
 type Mode = 'when' | 'howMany'
@@ -119,29 +127,21 @@ export function MonteCarloPage() {
 
   const [mode, setMode] = useState<Mode>('when')
   const [team, setTeam] = useState<Team>('sw')
-  const [issueTypes, setIssueTypes] = useState<string[]>(['Story', 'Bug'])
-  const [excludeCve, setExcludeCve] = useState(true)
-  const [historyDays, setHistoryDays] = useState(365)
-  const [workingDaysOnly, setWorkingDaysOnly] = useState(true)
+  const [issueTypes, setIssueTypes] = useState<string[]>(DEFAULT_HISTORY_OPTIONS.issueTypes)
+  const [excludeCve, setExcludeCve] = useState(DEFAULT_HISTORY_OPTIONS.excludeCve)
+  const [historyDays, setHistoryDays] = useState(DEFAULT_HISTORY_OPTIONS.historyDays)
+  const [workingDaysOnly, setWorkingDaysOnly] = useState(DEFAULT_HISTORY_OPTIONS.workingDaysOnly)
   const [startDate, setStartDate] = useState(todayIso())
   const [itemCountInput, setItemCountInput] = useState<string | null>(null)
   const [endDateInput, setEndDateInput] = useState<string | null>(null)
-  const [iterations, setIterations] = useState(10000)
+  const [iterations, setIterations] = useState(DEFAULT_ITERATIONS)
   // Incrementato da "Ripeti simulazione": forza una nuova estrazione
   // casuale anche a parametri invariati.
   const [runId, setRunId] = useState(0)
 
-  // L'estrazione Jira e' lenta (un changelog per issue): parte solo dal
-  // pulsante "Aggiorna da Jira", mai da sola all'apertura della pagina, e
-  // resta in cache finche' non la si aggiorna di nuovo. La cache e' la
-  // stessa della Dashboard generale: se li' i dati sono gia' stati
-  // estratti, qui si vedono subito.
-  const cycleTime = useQuery({
-    queryKey: ['dashboard', 'cycle-time', team],
-    queryFn: () => api.dashboard.cycleTime(team),
-    staleTime: Infinity,
-    enabled: false,
-  })
+  // Storico Jira: ultima estrazione salvata, aggiornabile col pulsante
+  // "Aggiorna da Jira" (vedi useCycleTimeData).
+  const cycleTime = useCycleTimeData(team)
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
@@ -157,28 +157,10 @@ export function MonteCarloPage() {
 
   const today = toEpochDays(new Date(`${todayIso()}T00:00:00Z`))
 
-  const history = useMemo(() => {
-    const points = (cycleTime.data?.points ?? []).filter(
-      (p) => issueTypes.includes(p.issue_type) && !(excludeCve && p.is_cve),
-    )
-    const fromDay = today - historyDays
-    const toDay = today - 1
-    const inWindow = points.filter((p) => {
-      const d = dateStrToEpochDays(p.finish_date)
-      return d !== null && d >= fromDay && d <= toDay
-    })
-    const finishDays = inWindow.map((p) => dateStrToEpochDays(p.finish_date) as number)
-    const samples = dailyThroughputSamples(finishDays, fromDay, toDay, workingDaysOnly)
-    const cycleTimes = inWindow.map((p) => p.cycle_time_days).sort((a, b) => a - b)
-    return {
-      itemCount: inWindow.length,
-      samples,
-      perWeek: (inWindow.length / historyDays) * 7,
-      p50: interpolatedPercentile(cycleTimes, 50),
-      p85: interpolatedPercentile(cycleTimes, 85),
-      p95: interpolatedPercentile(cycleTimes, 95),
-    }
-  }, [cycleTime.data, issueTypes, excludeCve, historyDays, workingDaysOnly, today])
+  const history = useMemo(
+    () => buildHistory(cycleTime.data?.points ?? [], { issueTypes, excludeCve, historyDays, workingDaysOnly }, today),
+    [cycleTime.data, issueTypes, excludeCve, historyDays, workingDaysOnly, today],
+  )
 
   const toggleIssueType = (t: string) =>
     setIssueTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
@@ -222,14 +204,17 @@ export function MonteCarloPage() {
       : 0
   const formatValue = (v: number) => (result?.mode === 'when' ? formatEpochDaysAsDate(v) : `${v} item`)
 
+  // Chance to meet the deadline: la stessa probabilita' che finisce nella
+  // colonna "Completion Likelihood" del Forecasting.
   const codeFreezeDay = dateStrToEpochDays(project.code_freeze_date)
   let highlight: string | null = null
+  let chance: number | null = null
   if (result?.mode === 'when' && codeFreezeDay !== null) {
-    const p = (result.values.filter((v) => v <= codeFreezeDay).length / result.values.length) * 100
-    highlight = `Probabilità di chiudere ${result.itemCount} item entro il code freeze (${formatIsoDate(project.code_freeze_date)}): ${p.toFixed(0)}%`
+    chance = (result.values.filter((v) => v <= codeFreezeDay).length / result.values.length) * 100
+    highlight = `Probabilità di chiudere ${result.itemCount} item entro il code freeze (${formatIsoDate(project.code_freeze_date)}): ${chance.toFixed(0)}%`
   } else if (result?.mode === 'howMany' && remainingCount > 0) {
-    const p = (result.values.filter((v) => v >= remainingCount).length / result.values.length) * 100
-    highlight = `Probabilità di chiudere tutti i ${remainingCount} item rimanenti del backlog (perimetro code freeze) entro il ${formatEpochDaysAsDate(result.endDay)}: ${p.toFixed(0)}%`
+    chance = (result.values.filter((v) => v >= remainingCount).length / result.values.length) * 100
+    highlight = `Probabilità di chiudere tutti i ${remainingCount} item rimanenti del backlog (perimetro code freeze) entro il ${formatEpochDaysAsDate(result.endDay)}: ${chance.toFixed(0)}%`
   }
 
   return (
@@ -311,15 +296,17 @@ export function MonteCarloPage() {
             </label>
 
             <div style={{ marginTop: 12, fontSize: 13, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              {cycleTime.isError ? (
-                <span style={{ color: 'var(--danger)' }}>{(cycleTime.error as Error).message}</span>
-              ) : cycleTime.data?.error ? (
-                <span style={{ color: 'var(--danger)' }}>{cycleTime.data.error}</span>
-              ) : cycleTime.data ? (
+              {cycleTime.error && <span style={{ color: 'var(--danger)' }}>{cycleTime.error}</span>}
+              {cycleTime.data && !cycleTime.data.error ? (
                 <>
                   <span>
                     <strong>{history.itemCount}</strong> item completati · <strong>{history.perWeek.toFixed(1)}</strong>/settimana
                   </span>
+                  {cycleTime.data.fetched_at && (
+                    <span className="muted">
+                      Estratti da Jira il {parseBackendDateTime(cycleTime.data.fetched_at).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                    </span>
+                  )}
                   {history.p85 != null && (
                     <span className="muted">
                       Cycle time P50 {history.p50?.toFixed(1)}g · P85 {history.p85.toFixed(1)}g · P95{' '}
@@ -328,11 +315,14 @@ export function MonteCarloPage() {
                   )}
                 </>
               ) : (
-                <span className="muted">Dati storici non ancora caricati: premi "Aggiorna da Jira".</span>
+                !cycleTime.error &&
+                !cycleTime.isLoadingCached && (
+                  <span className="muted">Dati storici non ancora caricati: premi "Aggiorna da Jira".</span>
+                )
               )}
               <button
                 className={cycleTime.data ? 'btn' : 'btn btn-primary'}
-                onClick={() => cycleTime.refetch()}
+                onClick={() => cycleTime.refresh()}
                 disabled={cycleTime.isFetching}
                 style={{ fontSize: 12, padding: '4px 10px' }}
               >
@@ -408,6 +398,12 @@ export function MonteCarloPage() {
                 </span>
               </div>
             ))}
+            {chance !== null && (
+              <div className="stat-chip green" title={highlight ?? undefined}>
+                <span className="label">Chance to meet the deadline</span>
+                <span className="value">{chance.toFixed(0)}%</span>
+              </div>
+            )}
           </div>
           {highlight && <p style={{ fontSize: 13, fontWeight: 600 }}>{highlight}</p>}
 

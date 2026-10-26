@@ -408,6 +408,8 @@ class ForecastSimulationBase(BaseModel):
     completion_date_85pct: dt.date | None = None
     pbi_completed_by_deadline_85pct: int | None = None
     completion_date_85pct_with_holidays: dt.date | None = None
+    # JSON dei parametri Monte Carlo (vedi models.ForecastSimulation).
+    mc_params: str | None = None
 
 
 class ForecastSimulationCreate(ForecastSimulationBase):
@@ -429,6 +431,7 @@ class ForecastSimulationUpdate(BaseModel):
     completion_date_85pct: dt.date | None = None
     pbi_completed_by_deadline_85pct: int | None = None
     completion_date_85pct_with_holidays: dt.date | None = None
+    mc_params: str | None = None
 
 
 class ForecastSimulation(ForecastSimulationBase):
@@ -792,6 +795,8 @@ class CycleTimeMetrics(BaseModel):
     p85: float | None = None
     p95: float | None = None
     error: str | None = None
+    # Quando i dati sono stati estratti da Jira (UTC): vedi CachedExtraction.
+    fetched_at: dt.datetime | None = None
 
 
 class BugsOpenedMonth(BaseModel):

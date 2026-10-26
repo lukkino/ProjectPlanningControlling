@@ -360,6 +360,8 @@ export const api = {
       request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
     cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
     cycleTimeProgress: (team: Team) => request<SyncProgress>(`/dashboard/cycle-time/progress?team=${team}`),
+    // Ultima estrazione Cycle Time salvata dal backend (null se mai fatta).
+    cycleTimeCached: (team: Team) => request<CycleTimeMetrics | null>(`/dashboard/cycle-time/cached?team=${team}`),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
   },
   dashboardSnapshots: {

@@ -1,3 +1,4 @@
+import datetime as dt
 import re
 from typing import Literal
 
@@ -63,9 +64,28 @@ def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
         _cycle_time_progress[team] = schemas.SyncProgress(phase=phase, done=done, total=total)
 
     try:
-        return compute_cycle_time_metrics(db, team, on_progress)
+        metrics = compute_cycle_time_metrics(db, team, on_progress)
     finally:
         _cycle_time_progress.pop(team, None)
+    # Solo un'estrazione riuscita sostituisce quella salvata.
+    if not metrics.error:
+        metrics.fetched_at = dt.datetime.utcnow()
+        cached = db.get(models.CachedExtraction, f"cycle-time:{team}") or models.CachedExtraction(
+            key=f"cycle-time:{team}"
+        )
+        cached.payload = metrics.model_dump_json()
+        cached.fetched_at = metrics.fetched_at
+        db.add(cached)
+        db.commit()
+    return metrics
+
+
+@router.get("/api/dashboard/cycle-time/cached", response_model=schemas.CycleTimeMetrics | None)
+def get_cached_cycle_time(team: Team = "sw", db: Session = Depends(get_db)):
+    """Ultima estrazione Cycle Time salvata (null se mai fatta): Monte Carlo
+    e Forecasting la mostrano subito, senza ripetere l'estrazione lenta."""
+    cached = db.get(models.CachedExtraction, f"cycle-time:{team}")
+    return schemas.CycleTimeMetrics.model_validate_json(cached.payload) if cached else None
 
 
 @router.get("/api/dashboard/cycle-time/progress", response_model=schemas.SyncProgress)

@@ -235,6 +235,9 @@ export type ForecastSimulation = {
   completion_date_85pct: string | null
   pbi_completed_by_deadline_85pct: number | null
   completion_date_85pct_with_holidays: string | null
+  // JSON dei parametri Monte Carlo usati per le previsioni (vedi
+  // lib/forecastParams): null per le righe inserite a mano.
+  mc_params: string | null
 }
 
 export type Project = {
@@ -454,6 +457,9 @@ export type CycleTimeMetrics = {
   p85: number | null
   p95: number | null
   error: string | null
+  // Quando i dati sono stati estratti da Jira (UTC, senza fuso: vedi
+  // parseBackendDateTime).
+  fetched_at: string | null
 }
 
 export type AppSettings = {

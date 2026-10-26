@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import {
   Bar,
   CartesianGrid,
@@ -14,8 +15,9 @@ import {
 } from 'recharts'
 import { api } from '../api/client'
 import type { ForecastSimulation, Project } from '../api/types'
-import { countBacklogStats, countPlannedUnplannedDone, countsForCodefreeze } from '../lib/backlogStats'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
+import { NewSimulationModal } from '../components/NewSimulationModal'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, parseBackendDateTime } from '../lib/dates'
+import { parseMcParams, recalcForDeadline } from '../lib/forecastParams'
 import { useProjectContext } from './useProjectContext'
 
 // Palette categorica validata del progetto (vedi skill data-viz), ordine
@@ -41,31 +43,9 @@ export function ForecastingPage() {
     queryFn: () => api.forecasting.list(project.id),
   })
 
-  // Stessa query cache di BacklogPage (query key condivisa): serve solo a
-  // precompilare #PBI Remaining di default su una nuova simulazione.
-  const { data: backlogItems } = useQuery({
-    queryKey: ['backlog', project.id],
-    queryFn: () => api.backlog.list(project.id),
-  })
-  const { remainingCount } = countBacklogStats(backlogItems ?? [])
-  const {
-    planned: plannedDoneCount,
-    unplanned: unplannedDoneCount,
-    plannedKeys,
-    unplannedKeys,
-  } = countPlannedUnplannedDone(backlogItems ?? [], project.dev_start_date)
-
-  // Traditional Forecasting di una nuova simulazione: la Fine pian. piu'
-  // tarda tra gli item ancora da chiudere, in scope e inclusi nel codefreeze
-  // (gli stessi su cui lavora Monte Carlo), cioe' quando il piano del Backlog
-  // prevede di finire - da confrontare con la data stimata da Monte Carlo.
-  // null se nessuno di quegli item ha una Fine pian.
-  const traditionalForecastIso = (backlogItems ?? [])
-    .filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
-    .reduce<string | null>(
-      (latest, i) => (i.expected_finish && (!latest || i.expected_finish > latest) ? i.expected_finish : latest),
-      null,
-    )
+  // "+ Aggiungi simulazione": popup che aggiorna i dati da Jira e calcola le
+  // colonne della nuova riga (vedi NewSimulationModal).
+  const [adding, setAdding] = useState(false)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['forecasting', project.id] })
 
@@ -78,21 +58,40 @@ export function ForecastingPage() {
     mutationFn: ({ id, data }: { id: number; data: Partial<ForecastSimulation> }) => api.forecasting.update(id, data),
     onSuccess: invalidate,
   })
-  const add = useMutation({
-    mutationFn: () =>
-      api.forecasting.create(project.id, {
-        simulation_date: new Date().toISOString().slice(0, 10),
-        pbi_remaining: remainingCount,
-        pbi_done: plannedDoneCount + unplannedDoneCount,
-        planned_pbi_done: plannedDoneCount,
-        unplanned_pbi_done: unplannedDoneCount,
-        planned_pbi_keys: plannedKeys.join(', ') || null,
-        unplanned_pbi_keys: unplannedKeys.join(', ') || null,
-        code_freeze_deadline: project.code_freeze_date,
-        traditional_forecasting: formatIsoDate(traditionalForecastIso),
-      }),
-    onSuccess: invalidate,
-  })
+  // Deadline di una riga cambiata: se la riga e' stata calcolata da "+
+  // Aggiungi simulazione" si ricalcolano anche Chance to meet the deadline e
+  // 85% #PBI entro la deadline (vedi recalcForDeadline), altrimenti cambia
+  // solo la data.
+  const [recalcError, setRecalcError] = useState<string | null>(null)
+  const changeDeadline = async (sim: ForecastSimulation, deadline: string | null) => {
+    if (deadline === sim.code_freeze_deadline) return
+    setRecalcError(null)
+    let data: Partial<ForecastSimulation> = { code_freeze_deadline: deadline }
+    try {
+      data = (await recalcForDeadline(sim, deadline)) ?? data
+    } catch (e) {
+      setRecalcError(`Previsioni non ricalcolate: ${(e as Error).message}`)
+    }
+    update.mutate({ id: sim.id, data })
+  }
+  // Nota sulla riga ricalcolata, con lo storico usato se diverso da quello
+  // della creazione.
+  const recalcInfo = (sim: ForecastSimulation): string | null => {
+    const params = parseMcParams(sim.mc_params)
+    if (!params?.recalculatedAt) return null
+    const when = (value: string | null | undefined, utc: boolean) =>
+      value
+        ? (utc ? parseBackendDateTime(value) : new Date(value)).toLocaleString('it-IT', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+          })
+        : 'n.d.'
+    let text = `Ricalcolata il ${when(params.recalculatedAt, false)} per la nuova deadline.`
+    if (params.recalcHistoryFetchedAt !== params.historyFetchedAt)
+      text += `\nStorico Jira usato: estratto il ${when(params.recalcHistoryFetchedAt, true)} (alla creazione: ${when(params.historyFetchedAt, true)}), quindi i valori possono differire leggermente.`
+    return text
+  }
+
   const remove = useMutation({
     mutationFn: (id: number) => api.forecasting.remove(id),
     onSuccess: invalidate,
@@ -144,7 +143,8 @@ export function ForecastingPage() {
         (label "planned" → Planned, label "oos" → Unplanned; se presenti entrambe vince "oos").
       </p>
 
-      <div className="table-wrap">
+      {recalcError && <div className="error-banner">{recalcError}</div>}
+      <div className="table-wrap table-wrap--sticky-head">
         <table className="forecast-table">
           <colgroup>
             <col style={{ width: '14%' }} />
@@ -252,12 +252,19 @@ export function ForecastingPage() {
                   <input
                     type="date"
                     defaultValue={sim.code_freeze_deadline ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { code_freeze_deadline: dateOrNull(e.target.value) } })}
+                    onBlur={(e) => changeDeadline(sim, dateOrNull(e.target.value))}
                   />
                 </td>
                 <td className="editable-cell">
                   <div className="pct-cell">
+                    {recalcInfo(sim) && (
+                      <span className="info-icon" title={recalcInfo(sim) ?? undefined}>
+                        ↻
+                      </span>
+                    )}
                     <input
+                      // key: ricreato quando il valore cambia da un ricalcolo.
+                      key={`likelihood-${sim.completion_likelihood}`}
                       type="number"
                       step="0.01"
                       min={0}
@@ -277,6 +284,7 @@ export function ForecastingPage() {
                 </td>
                 <td className="editable-cell">
                   <input
+                    key={`howmany-${sim.pbi_completed_by_deadline_85pct}`}
                     type="number"
                     defaultValue={sim.pbi_completed_by_deadline_85pct ?? ''}
                     onBlur={(e) =>
@@ -312,10 +320,11 @@ export function ForecastingPage() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <button className="btn btn-primary" onClick={() => add.mutate()} disabled={add.isPending}>
+        <button className="btn btn-primary" onClick={() => setAdding(true)}>
           + Aggiungi simulazione
         </button>
       </div>
+      {adding && <NewSimulationModal project={project} onClose={() => setAdding(false)} />}
 
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Andamento simulazioni</h3>
