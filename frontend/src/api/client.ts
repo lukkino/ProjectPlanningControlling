@@ -10,6 +10,7 @@ import type {
   DashboardSnapshotDetail,
   DashboardSnapshotSummary,
   DocumentRevisionMeta,
+  FolderStatus,
   ForecastSimulation,
   HoursCalculator,
   HoursDetail,
@@ -25,6 +26,7 @@ import type {
   OverviewPeriod,
   Phase,
   PprDeliverable,
+  PprCandidate,
   PprDocumentMeta,
   PprFileRole,
   PprInspection,
@@ -155,6 +157,40 @@ async function downloadFile(
   const filename = match ? match[1] : 'download.xlsx'
   const blob = await response.blob()
   return { blob, filename }
+}
+
+// Esito del salvataggio nella cartella review: "exists" se c'e' gia' un file
+// con quel nome (non sovrascritto), con il primo nome libero da proporre.
+export type ReviewSaveResult = { status: 'saved'; filename: string } | { status: 'exists'; suggested: string }
+
+async function saveToReviewFolder(
+  projectId: number,
+  blob: Blob,
+  filename: string,
+  overwrite: boolean,
+): Promise<ReviewSaveResult> {
+  const qs = new URLSearchParams({ filename, overwrite: String(overwrite) })
+  const response = await fetch(`/api/projects/${projectId}/review-folder/files?${qs}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: blob,
+  })
+  if (response.status === 409) {
+    const body = await response.json()
+    return { status: 'exists', suggested: body.detail.suggested }
+  }
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      const body = await response.json()
+      detail = body.detail ?? detail
+    } catch {
+      // ignore, keep statusText
+    }
+    throw new Error(detail)
+  }
+  const body = (await response.json()) as { filename: string }
+  return { status: 'saved', filename: body.filename }
 }
 
 export function saveBlob(blob: Blob, filename: string) {
@@ -367,6 +403,9 @@ export const api = {
         deliverables: PprDeliverable[] | null
         previous_b64: string | null
         previous_phase_b64: string | null
+        // In alternativa al base64: un file della cartella review.
+        previous_filename: string | null
+        previous_phase_filename: string | null
       },
     ) =>
       downloadFile(`/projects/${projectId}/documents/ppr/${docType}`, undefined, {
@@ -374,9 +413,22 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
+    // Documenti della cartella review che possono fare da ultima versione
+    // (previous) o da fase precedente (previous_phase), gia' controllati.
+    pprCandidates: (projectId: number, docType: string, role: PprFileRole) =>
+      request<PprCandidate[]>(`/projects/${projectId}/documents/ppr/${docType}/candidates?role=${role}`),
     // Elenco dei documenti attesi alla review con gli owner (.txt), non per il Planning.
     pprDeliverablesTxt: (projectId: number, docType: string) =>
       downloadFile(`/projects/${projectId}/documents/ppr/${docType}/deliverables-txt`),
+  },
+  // Cartella dei documenti delle review dell'increment: i documenti generati
+  // si salvano li' (vedi useReviewDelivery) invece di essere scaricati.
+  reviewFolder: {
+    status: (projectId: number) => request<FolderStatus>(`/projects/${projectId}/review-folder`),
+    save: saveToReviewFolder,
+    // Apre la cartella in Esplora risorse, o un suo file, sulla macchina del backend.
+    open: (projectId: number, filename?: string) =>
+      post<void>(`/projects/${projectId}/review-folder/open${filename ? `?${new URLSearchParams({ filename })}` : ''}`),
   },
   settings: {
     get: () => request<AppSettings>('/settings'),

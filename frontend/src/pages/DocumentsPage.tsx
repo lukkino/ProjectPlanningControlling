@@ -5,12 +5,14 @@ import type {
   BacklogItem,
   DocumentRevisionMeta,
   ImplementedByTask,
+  PprCandidate,
   PprDeliverable,
   PprInspection,
   Project,
   RequirementCheckItem,
   RequirementsCheck,
 } from '../api/types'
+import { useReviewDelivery } from '../components/ReviewDelivery'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -43,14 +45,17 @@ const pprFileName = (label: string) => `TIH-${pprDocName(label).toUpperCase().re
 // riflettono l'eventuale ultima generazione fatta (es. la RR incrementa il
 // proprio contatore lato server).
 function DocumentDownloadButton({
+  projectId,
   label,
   loadMeta,
   download,
 }: {
+  projectId: number
   label: string
   loadMeta: () => Promise<DocumentRevisionMeta>
   download: (version: number, revisionText: string) => Promise<{ blob: Blob; filename: string }>
 }) {
+  const delivery = useReviewDelivery(projectId)
   const [open, setOpen] = useState(false)
   const [version, setVersion] = useState('')
   const [revisionText, setRevisionText] = useState('')
@@ -65,11 +70,8 @@ function DocumentDownloadButton({
   })
 
   const confirm = useMutation({
-    mutationFn: () => download(Number(version) || 1, revisionText),
-    onSuccess: ({ blob, filename }) => {
-      saveBlob(blob, filename)
-      setOpen(false)
-    },
+    mutationFn: async () => delivery.deliver([await download(Number(version) || 1, revisionText)]),
+    onSuccess: () => setOpen(false),
   })
 
   const close = () => {
@@ -79,7 +81,7 @@ function DocumentDownloadButton({
   return (
     <>
       <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
-        {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
+        {prepare.isPending ? 'Preparazione…' : `${delivery.inFolder ? '💾 Salva' : '⬇ Scarica'} ${label} (.xlsx)`}
       </button>
       {open && (
         // onMouseDown (non onClick): un drag di selezione testo che parte
@@ -102,12 +104,13 @@ function DocumentDownloadButton({
                 Annulla
               </button>
               <button className="btn btn-primary" onClick={() => confirm.mutate()} disabled={confirm.isPending}>
-                {confirm.isPending ? 'Generazione…' : 'Genera e scarica'}
+                {confirm.isPending ? 'Generazione…' : delivery.inFolder ? 'Genera e salva' : 'Genera e scarica'}
               </button>
             </div>
           </div>
         </div>
       )}
+      {delivery.dialog}
     </>
   )
 }
@@ -235,21 +238,23 @@ const KICKOFF_PRESENTATION_INFO: DocumentInfo = {
 
 // Presentazione .pptx: nessun dato da chiedere, si scarica subito.
 function PresentationDownloadButton({
+  projectId,
   label,
   download,
 }: {
+  projectId: number
   label: string
   download: () => Promise<{ blob: Blob; filename: string }>
 }) {
+  const delivery = useReviewDelivery(projectId)
   const run = useMutation({
-    mutationFn: download,
-    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+    mutationFn: async () => delivery.deliver([await download()]),
   })
 
   return (
     <>
       <button className="btn btn-primary" disabled={run.isPending} onClick={() => run.mutate()}>
-        {run.isPending ? 'Generazione…' : `⬇ Scarica ${label} (.pptx)`}
+        {run.isPending ? 'Generazione…' : `${delivery.inFolder ? '💾 Salva' : '⬇ Scarica'} ${label} (.pptx)`}
       </button>
       {run.isError && (
         <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && run.reset()}>
@@ -264,6 +269,7 @@ function PresentationDownloadButton({
           </div>
         </div>
       )}
+      {delivery.dialog}
     </>
   )
 }
@@ -323,16 +329,30 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
-type PprUpload = { name: string; b64: string; info: PprInspection }
+// Documento precedente scelto nel popup: caricato dal disco (b64) oppure un
+// file della cartella review (folderFile), letto direttamente dal backend.
+type PprUpload = { name: string; b64: string | null; folderFile: string | null; info: PprInspection }
 
-// Scelta di un documento PPR precedente (.xlsx): appena scelto, il backend
-// controlla che sia del tipo giusto e ne legge l'ultima versione.
+// Tra i documenti della cartella review, quello da proporre: versione piu'
+// alta, a parita' il piu' recente (candidates arriva gia' dal piu' recente).
+function bestCandidate(candidates: PprCandidate[]): PprUpload | null {
+  let best: PprCandidate | null = null
+  for (const c of candidates) {
+    if (c.info && (best === null || (c.info.last_version ?? 0) > (best.info?.last_version ?? 0))) best = c
+  }
+  return best?.info ? { name: best.filename, b64: null, folderFile: best.filename, info: best.info } : null
+}
+
+// Scelta di un documento PPR precedente (.xlsx): tra quelli della cartella
+// review (gia' controllati dal backend) o dal disco; un file dal disco viene
+// controllato appena scelto (tipo giusto, ultima versione).
 function PprFilePicker({
   docLabel,
   fileName,
   purpose,
   hint,
   upload,
+  candidates,
   inspect,
   onLoad,
   onClear,
@@ -342,6 +362,7 @@ function PprFilePicker({
   purpose: string
   hint: string
   upload: PprUpload | null
+  candidates: PprCandidate[]
   inspect: (fileB64: string) => Promise<PprInspection>
   onLoad: (upload: PprUpload) => void
   onClear: () => void
@@ -350,7 +371,7 @@ function PprFilePicker({
   const check = useMutation({
     mutationFn: async (file: File) => {
       const b64 = await fileToBase64(file)
-      return { name: file.name, b64, info: await inspect(b64) }
+      return { name: file.name, b64, folderFile: null, info: await inspect(b64) }
     },
     onSuccess: onLoad,
   })
@@ -392,12 +413,31 @@ function PprFilePicker({
             if (file) check.mutate(file)
           }}
         />
+        {candidates.length > 0 && (
+          <select
+            title="Documenti trovati nella cartella review"
+            value={upload?.folderFile ?? ''}
+            onChange={(e) => {
+              const c = candidates.find((x) => x.filename === e.target.value)
+              if (c?.info) onLoad({ name: c.filename, b64: null, folderFile: c.filename, info: c.info })
+              else onClear()
+            }}
+          >
+            <option value="">{upload && !upload.folderFile ? 'File dal disco' : '— nessuno —'}</option>
+            {candidates.map((c) => (
+              <option key={c.filename} value={c.filename} disabled={!c.info} title={c.error ?? undefined}>
+                {c.filename}
+                {c.info ? ` (v${c.info.last_version ?? '—'})` : ' (non valido)'}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="btn" type="button" disabled={check.isPending} onClick={() => fileRef.current?.click()}>
-          {check.isPending ? 'Controllo…' : upload ? 'Cambia file' : 'Scegli file…'}
+          {check.isPending ? 'Controllo…' : candidates.length > 0 ? 'Dal disco…' : upload ? 'Cambia file' : 'Scegli file…'}
         </button>
         {upload ? (
           <>
-            <span>📄 {upload.name}</span>
+            {!upload.folderFile && <span>📄 {upload.name}</span>}
             <span className="muted">
               · ultima versione {upload.info.last_version ?? '—'}
               {upload.info.last_description && `: ${upload.info.last_description}`}
@@ -429,7 +469,9 @@ function PprFilePicker({
 // History, facoltativa la prima volta) e, tranne che per il Planning,
 // l'ultimo documento della fase precedente (fogli delle review precedenti
 // e Action Items). Per il Planning anche la sezione "Deliverable Check",
-// precompilata dall'ultimo Planning se caricato.
+// precompilata dall'ultimo Planning se caricato. Con la cartella review
+// dell'increment i documenti precedenti sono proposti da li' e il documento
+// generato (con l'elenco .txt) viene salvato li'.
 function PprDownloadButton({
   projectId,
   docType,
@@ -441,6 +483,7 @@ function PprDownloadButton({
   label: string
   previousLabel: string | null
 }) {
+  const delivery = useReviewDelivery(projectId)
   const [open, setOpen] = useState(false)
   const [defaultVersion, setDefaultVersion] = useState(1)
   const [version, setVersion] = useState('')
@@ -449,27 +492,52 @@ function PprDownloadButton({
   const [defaultDeliverables, setDefaultDeliverables] = useState<PprDeliverable[]>([])
   const [previous, setPrevious] = useState<PprUpload | null>(null)
   const [previousPhase, setPreviousPhase] = useState<PprUpload | null>(null)
+  const [previousCandidates, setPreviousCandidates] = useState<PprCandidate[]>([])
+  const [phaseCandidates, setPhaseCandidates] = useState<PprCandidate[]>([])
   const isPlanning = docType === 'planning'
 
+  const loadPrevious = (upload: PprUpload, fallbackDeliverables: PprDeliverable[] = defaultDeliverables) => {
+    setPrevious(upload)
+    setVersion(String((upload.info.last_version ?? 0) + 1))
+    setDeliverables(upload.info.deliverables ?? fallbackDeliverables)
+  }
+  const clearPrevious = () => {
+    setPrevious(null)
+    setVersion(String(defaultVersion))
+    setDeliverables(defaultDeliverables)
+  }
+
   const prepare = useMutation({
-    mutationFn: () => api.documents.pprMeta(projectId, docType),
-    onSuccess: (meta) => {
+    mutationFn: async () => {
+      const [meta, prevCandidates, phaseCands] = await Promise.all([
+        api.documents.pprMeta(projectId, docType),
+        delivery.inFolder ? api.documents.pprCandidates(projectId, docType, 'previous') : [],
+        delivery.inFolder && !isPlanning ? api.documents.pprCandidates(projectId, docType, 'previous_phase') : [],
+      ])
+      return { meta, prevCandidates, phaseCands }
+    },
+    onSuccess: ({ meta, prevCandidates, phaseCands }) => {
       setDefaultVersion(meta.next_version)
       setVersion(String(meta.next_version))
       setRevisionText(meta.last_revision_text)
       setDeliverables(meta.deliverables)
       setDefaultDeliverables(meta.deliverables)
+      setPreviousCandidates(prevCandidates)
+      setPhaseCandidates(phaseCands)
       setPrevious(null)
-      setPreviousPhase(null)
+      setPreviousPhase(bestCandidate(phaseCands))
+      const best = bestCandidate(prevCandidates)
+      if (best) loadPrevious(best, meta.deliverables)
       setGenerated(null)
       setOpen(true)
     },
   })
 
-  // Tranne che per il Planning, col documento si prepara anche l'elenco dei
-  // documenti attesi alla review con i loro owner (.txt). Non lo si scarica
-  // in automatico: un secondo download senza clic, a fine generazione,
-  // viene bloccato dal browser. Il popup resta aperto col pulsante.
+  // Senza cartella review, tranne che per il Planning, col documento si
+  // prepara anche l'elenco dei documenti attesi alla review con i loro owner
+  // (.txt). Non lo si scarica in automatico: un secondo download senza clic,
+  // a fine generazione, viene bloccato dal browser. Il popup resta aperto col
+  // pulsante. Con la cartella review si salvano entrambi li'.
   const [generated, setGenerated] = useState<{
     filename: string
     list: { blob: Blob; filename: string }
@@ -483,12 +551,18 @@ function PprDownloadButton({
         deliverables: isPlanning ? deliverables : null,
         previous_b64: previous?.b64 ?? null,
         previous_phase_b64: previousPhase?.b64 ?? null,
+        previous_filename: previous?.folderFile ?? null,
+        previous_phase_filename: previousPhase?.folderFile ?? null,
       })
       const list = isPlanning ? null : await api.documents.pprDeliverablesTxt(projectId, docType)
+      if (delivery.inFolder) {
+        await delivery.deliver(list ? [document, list] : [document])
+        return { document, list: null }
+      }
       return { document, list }
     },
     onSuccess: ({ document, list }) => {
-      saveBlob(document.blob, document.filename)
+      if (!delivery.inFolder) saveBlob(document.blob, document.filename)
       if (list) setGenerated({ filename: document.filename, list })
       else setOpen(false)
     },
@@ -510,8 +584,13 @@ function PprDownloadButton({
   return (
     <>
       <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
-        {prepare.isPending ? 'Preparazione…' : `⬇ Scarica ${label} (.xlsx)`}
+        {prepare.isPending ? 'Preparazione…' : `${delivery.inFolder ? '💾 Salva' : '⬇ Scarica'} ${label} (.xlsx)`}
       </button>
+      {prepare.isError && (
+        <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
+          {(prepare.error as Error).message}
+        </div>
+      )}
       {open && generated && (
         <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
@@ -542,24 +621,19 @@ function PprDownloadButton({
         <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Genera {label}</h3>
-            <p className="muted" style={{ marginTop: 0 }}>Documenti precedenti da caricare:</p>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Documenti precedenti{delivery.inFolder ? ' (proposti dalla cartella review)' : ' da caricare'}:
+            </p>
             <PprFilePicker
               docLabel={pprDocName(label)}
               fileName={pprFileName(label)}
               purpose="firmatari e Revision History"
               hint="Facoltativo: senza, la Revision History parte dalla versione indicata sotto (primo documento di questo tipo)"
               upload={previous}
+              candidates={previousCandidates}
               inspect={(b64) => api.documents.pprInspect(projectId, docType, 'previous', b64)}
-              onLoad={(upload) => {
-                setPrevious(upload)
-                setVersion(String((upload.info.last_version ?? 0) + 1))
-                if (upload.info.deliverables) setDeliverables(upload.info.deliverables)
-              }}
-              onClear={() => {
-                setPrevious(null)
-                setVersion(String(defaultVersion))
-                setDeliverables(defaultDeliverables)
-              }}
+              onLoad={(upload) => loadPrevious(upload)}
+              onClear={clearPrevious}
             />
             {previousLabel && (
               <PprFilePicker
@@ -568,6 +642,7 @@ function PprDownloadButton({
                 purpose="fogli delle review precedenti e Action Items"
                 hint="Obbligatorio"
                 upload={previousPhase}
+                candidates={phaseCandidates}
                 inspect={(b64) => api.documents.pprInspect(projectId, docType, 'previous_phase', b64)}
                 onLoad={setPreviousPhase}
                 onClear={() => setPreviousPhase(null)}
@@ -642,12 +717,17 @@ function PprDownloadButton({
                 onClick={() => confirm.mutate()}
                 disabled={confirm.isPending || missingPreviousPhase}
               >
-                {confirm.isPending ? 'Generazione… (Excel, qualche secondo)' : 'Genera e scarica'}
+                {confirm.isPending
+                  ? 'Generazione… (Excel, qualche secondo)'
+                  : delivery.inFolder
+                    ? 'Genera e salva'
+                    : 'Genera e scarica'}
               </button>
             </div>
           </div>
         </div>
       )}
+      {delivery.dialog}
     </>
   )
 }
@@ -659,22 +739,28 @@ function PprDownloadButton({
 // "Removed" nella revision history. `noun` e' come chiamare le righe aggiunte
 // nei messaggi ("story", "user need").
 function WorkbookExportButton({
+  projectId,
   label,
   title,
   noun,
   exportFile,
 }: {
+  projectId: number
   label: string
   title: string
   noun: string
   exportFile: (file: File) => Promise<WorkbookExportResult>
 }) {
+  const delivery = useReviewDelivery(projectId)
   const fileRef = useRef<HTMLInputElement>(null)
   const run = useMutation({
-    mutationFn: exportFile,
-    onSuccess: (result) => {
-      // Il file cambia se ha righe nuove o una nuova riga di revisione.
-      if (result.added.length > 0 || result.removed.length > 0) saveBlob(result.blob, result.filename)
+    mutationFn: async (file: File) => {
+      const result = await exportFile(file)
+      // Il file cambia se ha righe nuove o una nuova riga di revisione. Il
+      // riepilogo qui sotto dice gia' dov'e' finito: niente popup "Salvato".
+      const changed = result.added.length > 0 || result.removed.length > 0
+      const saved = changed ? await delivery.deliver([result], { showSaved: false }) : []
+      return { ...result, savedAs: saved[0] ?? null }
     },
   })
   const changed = run.isSuccess && (run.data.added.length > 0 || run.data.removed.length > 0)
@@ -710,7 +796,21 @@ function WorkbookExportButton({
             <h3 style={{ marginTop: 0 }}>{label}: riepilogo</h3>
             {changed ? (
               <p style={{ marginTop: 0 }}>
-                File salvato: <strong>{run.data.filename}</strong>.{' '}
+                {run.data.savedAs ? (
+                  <>
+                    Salvato nella cartella review: <strong>{run.data.savedAs}</strong>{' '}
+                    <button className="link-btn" type="button" onClick={() => delivery.open(run.data.savedAs ?? undefined)}>
+                      Apri
+                    </button>
+                    .{' '}
+                  </>
+                ) : delivery.inFolder ? (
+                  <>Non salvato nella cartella review (file già presente, non sovrascritto). </>
+                ) : (
+                  <>
+                    File salvato: <strong>{run.data.filename}</strong>.{' '}
+                  </>
+                )}
                 {run.data.version != null
                   ? `Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
                   : 'Versione e revision history non aggiornate (Cover non riconosciuta): da fare a mano.'}
@@ -754,6 +854,7 @@ function WorkbookExportButton({
           </div>
         </div>
       )}
+      {delivery.dialog}
     </>
   )
 }
@@ -951,6 +1052,8 @@ function parseImplementedBy(json: string | null): ImplementedByTask[] {
 export function DocumentsPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
+  const reviewFolder = useReviewDelivery(project.id)
+  const [folderError, setFolderError] = useState<string | null>(null)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN_TYPES))
   // Box di configurazione del Change Order: aperto di default solo se non
   // ancora configurato, altrimenti la pagina mostra solo il nome cliccabile
@@ -1049,6 +1152,42 @@ export function DocumentsPage() {
         {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
       </div>
 
+      {/* Dove finiscono i documenti generati qui sotto (vedi useReviewDelivery). */}
+      <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
+        <strong>Cartella review</strong>
+        {reviewFolder.inFolder ? (
+          <>
+            <span className="muted" style={{ wordBreak: 'break-all' }}>
+              {reviewFolder.folder?.folder}
+            </span>
+            <button
+              className="btn"
+              onClick={() => {
+                setFolderError(null)
+                api.reviewFolder.open(project.id).catch((e: Error) => setFolderError(e.message))
+              }}
+            >
+              📂 Apri cartella
+            </button>
+            <span className="muted">
+              I documenti generati vengono salvati qui; i PPR precedenti sono proposti da qui.
+            </span>
+          </>
+        ) : (
+          <span className="muted">
+            {reviewFolder.folder?.folder
+              ? `La cartella non esiste: ${reviewFolder.folder.folder}.`
+              : 'Non impostata (Modifica increment).'}{' '}
+            I documenti generati vengono scaricati nel browser.
+          </span>
+        )}
+        {folderError && (
+          <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
+            {folderError}
+          </div>
+        )}
+      </div>
+
       {PPR_TYPES.map(({ docType, label }, index) => (
         <div className="card" key={docType}>
           <h3 style={{ marginTop: 0 }}>{label}</h3>
@@ -1070,18 +1209,21 @@ export function DocumentsPage() {
               <>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <PresentationDownloadButton
+                    projectId={project.id}
                     label="presentazione Kick-off"
                     download={() => api.documents.kickoffPresentation(project.id)}
                   />
                   <DocumentInfoButton label="la presentazione Kick-off" info={KICKOFF_PRESENTATION_INFO} />
                 </span>
                 <WorkbookExportButton
+                  projectId={project.id}
                   label="Design Input"
                   noun="story"
                   title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story di questo increment (lette da Jira: fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
                   exportFile={(file) => api.documents.designInput(project.id, file)}
                 />
                 <WorkbookExportButton
+                  projectId={project.id}
                   label="User Needs"
                   noun="user need"
                   title={`Scegli il documento User Needs (TIH-UN, .xlsx): le User Need di questo increment (lette da Jira: Epic con Epic Category "UN" e fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes`}
@@ -1108,6 +1250,7 @@ export function DocumentsPage() {
                 {/* Pulsante e "i" in un unico blocco: non si separano quando la riga va a capo. */}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <DocumentDownloadButton
+                    projectId={project.id}
                     label="Regression Analysis"
                     loadMeta={() => api.documents.regressionAnalysisMeta(project.id)}
                     download={(version, revisionText) => api.documents.regressionAnalysis(project.id, version, revisionText)}
@@ -1116,6 +1259,7 @@ export function DocumentsPage() {
                 </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <DocumentDownloadButton
+                    projectId={project.id}
                     label="Release Report"
                     loadMeta={() => api.documents.releaseReportMeta(project.id)}
                     download={(version, revisionText) => api.documents.releaseReport(project.id, version, revisionText)}

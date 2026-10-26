@@ -150,6 +150,22 @@ export type SyncResult = {
   errors: string[]
 }
 
+// Una cartella dell'increment (es. quella dei documenti delle review): null
+// se non impostata; folder_exists se c'e' davvero su file system.
+export type FolderStatus = {
+  folder: string | null
+  folder_exists: boolean
+}
+
+// Documento PPR della cartella review proposto nel popup come documento
+// precedente: info se e' del tipo giusto, altrimenti error col motivo.
+export type PprCandidate = {
+  filename: string
+  modified: string
+  info: PprInspection | null
+  error: string | null
+}
+
 // Presentazioni degli scenari delle Story nella cartella Scenarios
 // dell'increment: files va da chiave Jira a nome del file pptx.
 export type ScenariosStatus = {

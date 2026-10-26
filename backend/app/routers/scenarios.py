@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.services.project_folders import clean_path, existing_folder, require_folder
 from app.services.scenarios import create_scenario_presentation, find_scenario_files
 
 router = APIRouter(tags=["scenarios"])
@@ -14,28 +15,12 @@ router = APIRouter(tags=["scenarios"])
 URL_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
 
 
-def _clean_path(value: str) -> Path:
-    # "Copia come percorso" di Esplora risorse lo mette tra virgolette.
-    return Path(value.strip().strip('"'))
-
-
 def _scenarios_folder(project: models.Project) -> Path | None:
-    if not project.scenarios_folder:
-        return None
-    folder = _clean_path(project.scenarios_folder)
-    return folder if folder.is_dir() else None
+    return existing_folder(project.scenarios_folder)
 
 
 def _require_folder(project: models.Project) -> Path:
-    folder = _scenarios_folder(project)
-    if folder is None:
-        detail = (
-            f"La cartella Scenarios non esiste: {project.scenarios_folder}"
-            if project.scenarios_folder
-            else "Cartella Scenarios non impostata: impostala da Modifica increment"
-        )
-        raise HTTPException(status_code=400, detail=detail)
-    return folder
+    return require_folder(project.scenarios_folder, "Scenarios")
 
 
 def _get_story_or_400(db: Session, item_id: int) -> models.BacklogItem:
@@ -80,7 +65,7 @@ def open_scenarios(item_id: int, db: Session = Depends(get_db)):
     Gli URL li apre direttamente il frontend."""
     item = _get_story_or_400(db, item_id)
     if item.scenarios_link and not URL_PATTERN.match(item.scenarios_link):
-        path = _clean_path(item.scenarios_link)
+        path = clean_path(item.scenarios_link)
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"File non trovato: {path}")
         os.startfile(path)

@@ -469,6 +469,16 @@ class ScenarioFile(BaseModel):
     filename: str
 
 
+class FolderStatus(BaseModel):
+    # Cartella dell'increment (None = non impostata) e se esiste davvero.
+    folder: str | None
+    folder_exists: bool
+
+
+class SavedFile(BaseModel):
+    filename: str
+
+
 class ScenarioBrowseResult(BaseModel):
     # None = finestra chiusa senza scegliere un file.
     path: str | None
@@ -648,12 +658,26 @@ class PprInspection(BaseModel):
     old_template: bool = False
 
 
+class PprCandidate(BaseModel):
+    """Un documento PPR della cartella review proposto nel popup: info se
+    e' del tipo giusto, altrimenti error col motivo."""
+
+    filename: str
+    modified: dt.datetime
+    info: PprInspection | None = None
+    error: str | None = None
+
+
 class PprGenerateRequest(BaseModel):
     version: int
     revision_text: str
     deliverables: list[PprDeliverable] | None = None
+    # Ogni documento precedente arriva caricato dal disco (base64) oppure
+    # come nome di un file della cartella review dell'increment.
     previous_b64: str | None = None
     previous_phase_b64: str | None = None
+    previous_filename: str | None = None
+    previous_phase_filename: str | None = None
 
 
 # ---------- Dashboard ----------

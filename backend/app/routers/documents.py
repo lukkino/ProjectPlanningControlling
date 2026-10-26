@@ -1,5 +1,6 @@
 import base64
 import binascii
+import datetime as dt
 import re
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -34,7 +35,9 @@ from app.services.ppr_document import (
     generate_ppr_document,
     get_ppr_defaults,
     inspect_ppr_file,
+    previous_phase_of,
 )
+from app.services.project_folders import existing_folder, file_in_folder, require_folder
 from app.services.jira_client import JiraClientError, fetch_requirement_issues
 from app.services.kickoff_presentation import generate_kickoff_presentation
 
@@ -153,18 +156,69 @@ def ppr_inspect(project_id: int, doc_type: str, payload: schemas.PprInspectReque
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/candidates", response_model=list[schemas.PprCandidate])
+def ppr_candidates(
+    project_id: int,
+    doc_type: str,
+    role: str = Query(..., pattern="^(previous|previous_phase)$"),
+    db: Session = Depends(get_db),
+):
+    """Documenti della cartella review dell'increment che possono fare da
+    ultima versione (role=previous) o da fase precedente (previous_phase):
+    gli .xlsx il cui nome inizia col codice del documento (es.
+    "TIH-EXECUTION-PTBSYS.16-approved.xlsx"), ciascuno gia' controllato come
+    se lo si caricasse nel popup. Dal piu' recente; vuoto senza cartella."""
+    _get_ppr_type_or_404(doc_type)
+    project = _get_project_or_404(db, project_id)
+    expected_type = doc_type if role == "previous" else previous_phase_of(doc_type)
+    folder = existing_folder(project.review_documents_folder)
+    if folder is None or expected_type is None:
+        return []
+    prefix = PPR_DOCUMENT_TYPES[expected_type].filename.lower()
+    files = [
+        p
+        for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() == ".xlsx" and p.name.lower().startswith(prefix)
+    ]
+    candidates = []
+    for path in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True):
+        candidate = schemas.PprCandidate(
+            filename=path.name, modified=dt.datetime.fromtimestamp(path.stat().st_mtime)
+        )
+        try:
+            candidate.info = schemas.PprInspection(**inspect_ppr_file(doc_type, role, path.read_bytes()))
+        except (PprError, OSError) as exc:
+            candidate.error = str(exc)
+        candidates.append(candidate)
+    return candidates
+
+
+def _previous_content(project: models.Project, b64: str | None, filename: str | None, what: str) -> bytes | None:
+    """Documento precedente del popup: caricato dal disco (base64) o scelto
+    tra quelli della cartella review."""
+    if b64:
+        return _decode_b64(b64, what)
+    if filename:
+        path = file_in_folder(require_folder(project.review_documents_folder, "documenti delle review"), filename)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"{what}: file non trovato nella cartella review: {filename}")
+        return path.read_bytes()
+    return None
+
+
 @router.post("/api/projects/{project_id}/documents/ppr/{doc_type}")
 def download_ppr_document(
     project_id: int, doc_type: str, payload: schemas.PprGenerateRequest, db: Session = Depends(get_db)
 ):
     """Genera il documento PPR (vedi services/ppr_document.py) dai documenti
-    precedenti caricati nel popup, in base64 nel corpo: nessun file viene
-    salvato sul server."""
+    precedenti caricati nel popup (in base64 nel corpo) o scelti nella
+    cartella review: il documento generato torna nella risposta, a salvarlo
+    nella cartella ci pensa il frontend (vedi routers/review_folder.py)."""
     _get_ppr_type_or_404(doc_type)
     project = _get_project_or_404(db, project_id)
-    previous = _decode_b64(payload.previous_b64, "Ultima versione") if payload.previous_b64 else None
-    previous_phase = (
-        _decode_b64(payload.previous_phase_b64, "Fase precedente") if payload.previous_phase_b64 else None
+    previous = _previous_content(project, payload.previous_b64, payload.previous_filename, "Ultima versione")
+    previous_phase = _previous_content(
+        project, payload.previous_phase_b64, payload.previous_phase_filename, "Fase precedente"
     )
     try:
         content, filename_stem = generate_ppr_document(

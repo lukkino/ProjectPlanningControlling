@@ -62,6 +62,9 @@ export function ProjectFormModal({ project, onClose }: Props) {
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project', saved.id] })
+      // Stato delle cartelle Scenarios e review (impostate in questo form).
+      queryClient.invalidateQueries({ queryKey: ['scenarios', saved.id] })
+      queryClient.invalidateQueries({ queryKey: ['review-folder', saved.id] })
       onClose()
       if (!project) navigate(`/projects/${saved.id}`)
     },
