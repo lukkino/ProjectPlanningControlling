@@ -149,6 +149,9 @@ def run_lightweight_migrations() -> None:
         if "scenarios_link" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN scenarios_link TEXT"))
+        if "impacts_on" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN impacts_on TEXT"))
 
     if "increment_budget_lines" in table_names:
         budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}

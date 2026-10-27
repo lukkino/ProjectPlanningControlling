@@ -107,6 +107,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   progetto_id: 130,
   notes: 160,
   scenarios: 170,
+  impacts_on: 160,
 }
 const HANDLE_COLUMN_WIDTH = 30
 const SELECT_COLUMN_WIDTH = 30
@@ -127,6 +128,11 @@ type Column = {
   render: (item: BacklogItem) => ReactNode
 }
 
+// Valori del campo Jira "Impacts On" di un item (salvati uniti da virgola).
+function impactsOf(item: BacklogItem): string[] {
+  return item.impacts_on ? item.impacts_on.split(',').map((v) => v.trim()).filter(Boolean) : []
+}
+
 export function BacklogPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
@@ -134,6 +140,10 @@ export function BacklogPage() {
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [hideDone, setHideDone] = useState(true)
   const [hideCve, setHideCve] = useState(true)
+  // Filtro "Impacts on": nessun valore selezionato = nessun filtro; con piu'
+  // valori, l'item deve averne almeno uno ('any') o tutti ('all').
+  const [impactFilter, setImpactFilter] = useState<Set<string>>(new Set())
+  const [impactMatch, setImpactMatch] = useState<'any' | 'all'>('any')
   const [sortByStatus, setSortByStatus] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   // Gantt: di default tutti gli item; il filtro sulla finestra di forecast
@@ -867,6 +877,12 @@ export function BacklogPage() {
         )
       },
     },
+    {
+      key: 'impacts_on',
+      label: 'Impacts on',
+      // Sincronizzato da Jira (campo "Impacts On"): non editabile qui.
+      render: (item) => item.impacts_on ?? <span className="muted">—</span>,
+    },
   ]
   const defaultColumnOrder = columns.map((c) => c.key)
 
@@ -1072,13 +1088,34 @@ export function BacklogPage() {
 
   const cveCount = (items ?? []).filter(isCveBug).length
 
+  const impactCounts = (items ?? []).reduce<Record<string, number>>((acc, i) => {
+    for (const impact of impactsOf(i)) acc[impact] = (acc[impact] ?? 0) + 1
+    return acc
+  }, {})
+  const availableImpacts = Object.keys(impactCounts).sort()
+  const toggleImpact = (impact: string) => {
+    setImpactFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(impact)) next.delete(impact)
+      else next.add(impact)
+      return next
+    })
+  }
+  const matchesImpactFilter = (item: BacklogItem) => {
+    if (impactFilter.size === 0) return true
+    const impacts = impactsOf(item)
+    const selected = Array.from(impactFilter)
+    return impactMatch === 'all' ? selected.every((v) => impacts.includes(v)) : selected.some((v) => impacts.includes(v))
+  }
+
   const visibleItems = (items ?? []).filter(
     (i) =>
       (!onlyInScope || i.in_scope) &&
       (!onlyCodefreeze || i.included_in_codefreeze || i.is_activity) &&
       (!hideDone || i.status !== 'Done') &&
       (!hideCve || !isCveBug(i)) &&
-      (!i.issue_type || !hiddenTypes.has(i.issue_type)),
+      (!i.issue_type || !hiddenTypes.has(i.issue_type)) &&
+      matchesImpactFilter(i),
   )
 
   // Ordinamento per stato su richiesta esplicita: sort stabile, a parita' di
@@ -1378,6 +1415,32 @@ export function BacklogPage() {
                 {type} ({typeCounts[type]})
               </label>
             ))}
+          </div>
+        )}
+
+        {availableImpacts.length > 0 && (
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+            title="Mostra solo gli item con questi valori nel campo Jira Impacts On; nessuno selezionato = tutti gli item"
+          >
+            <span className="muted">Impacts on:</span>
+            {availableImpacts.map((impact) => (
+              <label key={impact} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={impactFilter.has(impact)} onChange={() => toggleImpact(impact)} />
+                {impact} ({impactCounts[impact]})
+              </label>
+            ))}
+            {impactFilter.size > 1 && (
+              <select value={impactMatch} onChange={(e) => setImpactMatch(e.target.value as 'any' | 'all')}>
+                <option value="any">almeno uno</option>
+                <option value="all">tutti insieme</option>
+              </select>
+            )}
+            {impactFilter.size > 0 && (
+              <button className="btn" onClick={() => setImpactFilter(new Set())}>
+                Azzera
+              </button>
+            )}
           </div>
         )}
 

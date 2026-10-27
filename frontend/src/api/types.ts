@@ -133,6 +133,7 @@ export type BacklogItem = {
   priority_order: number
   summary: string | null
   dev_effort_hours: number | null
+  impacts_on: string | null
   issue_type: string | null
   jira_status: string | null
   labels: string | null

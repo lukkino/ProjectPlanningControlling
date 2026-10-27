@@ -48,6 +48,7 @@ class JiraIssue:
         problem_cause: str | None = None,
         components: str | None = None,
         dev_effort_hours: float | None = None,
+        impacts_on: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -75,6 +76,9 @@ class JiraIssue:
         # Campo custom Jira "Developer Effort" (customfield_10146, solo
         # sulle Story): colonna "Ore stimate" del Backlog.
         self.dev_effort_hours = dev_effort_hours
+        # Campo custom Jira "Impacts On" (customfield_10115, multiselect):
+        # valori uniti da virgola, colonna "Impacts on" del Backlog.
+        self.impacts_on = impacts_on
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -466,6 +470,9 @@ def search_issues(
     # customfield_10146 = "Developer Effort" (solo Story), colonna "Ore
     # stimate" del Backlog.
     DEV_EFFORT_FIELD = "customfield_10146"
+    # customfield_10115 = "Impacts On" (multiselect), colonna "Impacts on"
+    # del Backlog.
+    IMPACTS_ON_FIELD = "customfield_10115"
     fields = [
         "summary",
         "issuetype",
@@ -479,6 +486,7 @@ def search_issues(
         CHANGE_DESCRIPTION_FIELD,
         PROBLEM_CAUSE_FIELD,
         DEV_EFFORT_FIELD,
+        IMPACTS_ON_FIELD,
     ]
 
     raw_issues: list[dict] = []
@@ -528,6 +536,7 @@ def search_issues(
                 parent = f.get("parent") or {}
                 implemented_by = _extract_implemented_by(f.get("issuelinks") or [])
                 components = ", ".join(c.get("name", "") for c in (f.get("components") or [])) or None
+                impacts_on = ", ".join(o.get("value", "") for o in (f.get(IMPACTS_ON_FIELD) or [])) or None
                 issues.append(
                     JiraIssue(
                         key=key,
@@ -546,6 +555,7 @@ def search_issues(
                         problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
                         components=components,
                         dev_effort_hours=f.get(DEV_EFFORT_FIELD),
+                        impacts_on=impacts_on,
                     )
                 )
                 report("changelog", index, total)

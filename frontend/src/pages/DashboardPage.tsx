@@ -272,14 +272,15 @@ const RECENTLY_CLOSED_PERIODS = [
 
 // Issue in scope chiuse negli ultimi `days` giorni (oggi compreso), dalla
 // piu' recente: Done con Actual finish (dal sync Jira) da `days` giorni fa in
-// poi. Le date sono stringhe ISO yyyy-mm-dd, confrontabili direttamente.
+// poi. Tutte quelle in scope, anche se non incluse nel code freeze: e' il
+// resoconto di cosa si e' chiuso, non solo del lavoro del piano. Le date sono stringhe ISO yyyy-mm-dd, confrontabili direttamente.
 function recentlyClosedItems(items: BacklogItem[] | undefined, days: number): BacklogItem[] {
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - days)
   const pad = (n: number) => String(n).padStart(2, '0')
   const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`
   return (items ?? [])
-    .filter((i) => isInPlan(i) && i.status === 'Done' && i.actual_finish != null && i.actual_finish >= cutoffStr)
+    .filter((i) => i.in_scope && i.status === 'Done' && i.actual_finish != null && i.actual_finish >= cutoffStr)
     .sort((a, b) => (b.actual_finish ?? '').localeCompare(a.actual_finish ?? '') || a.priority_order - b.priority_order)
 }
 
@@ -296,8 +297,9 @@ function RecentlyClosedCard({
 }) {
   const closed = recentlyClosedItems(items, period.days)
   // Sotto le chiuse, come nella presentazione: le issue in lavorazione ora e
-  // quelle ancora da iniziare, nell'ordine del Backlog. Tutte e tre le liste
-  // con la regola del piano (code freeze e attivita' di servizio).
+  // quelle ancora da iniziare, nell'ordine del Backlog, con la regola del
+  // piano (code freeze e attivita' di servizio); le chiuse invece tutte
+  // quelle in scope.
   const byBacklogOrder = (a: BacklogItem, b: BacklogItem) => a.priority_order - b.priority_order
   const inProgress = (items ?? []).filter((i) => isInPlan(i) && i.status === 'In Progress').sort(byBacklogOrder)
   const toDo = (items ?? []).filter((i) => isInPlan(i) && i.status === 'To Do').sort(byBacklogOrder)

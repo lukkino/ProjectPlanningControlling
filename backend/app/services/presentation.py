@@ -634,14 +634,15 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
         (
             i
             for i in project.backlog_items
-            if i.is_in_plan and i.status == "Done" and i.actual_finish is not None and i.actual_finish >= cutoff
+            if i.in_scope and i.status == "Done" and i.actual_finish is not None and i.actual_finish >= cutoff
         ),
         key=lambda i: (-i.actual_finish.toordinal(), i.priority_order),
     )
     # Sotto le chiuse, quelle in lavorazione ora (stato In Progress, vedi
     # BacklogItem.status) e quelle ancora da iniziare, nell'ordine del
-    # Backlog. Tutte e tre con la stessa regola del piano: lavoro del code
-    # freeze e attivita' di servizio, come il Gantt del Backlog.
+    # Backlog, con la regola del piano: lavoro del code freeze e attivita' di
+    # servizio, come il Gantt del Backlog. Le chiuse invece sono tutte quelle
+    # in scope, come nella card della Dashboard.
     in_progress = sorted(
         (i for i in project.backlog_items if i.is_in_plan and i.status == "In Progress"),
         key=lambda i: i.priority_order,
