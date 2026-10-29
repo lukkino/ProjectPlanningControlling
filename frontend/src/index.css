@@ -494,6 +494,7 @@ tbody tr:hover .sticky-col { background: var(--bg); }
 .badge.todo { background: #eef0f3; color: var(--text-muted); }
 .badge.progress { background: #fff2df; color: var(--warning); }
 .badge.done { background: #e3f6ea; color: var(--success); }
+.badge.ready { background: #e6eefc; color: var(--primary); }
 .badge.current { background: var(--primary); color: white; }
 
 /* Capacity Planner: tipologie di risorsa espandibili nelle persone del team,
@@ -539,6 +540,9 @@ tr.capacity-member-row input { background: #f7f9fc; }
 
 tr.phase-current td { background: #e6eefc; }
 tr.phase-current input { background: #e6eefc; }
+.phase-history { margin-top: 2px; font-size: 11px; }
+.phase-history ul { margin: 2px 0 0; padding-left: 14px; }
+.phase-history li { white-space: nowrap; }
 
 .empty-state {
   text-align: center;

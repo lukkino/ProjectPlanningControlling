@@ -33,6 +33,14 @@ def run_lightweight_migrations() -> None:
     if "projects" not in table_names:
         return  # prima esecuzione: create_all la crea gia' con la colonna
 
+    if "phases" in table_names:
+        phase_columns = {col["name"] for col in inspector.get_columns("phases")}
+        if "original_date" not in phase_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE phases ADD COLUMN original_date DATE"))
+                # La pianificata di oggi diventa la baseline delle fasi esistenti.
+                conn.execute(text("UPDATE phases SET original_date = planned_date"))
+
     project_columns = {col["name"] for col in inspector.get_columns("projects")}
     if "increment_id" not in project_columns:
         with engine.begin() as conn:

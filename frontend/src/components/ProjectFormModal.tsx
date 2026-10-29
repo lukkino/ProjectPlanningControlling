@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Project } from '../api/types'
+import { formatIsoDate } from '../lib/dates'
 
 type Props = {
   project?: Project
@@ -15,7 +16,6 @@ const emptyForm = {
   status: 'Kick-off',
   scope: '',
   start_date: '',
-  code_freeze_date: '',
   planned_finish_date: '',
   jira_jql: '',
   scenarios_folder: '',
@@ -31,7 +31,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
           status: project.status,
           scope: project.scope ?? '',
           start_date: project.start_date ?? '',
-          code_freeze_date: project.code_freeze_date ?? '',
           planned_finish_date: project.planned_finish_date ?? '',
           jira_jql: project.jira_jql ?? '',
           scenarios_folder: project.scenarios_folder ?? '',
@@ -47,7 +46,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
       const payload: Partial<Project> = {
         ...form,
         start_date: form.start_date || null,
-        code_freeze_date: form.code_freeze_date || null,
         planned_finish_date: form.planned_finish_date || null,
         scope: form.scope || null,
         jira_jql: form.jira_jql || null,
@@ -104,13 +102,11 @@ export function ProjectFormModal({ project, onClose }: Props) {
             <label>Project start</label>
             <input type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
           </div>
-          <div className="form-row">
+          {/* Il code freeze ufficiale e' la data aggiornata della fase "Code
+              freeze" nelle fasi della Dashboard: qui solo in lettura. */}
+          <div className="form-row" title="Si modifica dalle fasi dell'increment in Dashboard (fase Code freeze, data aggiornata)">
             <label>Code freeze</label>
-            <input
-              type="date"
-              value={form.code_freeze_date}
-              onChange={(e) => set('code_freeze_date', e.target.value)}
-            />
+            <input value={formatIsoDate(project?.code_freeze_date) ?? 'dalle fasi in Dashboard'} disabled />
           </div>
           <div className="form-row">
             <label>Planned finish</label>

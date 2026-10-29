@@ -53,6 +53,20 @@ export function addWorkingDays(startStr: string | null, days: number | null, off
   return toIsoLocal(cursor)
 }
 
+// Giorni lavorativi da startStr a endStr, estremi inclusi, saltando anche i
+// giorni non lavorativi del team (inverso di addWorkingDays): il Sizing (gg)
+// che corrisponde a una barra del Gantt allungata o accorciata col mouse.
+export function countWorkingDays(startStr: string, endStr: string, off: DaysOff = NO_DAYS_OFF): number {
+  const cursor = new Date(`${startStr}T00:00:00`)
+  const end = new Date(`${endStr}T00:00:00`)
+  let count = 0
+  while (cursor <= end) {
+    if (isWorkingDay(cursor, off)) count++
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return count
+}
+
 // Primo giorno lavorativo successivo a startStr - usato per far ripartire un
 // item subito dopo la Fine pian. di quello che lo precede (pianificazione a
 // cascata e predecessori).

@@ -1323,7 +1323,7 @@ export function DocumentsPage() {
                             </td>
                             <td rowSpan={rowCount}>{item.issue_type}</td>
                             <td rowSpan={rowCount}>
-                              <StatusBadge status={item.status} />
+                              <StatusBadge status={item.status} jiraStatus={item.jira_status} />
                             </td>
                             <td rowSpan={rowCount}>
                               {item.parent_key ? (

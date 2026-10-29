@@ -4,6 +4,14 @@ const CLASS_BY_STATUS: Record<string, string> = {
   Done: 'done',
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${CLASS_BY_STATUS[status] ?? 'todo'}`}>{status}</span>
+// Colore dai 3 stati locali (status), testo dallo stato Jira se c'e' (es.
+// "Ready" resta To Do per filtri e conteggi, ma si vede come Ready).
+export function StatusBadge({ status, jiraStatus }: { status: string; jiraStatus?: string | null }) {
+  const label = jiraStatus || status
+  const className = label === 'Ready' ? 'ready' : (CLASS_BY_STATUS[status] ?? 'todo')
+  return (
+    <span className={`badge ${className}`} title={label !== status ? `Stato Jira ${label} (${status})` : undefined}>
+      {label}
+    </span>
+  )
 }

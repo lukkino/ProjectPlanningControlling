@@ -12,10 +12,21 @@ export type Phase = {
   id: number
   project_id: number
   name: string
+  // Originale (baseline), pianificata aggiornata (quella che vale ora) ed
+  // effettiva; changes = storico dei cambi della pianificata aggiornata.
+  original_date: string | null
   planned_date: string | null
   actual_date: string | null
   order: number
   notes: string | null
+  changes: PhaseDateChange[]
+}
+
+export type PhaseDateChange = {
+  id: number
+  old_date: string | null
+  new_date: string | null
+  changed_at: string
 }
 
 export type IncrementBudgetLine = {

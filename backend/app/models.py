@@ -121,6 +121,10 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(64), default="Kick-off")
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Copia in sola lettura della data aggiornata della fase "Code freeze"
+    # (la data ufficiale, vedi routers/projects.sync_code_freeze): la
+    # mantiene il backend, cosi' chi legge l'increment (Backlog, Gantt,
+    # Monte Carlo, presentazioni...) usa sempre la data delle fasi.
     code_freeze_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Data di fine pianificata del progetto (rilascio finale/Release to
     # Market), distinta dal code freeze: usata anche nella Dashboard
@@ -181,12 +185,34 @@ class Phase(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(64))
+    # Data originale (baseline): la prima pianificata, poi fissa salvo
+    # modifica a mano. planned_date e' la data pianificata aggiornata, quella
+    # che vale ora (Backlog, Gantt e presentazioni usano questa); ogni suo
+    # cambio finisce in `changes`.
+    original_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     planned_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     actual_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="phases")
+    changes: Mapped[list["PhaseDateChange"]] = relationship(
+        back_populates="phase", cascade="all, delete-orphan", order_by="PhaseDateChange.changed_at"
+    )
+
+
+class PhaseDateChange(Base):
+    """Storico dei cambi della data pianificata aggiornata di una fase."""
+
+    __tablename__ = "phase_date_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phase_id: Mapped[int] = mapped_column(ForeignKey("phases.id", ondelete="CASCADE"))
+    old_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    new_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    changed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+    phase: Mapped["Phase"] = relationship(back_populates="changes")
 
 
 class NonWorkingDay(Base):

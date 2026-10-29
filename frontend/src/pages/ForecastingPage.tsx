@@ -51,7 +51,10 @@ export function ForecastingPage() {
 
   const updateProject = useMutation({
     mutationFn: (data: Partial<Project>) => api.projects.update(project.id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['phases', project.id] })
+    },
   })
 
   const update = useMutation({

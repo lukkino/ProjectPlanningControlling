@@ -11,13 +11,14 @@ import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, toEpochDays
 // visto che ora la sequenza e' garantita coerente. Eventuali fasi extra
 // aggiunte a mano ricadono sui colori restanti della palette.
 const PHASE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
-const STANDARD_PHASES = ['Kick-off', 'Planning', 'Execution', 'Deployment', 'Release to Market']
+// Code freeze in fondo: aggiunta dopo, cosi' le altre fasi tengono i loro colori.
+const STANDARD_PHASES = ['Kick-off', 'Planning', 'Execution', 'Deployment', 'Release to Market', 'Code freeze']
 const PHASE_COLOR_BY_NAME: Record<string, string> = Object.fromEntries(
-  STANDARD_PHASES.map((name, i) => [name, PHASE_COLORS[i]]),
+  STANDARD_PHASES.map((name, i) => [name.toLowerCase(), PHASE_COLORS[i]]),
 )
 
 function colorForPhase(name: string, fallbackIndex: number): string {
-  return PHASE_COLOR_BY_NAME[name] ?? PHASE_COLORS[(STANDARD_PHASES.length + fallbackIndex) % PHASE_COLORS.length]
+  return PHASE_COLOR_BY_NAME[name.toLowerCase()] ?? PHASE_COLORS[(STANDARD_PHASES.length + fallbackIndex) % PHASE_COLORS.length]
 }
 
 const ROW_LABEL_WIDTH = 220

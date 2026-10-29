@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEve
 import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
-import { parsePredecessors } from '../lib/scheduling'
+import { parsePredecessors, type BacklogPatch } from '../lib/scheduling'
 
 // Stessa coppia di colori usata per Budget/Actual in IncrementHistoryCard:
 // blu = valore pianificato, arancio = valore effettivo.
@@ -77,6 +77,35 @@ function markTextWidth(text: string, fontWeight: number) {
   measureContext.font = `${fontWeight} 11px ${getComputedStyle(document.body).fontFamily}`
   return Math.ceil(measureContext.measureText(text).width)
 }
+// Modifica col mouse della barra "Pianificato": bordo sinistro = inizio,
+// bordo destro = fine, il resto della barra = spostamento. Fascia dei bordi
+// in pixel (meno sulle barre corte, cosi' resta sempre un centro da
+// afferrare).
+const BAR_EDGE_ZONE = 6
+type BarDragMode = 'move' | 'start' | 'end'
+export type GanttBarChange = { mode: BarDragMode; planned_start: string; expected_finish: string }
+
+// Cursori dei bordi: una parentesi quadra ("[" inizio, "]" fine) con la
+// freccia orizzontale, bordata di bianco per vedersi anche sulle barre
+// scure; il cursore di sistema e' la riserva se l'SVG non viene caricato.
+function bracketCursor(side: 'left' | 'right'): string {
+  const bracket = side === 'left' ? 'M15 3 H10 V21 H15' : 'M9 3 H14 V21 H9'
+  const arrow = 'M2 12 H22 M5.5 8.5 L2 12 L5.5 15.5 M18.5 8.5 L22 12 L18.5 15.5'
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+    `<path d='${bracket}' fill='none' stroke='white' stroke-width='4.5'/>` +
+    `<path d='${arrow}' fill='none' stroke='white' stroke-width='4'/>` +
+    `<path d='${bracket}' fill='none' stroke='black' stroke-width='2'/>` +
+    `<path d='${arrow}' fill='none' stroke='black' stroke-width='1.5'/></svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, ${side === 'left' ? 'w-resize' : 'e-resize'}`
+}
+const CURSOR_BY_MODE: Record<BarDragMode, string> = {
+  move: 'move',
+  start: bracketCursor('left'),
+  end: bracketCursor('right'),
+}
+const epochDaysToIso = (day: number) => epochDaysToDate(day).toISOString().slice(0, 10)
+
 // Lato massimo dell'immagine esportata: oltre, i browser rifiutano il canvas.
 const EXPORT_MAX_SIDE = 16000
 // Margine attorno all'immagine esportata e ingrandimento della legenda.
@@ -217,6 +246,14 @@ type Props = {
   // Prefisso del nome del PNG esportato (es. "Gantt_PTBSYS-123"), seguito
   // dalla data dell'export.
   exportName?: string
+  // Modifica delle barre "Pianificato" col mouse (assente = Gantt in sola
+  // lettura). planBarChange dice cosa cambierebbe (l'item e quelli che ne
+  // dipendono), per l'anteprima durante il trascinamento; onBarChange salva
+  // quelle modifiche al rilascio. isStartLocked: item con lo Start calcolato
+  // dai predecessori, di cui si puo' cambiare solo la fine.
+  planBarChange?: (item: BacklogItem, change: GanttBarChange) => BacklogPatch[]
+  onBarChange?: (updates: BacklogPatch[]) => void
+  isStartLocked?: (item: BacklogItem) => boolean
 }
 
 const NO_PHASES: { name: string; date: string | null }[] = []
@@ -231,6 +268,9 @@ export function BacklogGanttChart({
   phases = NO_PHASES,
   nonWorkingDays = NO_NON_WORKING_DAYS,
   exportName = 'Gantt',
+  planBarChange,
+  onBarChange,
+  isStartLocked,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
@@ -285,6 +325,25 @@ export function BacklogGanttChart({
     onPointerCancel: endDrag,
   }
   const dragClassName = dragging ? 'gantt-draggable gantt-draggable--dragging' : 'gantt-draggable'
+
+  // Trascinamento di una barra "Pianificato" (vedi barHandlers sotto):
+  // spostamento in giorni interi dal punto di partenza e modifiche che ne
+  // derivano, mostrate in anteprima finche' non si rilascia.
+  type BarDrag = {
+    item: BacklogItem
+    mode: BarDragMode
+    startX: number
+    start: number
+    end: number
+    delta: number
+    updates: BacklogPatch[]
+  }
+  const [barDrag, setBarDrag] = useState<BarDrag | null>(null)
+  const barDragRef = useRef<BarDrag | null>(null)
+  const updateBarDrag = (next: BarDrag | null) => {
+    barDragRef.current = next
+    setBarDrag(next)
+  }
 
   // Esporta PNG: per catturare tutto il Gantt e non solo la parte visibile,
   // durante l'export il componente si allarga all'intero calendario (niente
@@ -459,6 +518,64 @@ export function BacklogGanttChart({
 
   const chartWidth = (maxDay - minDay + 1) * dayWidth
   const dayToX = (day: number) => (day - minDay) * dayWidth
+
+  // Barre modificabili col mouse: cursore secondo la zona (bordi o centro),
+  // trascinamento a giorni interi con anteprima, salvataggio al rilascio.
+  const editable = !!planBarChange && !!onBarChange && !exporting
+  const barZone = (e: PointerEvent<HTMLDivElement>, item: BacklogItem): BarDragMode | null => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const edge = Math.min(BAR_EDGE_ZONE, rect.width / 3)
+    const x = e.clientX - rect.left
+    const mode: BarDragMode = x <= edge ? 'start' : x >= rect.width - edge ? 'end' : 'move'
+    // Start calcolato dai predecessori: si cambia solo la fine.
+    return mode !== 'end' && isStartLocked?.(item) ? null : mode
+  }
+  const barChange = (drag: BarDrag, delta: number): GanttBarChange => {
+    const start = drag.mode === 'end' ? drag.start : Math.min(drag.start + delta, drag.mode === 'start' ? drag.end : Infinity)
+    const end = drag.mode === 'start' ? drag.end : Math.max(drag.end + delta, drag.mode === 'end' ? drag.start : -Infinity)
+    return { mode: drag.mode, planned_start: epochDaysToIso(start), expected_finish: epochDaysToIso(end) }
+  }
+  const endBarDrag = () => {
+    document.body.style.cursor = ''
+    updateBarDrag(null)
+  }
+  const barHandlers = (item: BacklogItem, start: number, end: number) =>
+    editable
+      ? {
+          onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
+            const drag = barDragRef.current
+            if (!drag) {
+              const zone = barZone(e, item)
+              e.currentTarget.style.cursor = zone ? CURSOR_BY_MODE[zone] : ''
+              return
+            }
+            if (drag.item.id !== item.id) return
+            const delta = Math.round((e.clientX - drag.startX) / dayWidth)
+            if (delta === drag.delta) return
+            updateBarDrag({ ...drag, delta, updates: delta === 0 ? [] : planBarChange!(item, barChange(drag, delta)) })
+          },
+          onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+            if (e.pointerType !== 'mouse' || e.button !== 0) return
+            const zone = barZone(e, item)
+            // Fuori dalle zone modificabili il trascinamento sposta il Gantt.
+            if (!zone) return
+            e.stopPropagation()
+            e.currentTarget.setPointerCapture(e.pointerId)
+            document.body.style.cursor = CURSOR_BY_MODE[zone]
+            updateBarDrag({ item, mode: zone, startX: e.clientX, start, end, delta: 0, updates: [] })
+          },
+          onPointerUp: () => {
+            const drag = barDragRef.current
+            if (drag && drag.updates.length > 0) onBarChange!(drag.updates)
+            endBarDrag()
+          },
+          onPointerCancel: endBarDrag,
+        }
+      : {}
+  // Durante il trascinamento le barre mostrano gia' le date nuove (l'item e
+  // quelli che si spostano con lui); altrimenti quelle salvate.
+  const previewById = new Map((barDrag?.updates ?? []).map((u) => [u.id, u]))
+  const shownItems = previewById.size > 0 ? items.map((i) => (previewById.has(i.id) ? { ...i, ...previewById.get(i.id) } : i)) : items
   const scale = buildScale(minDay, maxDay, dayWidth)
 
   // Etichetta (nomi e data, sempre visibili) a destra della linea, o a
@@ -500,13 +617,13 @@ export function BacklogGanttChart({
   const cutoffRow = forecastCutoffId == null ? -1 : items.findIndex((item) => item.id === forecastCutoffId)
   const rowTop = (row: number) => row * ROW_HEIGHT + (cutoffRow >= 0 && row > cutoffRow ? CUTOFF_BAND_HEIGHT : 0)
   const barCenterY = (row: number) => rowTop(row) + PLANNED_BAR_TOP + BAR_HEIGHT / 2
-  const links = items.flatMap((successor, successorRow) => {
+  const links = shownItems.flatMap((successor, successorRow) => {
     const sStart = dateStrToEpochDays(successor.planned_start)
     if (sStart === null || dateStrToEpochDays(successor.expected_finish) === null) return []
     return parsePredecessors(successor.predecessors).flatMap((key) => {
       const predecessorRow = rowByKey.get(key)
       if (predecessorRow === undefined || predecessorRow === successorRow) return []
-      const predecessor = items[predecessorRow]
+      const predecessor = shownItems[predecessorRow]
       const pStart = dateStrToEpochDays(predecessor.planned_start)
       const pEnd = dateStrToEpochDays(predecessor.expected_finish)
       if (pStart === null || pEnd === null) return []
@@ -908,7 +1025,7 @@ export function BacklogGanttChart({
                 )
               })}
             </div>
-            {items.map((item, row) => {
+            {shownItems.map((item, row) => {
               const pStart = dateStrToEpochDays(item.planned_start)
               const pEnd = dateStrToEpochDays(item.expected_finish)
               const aStart = dateStrToEpochDays(item.actual_start)
@@ -955,7 +1072,17 @@ export function BacklogGanttChart({
 
                   {pStart !== null && pEnd !== null && (
                     <div
-                      title={`Pian.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}`}
+                      title={
+                        barDrag
+                          ? undefined
+                          : `Pian.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}` +
+                            (editable
+                              ? isStartLocked?.(item)
+                                ? '\nInizio calcolato dai predecessori: trascina il bordo destro per cambiare la fine'
+                                : '\nTrascina per spostare, i bordi per cambiare inizio o fine'
+                              : '')
+                      }
+                      {...barHandlers(item, pStart, pEnd)}
                       style={{
                         position: 'absolute',
                         left: dayToX(pStart),
@@ -966,8 +1093,39 @@ export function BacklogGanttChart({
                         border: item.is_activity ? undefined : `1px solid ${color}`,
                         boxSizing: 'border-box',
                         borderRadius: 3,
+                        // Sopra la linea di oggi, per poterla afferrare anche li'.
+                        zIndex: editable ? 2 : undefined,
+                        // Item spostati dal trascinamento: contorno tratteggiato.
+                        outline: previewById.has(item.id) ? `2px dashed ${color}` : undefined,
+                        outlineOffset: 1,
                       }}
                     />
+                  )}
+
+                  {/* Date nuove sopra la barra trascinata, e quanti altri
+                      item si spostano con lei. */}
+                  {barDrag?.item.id === item.id && pStart !== null && pEnd !== null && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: dayToX(pStart),
+                        top: 2,
+                        zIndex: 3,
+                        padding: '0 6px',
+                        borderRadius: 3,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        lineHeight: '16px',
+                        whiteSpace: 'nowrap',
+                        background: 'var(--text)',
+                        color: 'var(--surface)',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {formatEpochDaysAsDate(pStart)} → {formatEpochDaysAsDate(pEnd)}
+                      {barDrag.updates.length > 1 &&
+                        ` · ${barDrag.updates.length - 1} ${barDrag.updates.length === 2 ? 'altro item si sposta' : 'altri item si spostano'}`}
+                    </div>
                   )}
 
                   {aStart !== null && aEnd !== null && (

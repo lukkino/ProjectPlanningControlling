@@ -27,7 +27,10 @@ export default function App() {
     // Pagina di dettaglio di un progetto (non la lista /increments): la
     // tabella dello Storico progetto ha bisogno di spazio per non dover
     // scorrere.
-    /^\/increments\/\d+$/.test(location.pathname)
+    /^\/increments\/\d+$/.test(location.pathname) ||
+    // Dashboard dell'increment (rotta index del progetto): la tabella delle
+    // fasi, con date, scostamento e note, ha bisogno di tutta la larghezza.
+    /^\/projects\/\d+\/?$/.test(location.pathname)
 
   return (
     <div className="app-shell">

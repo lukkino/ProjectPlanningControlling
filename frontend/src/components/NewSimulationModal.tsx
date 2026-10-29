@@ -69,6 +69,11 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
   const [updateIncrementDeadline, setUpdateIncrementDeadline] = useState(false)
   const deadlineChanged = (deadline || null) !== project.code_freeze_date
 
+  const { data: phases } = useQuery({
+    queryKey: ['phases', project.id],
+    queryFn: () => api.phases.list(project.id),
+  })
+  const codeFreezePhase = phases?.find((p) => p.name.trim().toLowerCase().replace('-', ' ') === 'code freeze')
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
@@ -158,12 +163,14 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
 
   const create = useMutation({
     mutationFn: async () => {
-      // La nuova deadline diventa anche il code freeze dell'increment (Backlog,
-      // Gantt, Dashboard...), solo se richiesto.
-      if (deadlineChanged && updateIncrementDeadline) {
-        await api.projects.update(project.id, { code_freeze_date: deadline || null })
+      // La nuova deadline diventa anche il code freeze ufficiale (data
+      // aggiornata della fase Code freeze: Backlog, Gantt, Dashboard...),
+      // solo se richiesto.
+      if (deadlineChanged && updateIncrementDeadline && codeFreezePhase) {
+        await api.phases.update(codeFreezePhase.id, { planned_date: deadline || null })
         queryClient.invalidateQueries({ queryKey: ['project', project.id] })
         queryClient.invalidateQueries({ queryKey: ['projects'] })
+        queryClient.invalidateQueries({ queryKey: ['phases', project.id] })
       }
       return api.forecasting.create(project.id, {
         note: paramsNote,
@@ -276,15 +283,15 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
               </button>
             )}
           </label>
-          {deadlineChanged && (
+          {deadlineChanged && codeFreezePhase && (
             <label>
               <input
                 type="checkbox"
                 checked={updateIncrementDeadline}
                 onChange={(e) => setUpdateIncrementDeadline(e.target.checked)}
               />{' '}
-              Aggiorna anche il code freeze dell'increment (oggi {formatIsoDate(project.code_freeze_date) ?? 'non impostato'}
-              ): vale per Backlog, Gantt e Dashboard
+              Aggiorna anche il code freeze ufficiale, cioè la data aggiornata della fase Code freeze (oggi{' '}
+              {formatIsoDate(project.code_freeze_date) ?? 'non impostato'}): vale per Backlog, Gantt e Dashboard
             </label>
           )}
         </div>

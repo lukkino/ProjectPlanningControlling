@@ -11,7 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
-import { BacklogGanttChart } from '../components/BacklogGanttChart'
+import { BacklogGanttChart, type GanttBarChange } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { NonWorkingDaysModal, type NewNonWorkingDay } from '../components/NonWorkingDaysModal'
 import { ScenarioLinkModal } from '../components/ScenarioLinkModal'
@@ -21,6 +21,7 @@ import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../
 import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
 import {
   addWorkingDays,
+  countWorkingDays,
   daysOffSet,
   indexByKey,
   isWorkingDayIso,
@@ -409,6 +410,49 @@ export function BacklogPage() {
     onSuccess: invalidate,
   })
 
+  // Barre del Pianificato modificate col mouse nel Gantt, con le stesse
+  // regole della tabella:
+  // - spostare la barra e' come cambiare lo Start pian.: la Fine pian. si
+  //   ricalcola dal Sizing (senza Sizing si sposta di quanto lo Start) e gli
+  //   item sotto si ripianificano in cascata (vedi reschedule);
+  // - bordo destro: come cambiare la Fine pian.;
+  // - bordo sinistro: nuovo Start con la fine ferma.
+  // Coi bordi la durata cambia, quindi il Sizing (gg) diventa quella nuova
+  // in giorni lavorativi. In tutti i casi poi i successori lungo i
+  // predecessori (scheduleFromPredecessors).
+  const planGanttChange = (item: BacklogItem, change: GanttBarChange): BacklogPatch[] => {
+    const patches = new Map<number, Partial<BacklogItem>>()
+    if (change.mode === 'move') {
+      const expected_finish =
+        addWorkingDays(change.planned_start, item.planned_duration_days, offDays) ?? change.expected_finish
+      patches.set(item.id, { planned_start: change.planned_start, expected_finish })
+      const chain = cascadeChain()
+      const index = chain.findIndex((i) => i.id === item.id)
+      if (index !== -1) cascadeAfter(chain, index, expected_finish, patches)
+    } else {
+      patches.set(item.id, {
+        planned_start: change.planned_start,
+        expected_finish: change.expected_finish,
+        planned_duration_days: Math.max(1, countWorkingDays(change.planned_start, change.expected_finish, offDays)),
+      })
+    }
+    return scheduleFromPredecessors(items ?? [], patches, offDays)
+  }
+  // Salvataggio in blocco, con le date nuove subito in cache: al rilascio le
+  // barre restano dove le ha lasciate il trascinamento invece di tornare
+  // indietro finche' non arriva la risposta.
+  const applyGanttChange = useMutation({
+    mutationFn: (updates: BacklogPatch[]) => api.backlog.bulkUpdate(project.id, updates),
+    onMutate: (updates) => {
+      const byId = new Map(updates.map((u) => [u.id, u]))
+      queryClient.setQueryData<BacklogItem[]>(['backlog', project.id], (old) =>
+        old?.map((i) => (byId.has(i.id) ? { ...i, ...byId.get(i.id) } : i)),
+      )
+    },
+    onSettled: invalidate,
+  })
+  const isStartLocked = (item: BacklogItem) => resolvePredecessors(item, itemsByKey).some((p) => p.expected_finish)
+
   // Predecessori scritti a mano: chiavi Jira separate da virgola; basta
   // anche il solo numero ("1234") se identifica un unico item del backlog.
   // Vengono rifiutati item sconosciuti, l'item stesso e i cicli.
@@ -536,7 +580,7 @@ export function BacklogPage() {
         />
       ),
     },
-    { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} /> },
+    { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} jiraStatus={item.jira_status} /> },
     {
       key: 'refinement_date',
       label: 'Data refinement',
@@ -1512,7 +1556,15 @@ export function BacklogPage() {
           phases={ganttPhases}
           nonWorkingDays={nonWorkingDays}
           exportName={`Gantt_${project.code}`}
+          planBarChange={planGanttChange}
+          onBarChange={(updates) => applyGanttChange.mutate(updates)}
+          isStartLocked={isStartLocked}
         />
+      )}
+      {view === 'gantt' && applyGanttChange.isError && (
+        <div className="error-banner">
+          Modifica del Gantt non salvata, le date sono tornate come prima: {(applyGanttChange.error as Error).message}
+        </div>
       )}
 
       {view === 'table' && (

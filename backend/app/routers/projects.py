@@ -11,7 +11,53 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 # alla creazione del progetto, senza date): la Dashboard progetti (Gantt) si
 # affida a questo elenco fisso per colorare/etichettare le fasi in modo
 # uniforme tra progetti diversi.
-STANDARD_PHASE_NAMES = ["Kick-off", "Planning", "Execution", "Deployment", "Release to Market"]
+STANDARD_PHASE_NAMES = ["Kick-off", "Planning", "Code freeze", "Execution", "Deployment", "Release to Market"]
+CODE_FREEZE_PHASE_NAME = "Code freeze"
+
+
+def _is_code_freeze_phase(phase: models.Phase) -> bool:
+    return phase.name.strip().lower().replace("-", " ") == "code freeze"
+
+
+def sync_code_freeze(project: models.Project) -> None:
+    """Il code freeze ufficiale e' la data aggiornata della fase "Code
+    freeze": project.code_freeze_date ne e' solo la copia."""
+    phase = next((p for p in project.phases if _is_code_freeze_phase(p)), None)
+    project.code_freeze_date = phase.planned_date if phase else None
+
+
+def ensure_code_freeze_phases(db: Session) -> None:
+    """All'avvio: ogni increment ha la fase "Code freeze" (dopo Planning,
+    se c'e'), con la data che l'increment aveva se la fase non ne ha una;
+    poi la copia sull'increment si riallinea alla fase."""
+    for project in db.query(models.Project).all():
+        phase = next((p for p in project.phases if _is_code_freeze_phase(p)), None)
+        if phase is None:
+            planning = next((p for p in project.phases if p.name == "Planning"), None)
+            order = planning.order + 1 if planning else len(project.phases) + 1
+            for other in project.phases:
+                if other.order >= order:
+                    other.order += 1
+            phase = models.Phase(name=CODE_FREEZE_PHASE_NAME, order=order)
+            project.phases.append(phase)
+        if phase.planned_date is None and project.code_freeze_date is not None:
+            phase.planned_date = project.code_freeze_date
+            if phase.original_date is None:
+                phase.original_date = project.code_freeze_date
+        sync_code_freeze(project)
+    db.commit()
+
+
+def _set_phase_planned_date(phase: models.Phase, new_date) -> None:
+    """Cambia la data pianificata aggiornata registrando il cambio nello
+    storico; la prima data pianificata diventa anche quella originale."""
+    if new_date == phase.planned_date:
+        return
+    if phase.planned_date is not None:
+        phase.changes.append(models.PhaseDateChange(old_date=phase.planned_date, new_date=new_date))
+    if phase.original_date is None:
+        phase.original_date = new_date
+    phase.planned_date = new_date
 
 
 def _get_project_or_404(db: Session, project_id: int) -> models.Project:
@@ -96,7 +142,12 @@ def list_phases(project_id: int, db: Session = Depends(get_db)):
 def create_phase(project_id: int, payload: schemas.PhaseCreate, db: Session = Depends(get_db)):
     _get_project_or_404(db, project_id)
     phase = models.Phase(project_id=project_id, **payload.model_dump())
+    if phase.original_date is None:
+        phase.original_date = phase.planned_date
     db.add(phase)
+    db.flush()
+    db.refresh(phase.project)
+    sync_code_freeze(phase.project)
     db.commit()
     db.refresh(phase)
     return phase
@@ -107,8 +158,17 @@ def update_phase(phase_id: int, payload: schemas.PhaseUpdate, db: Session = Depe
     phase = db.get(models.Phase, phase_id)
     if phase is None:
         raise HTTPException(status_code=404, detail="Fase non trovata")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # La fase "Code freeze" porta il code freeze ufficiale: non si rinomina.
+    if "name" in data and _is_code_freeze_phase(phase) and data["name"] != phase.name:
+        raise HTTPException(status_code=400, detail="La fase Code freeze non si può rinominare")
+    planned_changed = "planned_date" in data
+    new_planned = data.pop("planned_date", None)
+    for field, value in data.items():
         setattr(phase, field, value)
+    if planned_changed:
+        _set_phase_planned_date(phase, new_planned)
+    sync_code_freeze(phase.project)
     db.commit()
     db.refresh(phase)
     return phase
@@ -119,6 +179,8 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
     phase = db.get(models.Phase, phase_id)
     if phase is None:
         raise HTTPException(status_code=404, detail="Fase non trovata")
+    if _is_code_freeze_phase(phase):
+        raise HTTPException(status_code=400, detail="La fase Code freeze porta il code freeze ufficiale: non si può eliminare")
     db.delete(phase)
     db.commit()
 

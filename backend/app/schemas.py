@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class PhaseBase(BaseModel):
     name: str
+    original_date: dt.date | None = None
     planned_date: dt.date | None = None
     actual_date: dt.date | None = None
     order: int = 0
@@ -20,16 +21,26 @@ class PhaseCreate(PhaseBase):
 
 class PhaseUpdate(BaseModel):
     name: str | None = None
+    original_date: dt.date | None = None
     planned_date: dt.date | None = None
     actual_date: dt.date | None = None
     order: int | None = None
     notes: str | None = None
 
 
+class PhaseDateChange(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    old_date: dt.date | None
+    new_date: dt.date | None
+    changed_at: dt.datetime
+
+
 class Phase(PhaseBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     project_id: int
+    changes: list[PhaseDateChange] = []
 
 
 # ---------- NonWorkingDay ----------
@@ -455,7 +466,6 @@ class ProjectBase(BaseModel):
     status: str = "Kick-off"
     scope: str | None = None
     start_date: dt.date | None = None
-    code_freeze_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
     jira_jql: str | None = None
@@ -482,7 +492,6 @@ class ProjectUpdate(BaseModel):
     status: str | None = None
     scope: str | None = None
     start_date: dt.date | None = None
-    code_freeze_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
     jira_jql: str | None = None
@@ -497,6 +506,9 @@ class ProjectUpdate(BaseModel):
 class ProjectListItem(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    # Sola lettura: e' la data aggiornata della fase "Code freeze", si
+    # modifica dalle fasi dell'increment.
+    code_freeze_date: dt.date | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
     created_at: dt.datetime
