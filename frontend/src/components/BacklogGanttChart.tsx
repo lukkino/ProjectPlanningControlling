@@ -186,10 +186,15 @@ function buildBands(minDay: number, maxDay: number, unit: Unit, dayWidth: number
   return bands
 }
 
-// Le due righe del calendario secondo lo zoom: sopra il contesto (mesi o
-// anni), sotto il dettaglio (giorni, settimane, mesi o trimestri), con
-// etichette scelte per stare nella larghezza delle celle.
+// Le righe del calendario secondo lo zoom: sopra il contesto (mesi o anni),
+// sotto il dettaglio (giorni, settimane, mesi o trimestri), con etichette
+// scelte per stare nella larghezza delle celle. Con i giorni c'e' una riga in
+// piu' in mezzo, `weeks`, cosi' le settimane restano sempre visibili.
 function buildScale(minDay: number, maxDay: number, dayWidth: number) {
+  const weekLabel = (start: number, withDate: boolean) => {
+    const week = `W${isoWeekNumber(epochDaysToDate(start))}`
+    return withDate ? `${week} · ${formatEpochDaysAsDate(start).slice(0, 5)}` : week
+  }
   const monthLabel = (start: number) => {
     const d = epochDaysToDate(start)
     return `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
@@ -199,6 +204,7 @@ function buildScale(minDay: number, maxDay: number, dayWidth: number) {
     return {
       name: 'Giorni',
       top: buildBands(minDay, maxDay, 'month', dayWidth, monthLabel),
+      weeks: buildBands(minDay, maxDay, 'week', dayWidth, (d) => weekLabel(d, true)),
       bottom: buildBands(minDay, maxDay, 'day', dayWidth, (d) => `${WEEKDAY_NAMES[epochDaysToDate(d).getUTCDay()]} ${epochDaysToDate(d).getUTCDate()}`),
     }
   }
@@ -207,9 +213,7 @@ function buildScale(minDay: number, maxDay: number, dayWidth: number) {
     return {
       name: 'Settimane',
       top: buildBands(minDay, maxDay, 'month', dayWidth, monthLabel),
-      bottom: buildBands(minDay, maxDay, 'week', dayWidth, (d) =>
-        withDate ? `S${isoWeekNumber(epochDaysToDate(d))} · ${formatEpochDaysAsDate(d).slice(0, 5)}` : `S${isoWeekNumber(epochDaysToDate(d))}`,
-      ),
+      bottom: buildBands(minDay, maxDay, 'week', dayWidth, (d) => weekLabel(d, withDate)),
     }
   }
   if (dayWidth >= 1.6) {
@@ -648,6 +652,7 @@ export function BacklogGanttChart({
   const previewById = new Map((barDrag?.updates ?? []).map((u) => [u.id, u]))
   const shownItems = previewById.size > 0 ? items.map((i) => (previewById.has(i.id) ? { ...i, ...previewById.get(i.id) } : i)) : items
   const scale = buildScale(minDay, maxDay, dayWidth)
+  const headerHeight = HEADER_HEIGHT + (scale.weeks ? WEEK_ROW_HEIGHT : 0)
 
   // Etichetta (nomi e data, sempre visibili) a destra della linea, o a
   // sinistra dove a fine calendario non ci starebbe; se toccherebbe quella
@@ -880,7 +885,7 @@ export function BacklogGanttChart({
               {...dragHandlers}
               style={{
                 width: chartWidth,
-                height: HEADER_HEIGHT + laneEnds.length * MARK_ROW_HEIGHT,
+                height: headerHeight + laneEnds.length * MARK_ROW_HEIGHT,
                 position: 'relative',
               }}
             >
@@ -917,10 +922,46 @@ export function BacklogGanttChart({
                   </div>
                 ))}
               </div>
+              {scale.weeks && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: MONTH_BAND_HEIGHT,
+                    left: 0,
+                    right: 0,
+                    height: WEEK_ROW_HEIGHT,
+                    borderBottom: '1px solid var(--border)',
+                  }}
+                >
+                  {scale.weeks.map((band) => (
+                    <div
+                      key={band.day}
+                      className="muted"
+                      title={band.label}
+                      style={{
+                        position: 'absolute',
+                        left: dayToX(band.day),
+                        width: band.width,
+                        top: 0,
+                        height: '100%',
+                        lineHeight: `${WEEK_ROW_HEIGHT}px`,
+                        fontSize: 11,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'clip',
+                        borderLeft: '1px solid var(--border)',
+                        paddingLeft: 3,
+                      }}
+                    >
+                      {band.label}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div
                 style={{
                   position: 'absolute',
-                  top: MONTH_BAND_HEIGHT,
+                  top: headerHeight - WEEK_ROW_HEIGHT,
                   left: 0,
                   right: 0,
                   height: WEEK_ROW_HEIGHT,
@@ -959,7 +1000,7 @@ export function BacklogGanttChart({
                   title={mark.label}
                   style={{
                     position: 'absolute',
-                    top: HEADER_HEIGHT + mark.lane * MARK_ROW_HEIGHT,
+                    top: headerHeight + mark.lane * MARK_ROW_HEIGHT,
                     height: MARK_ROW_HEIGHT,
                     ...mark.position,
                     fontSize: 11,
@@ -978,7 +1019,7 @@ export function BacklogGanttChart({
                 style={{
                   position: 'absolute',
                   left: dayToX(todayDay) - 1,
-                  top: HEADER_HEIGHT + todaySlot.lane * MARK_ROW_HEIGHT + MARK_ROW_HEIGHT - 2,
+                  top: headerHeight + todaySlot.lane * MARK_ROW_HEIGHT + MARK_ROW_HEIGHT - 2,
                   bottom: 0,
                   borderLeft: `2px solid ${COLOR_TODAY}`,
                 }}
@@ -987,7 +1028,7 @@ export function BacklogGanttChart({
                 title={`Today ${formatEpochDaysAsDate(todayDay)}`}
                 style={{
                   position: 'absolute',
-                  top: HEADER_HEIGHT + todaySlot.lane * MARK_ROW_HEIGHT + 1,
+                  top: headerHeight + todaySlot.lane * MARK_ROW_HEIGHT + 1,
                   left: todaySlot.start,
                   width: todaySlot.width,
                   height: MARK_ROW_HEIGHT - 2,
