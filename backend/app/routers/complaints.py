@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import re
 from collections.abc import Callable
 from io import BytesIO
@@ -13,7 +14,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.routers.settings import SETTINGS_ROW_ID
-from app.services.jira_client import JiraClientError, fetch_complaints
+from app.services.db_backup import DatabaseBackupError, backup_database
+from app.services.jira_client import JiraClientError, fetch_complaints, test_connection
 
 router = APIRouter(prefix="/api/complaints", tags=["complaints"])
 
@@ -62,6 +64,8 @@ EXPORT_COLUMNS = [
     ("ID Jira", 15),
     ("Stato Jira", 15),
     ("Fix Version", 28),
+    ("TSB", 15),
+    ("TSB Status", 15),
     ("Severity", 12),
     ("Creato su Jira", 16),
     ("Architettura", 15),
@@ -141,6 +145,8 @@ def export_complaints(db: Session = Depends(get_db)):
                 c.jira_key,
                 c.jira_status,
                 c.fix_versions,
+                ", ".join(a["key"] for a in json.loads(c.tsb_activities or "[]")),
+                ", ".join(a.get("status") or "-" for a in json.loads(c.tsb_activities or "[]")),
                 c.severity,
                 c.jira_created,
                 c.architecture,
@@ -160,7 +166,12 @@ def export_complaints(db: Session = Depends(get_db)):
         key = row[3]
         key.hyperlink = f"{JIRA_BROWSE_URL}{key.value}"
         key.font = Font(color="0563C1", underline="single")
-        row[7].number_format = "DD/MM/YYYY"
+        # TSB: link alla prima activity (una cella ha un solo link).
+        tsb = row[6]
+        if tsb.value:
+            tsb.hyperlink = f"{JIRA_BROWSE_URL}{tsb.value.split(', ')[0]}"
+            tsb.font = Font(color="0563C1", underline="single")
+        row[9].number_format = "DD/MM/YYYY"
     # Filtro automatico su tutte le colonne, con l'intestazione bloccata in
     # alto scorrendo le righe.
     sheet.auto_filter.ref = sheet.dimensions
@@ -210,13 +221,12 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
 def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) -> schemas.SyncResult:
     row = _settings_row(db)
     try:
-        issues = fetch_complaints(
-            (row.jira_base_url if row else None) or "",
-            (row.jira_email if row else None) or "",
-            (row.jira_api_token if row else None) or "",
-            _base_jql(row),
-            on_progress,
-        )
+        base_url = (row.jira_base_url if row else None) or ""
+        email = (row.jira_email if row else None) or ""
+        api_token = (row.jira_api_token if row else None) or ""
+        # Credenziali prima di tutto: vedi la sync del Backlog.
+        test_connection(base_url, email, api_token)
+        issues = fetch_complaints(base_url, email, api_token, _base_jql(row), on_progress)
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     on_progress("saving", len(issues), len(issues))
@@ -229,6 +239,10 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
             status_code=400,
             detail="La JQL non ha restituito nessuna issue: sincronizzazione annullata, i complaint esistenti non sono stati modificati.",
         )
+    try:
+        backup_database("sync-complaints")
+    except DatabaseBackupError as exc:
+        raise HTTPException(status_code=500, detail=f"{exc}. Sincronizzazione annullata.") from exc
 
     existing = {c.jira_key: c for c in db.query(models.Complaint)}
     matched_keys = {issue.key for issue in issues}
@@ -256,6 +270,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
             complaint.architecture = _architecture(issue.labels)
         complaint.salesforce_case_number = _case_number(issue.source_note, issue.summary)
         complaint.salesforce_case_id = issue.salesforce_case_id
+        complaint.tsb_activities = json.dumps(issue.tsb_activities) if issue.tsb_activities else None
         if not complaint.customer_site_manual:
             complaint.customer_site = _customer_site(issue.labels)
         complaint.last_synced_at = now

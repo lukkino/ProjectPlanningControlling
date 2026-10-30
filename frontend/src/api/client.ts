@@ -319,6 +319,8 @@ export const api = {
     bulkUpdate: (projectId: number, data: (Partial<BacklogItem> & { id: number })[]) =>
       put<BacklogItem[]>(`/projects/${projectId}/backlog/bulk`, data),
     remove: (id: number) => del(`/backlog/${id}`),
+    archived: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog/archived`),
+    restore: (id: number) => post<BacklogItem>(`/backlog/${id}/restore`),
     sync: (projectId: number) => post<SyncResult>(`/projects/${projectId}/backlog/sync`),
     syncProgress: (projectId: number) => request<SyncProgress>(`/projects/${projectId}/backlog/sync/progress`),
   },

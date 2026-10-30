@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
+import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
 import { BacklogGanttChart, type GanttBarChange } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
 import { NonWorkingDaysModal, type NewNonWorkingDay } from '../components/NonWorkingDaysModal'
@@ -235,8 +236,14 @@ export function BacklogPage() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
+    queryClient.invalidateQueries({ queryKey: ['backlog-archived', project.id] })
     queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
   }
+  const { data: archivedItems } = useQuery({
+    queryKey: ['backlog-archived', project.id],
+    queryFn: () => api.backlog.archived(project.id),
+  })
+  const [archivedOpen, setArchivedOpen] = useState(false)
 
   // Presentazioni degli scenari gia' presenti nella cartella Scenarios
   // dell'increment, per chiave Jira (solo Story).
@@ -1294,6 +1301,18 @@ export function BacklogPage() {
             <span className="muted">
               Ultima sync: {lastSyncedAt ? formatDateTime(lastSyncedAt) : 'mai sincronizzato'}
             </span>
+            {(archivedItems?.length ?? 0) > 0 && (
+              <>
+                {' · '}
+                <button
+                  className="link-btn"
+                  title="Item non più nella JQL: i loro dati sono conservati"
+                  onClick={() => setArchivedOpen(true)}
+                >
+                  {archivedItems?.length} archiviati
+                </button>
+              </>
+            )}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1382,6 +1401,13 @@ export function BacklogPage() {
         </p>
       )}
 
+      {archivedOpen && (
+        <ArchivedItemsModal
+          projectId={project.id}
+          items={archivedItems ?? []}
+          onClose={() => setArchivedOpen(false)}
+        />
+      )}
       {scenarioLinkItem && (
         <ScenarioLinkModal
           projectId={project.id}
@@ -1413,7 +1439,9 @@ export function BacklogPage() {
       {sync.isSuccess && (
         <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
           Sync completata: {sync.data.created} nuove issue, {sync.data.updated} aggiornate
-          {sync.data.removed > 0 && `, ${sync.data.removed} rimosse (non più nella JQL)`} (totale trovate:{' '}
+          {sync.data.restored > 0 && ` (${sync.data.restored} ripristinate dall'archivio)`}
+          {sync.data.removed > 0 && `, ${sync.data.removed} archiviate (non più nella JQL, dati conservati)`} (totale
+          trovate:{' '}
           {sync.data.total_matched}).
         </div>
       )}

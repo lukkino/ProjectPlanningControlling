@@ -168,7 +168,16 @@ class Project(Base):
     non_working_days: Mapped[list["NonWorkingDay"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="NonWorkingDay.start_date"
     )
-    backlog_items: Mapped[list["BacklogItem"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BacklogItem.priority_order")
+    # Tutti gli item, archiviati compresi: serve solo per eliminarli col progetto.
+    all_backlog_items: Mapped[list["BacklogItem"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="BacklogItem.priority_order")
+    # Il backlog vero e proprio, senza gli item archiviati (vedi
+    # BacklogItem.archived_at): e' quello che usano metriche, documenti e
+    # presentazioni.
+    backlog_items: Mapped[list["BacklogItem"]] = relationship(
+        primaryjoin="and_(Project.id == BacklogItem.project_id, BacklogItem.archived_at.is_(None))",
+        viewonly=True,
+        order_by="BacklogItem.priority_order",
+    )
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Snapshot.snapshot_date")
     forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="ForecastSimulation.id"
@@ -596,8 +605,13 @@ class BacklogItem(Base):
     # id perche' restano valide se la sync ricrea l'item; una chiave che non
     # e' piu' nel backlog viene semplicemente ignorata dalla UI.
     predecessors: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Quando la sync non ha piu' trovato l'item nella JQL. Non si cancella: le
+    # date e gli altri dati inseriti qui esistono solo in questo database, e
+    # Jira puo' restituire una lista incompleta. Un item archiviato sparisce
+    # dal backlog e torna com'era se rientra nella JQL.
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
-    project: Mapped["Project"] = relationship(back_populates="backlog_items")
+    project: Mapped["Project"] = relationship(back_populates="all_backlog_items")
     progetto: Mapped["Increment | None"] = relationship()
 
     @property
@@ -783,4 +797,8 @@ class Complaint(Base):
     # True se il Sito Cliente e' stato corretto a mano: la sync non lo
     # ricalcola piu' dalle label.
     customer_site_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Activity Jira con i dettagli del TSB che risolve il bug (link "relates
+    # to" con TSB nel summary), come JSON [{"key", "summary", "status"}];
+    # None se non ce ne sono.
+    tsb_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)

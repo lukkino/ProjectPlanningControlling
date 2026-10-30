@@ -142,6 +142,9 @@ def run_lightweight_migrations() -> None:
         if "fix_versions" not in complaint_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE complaints ADD COLUMN fix_versions VARCHAR(255)"))
+        if "tsb_activities" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN tsb_activities TEXT"))
 
     if "backlog_items" in table_names:
         backlog_columns = {col["name"] for col in inspector.get_columns("backlog_items")}
@@ -160,6 +163,9 @@ def run_lightweight_migrations() -> None:
         if "impacts_on" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN impacts_on TEXT"))
+        if "archived_at" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN archived_at DATETIME"))
 
     if "increment_budget_lines" in table_names:
         budget_line_columns = {col["name"] for col in inspector.get_columns("increment_budget_lines")}

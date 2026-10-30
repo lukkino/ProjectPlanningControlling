@@ -152,6 +152,8 @@ export type BacklogItem = {
   parent_summary: string | null
   implemented_by_json: string | null
   last_synced_at: string | null
+  // Quando la sync non ha piu' trovato l'item nella JQL; null = nel backlog.
+  archived_at: string | null
   ready_for_refinement: boolean
   in_scope: boolean
   included_in_codefreeze: boolean
@@ -184,6 +186,8 @@ export type SyncResult = {
   created: number
   updated: number
   removed: number
+  // Backlog: item archiviati tornati perche' rientrati nella JQL.
+  restored: number
   total_matched: number
   errors: string[]
 }
@@ -552,6 +556,9 @@ export type Complaint = {
   customer_site: string | null
   // true = corretto a mano, la sync non lo ricalcola dalle label Jira.
   customer_site_manual: boolean
+  // Activity Jira con i dettagli del TSB che risolve il bug (link "relates
+  // to" con TSB nel summary).
+  tsb_activities: { key: string; summary: string; status: string | null }[]
   last_synced_at: string | null
 }
 

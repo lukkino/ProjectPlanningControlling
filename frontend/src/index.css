@@ -53,6 +53,7 @@ body {
   overflow-y: auto;
 }
 
+.sidebar-logo { width: 130px; height: auto; align-self: flex-start; margin: 0 4px; }
 .sidebar-brand { display: flex; align-items: center; gap: 8px; margin: 0 4px; }
 .sidebar-brand img { border-radius: 6px; flex-shrink: 0; }
 
@@ -271,9 +272,9 @@ tbody tr:hover { background: var(--bg); }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 
-/* Tabella alta in un riquadro con scroll proprio (Complaints), dove
-   l'intestazione deve restare visibile scorrendo. Il Backlog non la usa
-   piu': si mostra per intero e scorre con la pagina.
+/* Tabella alta in un riquadro con scroll proprio, dove
+   l'intestazione deve restare visibile scorrendo. Backlog e Complaints non
+   la usano piu': si mostrano per intero e scorrono con la pagina.
    overflow-x:auto da solo farebbe gia' di .table-wrap il contenitore di
    scroll anche in verticale (regola CSS: se un asse non e' "visible",
    l'altro asse "visible" diventa "auto"), ma senza un'altezza massima non
@@ -669,7 +670,24 @@ tr.phase-current input { background: #e6eefc; }
 .filter-menu .column-menu-panel { right: auto; left: 0; }
 .link-btn { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
-.complaints-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+/* Tabella dei complaint con colonne a larghezza fissa (regolabili, vedi
+   ComplaintsPage): il testo va a capo dentro la colonna invece di
+   allargarla. In verticale scorre la pagina: --thead-top, aggiornato allo
+   scroll, tiene l'intestazione in cima alla finestra. */
+.complaints-table { table-layout: fixed; }
+.complaints-table th {
+  position: sticky;
+  top: var(--thead-top, 0);
+  z-index: 1;
+  background: var(--surface);
+  white-space: normal;
+  vertical-align: bottom;
+  line-height: 1.25;
+}
+.complaints-table th .sort-btn { white-space: normal; text-align: left; }
+.complaints-table td { white-space: normal; overflow-wrap: anywhere; }
+.complaints-table td input,
+.complaints-table td select { width: 100%; min-width: 0; }
 /* Intestazione cliccabile per l'ordinamento: stesso aspetto delle altre th. */
 .sort-btn {
   border: none;

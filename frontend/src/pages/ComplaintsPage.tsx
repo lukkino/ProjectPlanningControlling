@@ -1,9 +1,106 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { api, saveBlob } from '../api/client'
 import type { Complaint, SalesforceStatus } from '../api/types'
 import { ARCHITECTURES, NO_ARCHITECTURE, architecturesOf } from '../lib/complaints'
 import { formatIsoDate } from '../lib/dates'
+
+// Link ai case in Salesforce (Lightning). Con l'id tecnico del record
+// (campo Jira "Salesforce Case ID") si apre direttamente il case; senza, si
+// apre la ricerca di Salesforce sul numero del case.
+const SALESFORCE_BASE_URL = 'https://inpeco-force.lightning.force.com'
+const salesforceCaseUrl = (caseId: string) => `${SALESFORCE_BASE_URL}/lightning/r/Case/${caseId}/view`
+const salesforceSearchUrl = (term: string) =>
+  `${SALESFORCE_BASE_URL}/one/one.app#` +
+  btoa(JSON.stringify({ componentDef: 'forceSearch:searchPage', attributes: { term, scopeMap: { type: 'TOP_RESULTS' } } }))
+
+// Numeri di case Salesforce nel campo "ID Salesforce", a 8 cifre (in Jira
+// spesso mancano gli zeri davanti: "53585" -> "00053585"). Il campo puo'
+// averne piu' d'uno ("62995, 62957") o contenere ticket del vecchio sistema
+// AX, che non sono in Salesforce: "AX 034877" e i numeri a 6 cifre con lo
+// zero davanti ("032104"); in "AX 032314, SF: 50889" vale solo SF.
+function salesforceCaseNumbers(value: string | null): string[] {
+  if (!value) return []
+  const sfPart = value.match(/SF\s*:\s*(.*)$/i)
+  const text = sfPart ? sfPart[1] : value.replace(/AX\s*\d+/gi, '')
+  return (text.match(/\d+/g) ?? [])
+    .filter((n) => n.length <= 8 && !(n.length === 6 && n.startsWith('0')))
+    .map((n) => n.padStart(8, '0'))
+}
+
+// Colonne della tabella: l'utente puo' nasconderle (menu "Colonne") e
+// riordinarle trascinando l'intestazione, come nel Backlog. Ordine e colonne
+// nascoste restano nel browser (localStorage); l'ID Jira resta sempre
+// visibile, per riconoscere la riga.
+const COLUMN_ORDER_STORAGE_KEY = 'complaints.columnOrder'
+const HIDDEN_COLUMNS_STORAGE_KEY = 'complaints.hiddenColumns'
+// Larghezze delle colonne (trascinando il bordo destro dell'intestazione),
+// anche queste nel browser.
+const COLUMN_WIDTHS_STORAGE_KEY = 'complaints.columnWidths'
+const MIN_COLUMN_WIDTH = 40
+const ALWAYS_VISIBLE_COLUMN_KEYS = new Set(['jira_key'])
+
+type ComplaintColumn = {
+  key: string
+  label: string
+  // Larghezza iniziale in pixel, finche' l'utente non la cambia. Senza
+  // (Summary) la colonna prende lo spazio che resta nella card, cosi' la
+  // tabella parte larga quanto la pagina.
+  width?: number
+  // Intestazione diversa dalla sola etichetta (colonne ordinabili).
+  header?: ReactNode
+  title?: string
+  ariaSort?: 'ascending' | 'descending'
+  className?: string
+  style?: (c: Complaint) => CSSProperties | undefined
+  render: (c: Complaint) => ReactNode
+}
+
+function readStoredList(storageKey: string): string[] | null {
+  try {
+    const stored = localStorage.getItem(storageKey)
+    const parsed: unknown = stored ? JSON.parse(stored) : null
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : null
+  } catch {
+    // localStorage non disponibile o dato corrotto: valori di default.
+    return null
+  }
+}
+
+function readStoredWidths(): Record<string, number> {
+  try {
+    const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY)
+    const parsed: unknown = stored ? JSON.parse(stored) : null
+    if (!parsed || typeof parsed !== 'object') return {}
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+    )
+  } catch {
+    // localStorage non disponibile o dato corrotto: larghezze di default.
+    return {}
+  }
+}
+
+function writeStoredList(storageKey: string, value: string[]) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value))
+  } catch {
+    // localStorage non disponibile: la scelta vale solo fino al ricaricamento.
+  }
+}
+
+// Ordine salvato, senza le colonne che non esistono piu' e con quelle nuove
+// inserite dopo la colonna che le precede nell'ordine di default.
+function mergeColumnOrder(stored: string[] | null, defaults: string[]): string[] {
+  if (!stored) return defaults
+  const order = stored.filter((k) => defaults.includes(k))
+  defaults.forEach((key, index) => {
+    if (order.includes(key)) return
+    const at = index === 0 ? -1 : order.indexOf(defaults[index - 1])
+    order.splice(at + 1, 0, key)
+  })
+  return order
+}
 
 // Voce del menu Architettura che annulla la correzione manuale.
 const RESET_TO_JIRA = '__jira__'
@@ -22,6 +119,12 @@ const NO_FIX_VERSION = 'N/D'
 // Le fix version di un complaint (su Jira possono essere piu' d'una, qui
 // separate da ", "): conta per ognuna, nei conteggi e nel filtro.
 const fixVersionsOf = (c: Complaint) => (c.fix_versions ? c.fix_versions.split(', ') : [NO_FIX_VERSION])
+
+// Filtro TSB: complaint con o senza un'activity TSB collegata.
+const WITH_TSB = 'Con TSB'
+const WITHOUT_TSB = 'Senza TSB'
+const TSB_OPTIONS = [WITH_TSB, WITHOUT_TSB]
+const tsbOf = (c: Complaint) => (c.tsb_activities.length > 0 ? WITH_TSB : WITHOUT_TSB)
 const severityRank = (c: Complaint) => {
   const index = SEVERITY_ORDER.indexOf(c.severity ?? '')
   return index === -1 ? SEVERITY_ORDER.length : index
@@ -35,9 +138,20 @@ type Sort = { key: SortKey; desc: boolean }
 const JIRA_BADGE_CLASS: Record<string, string> = { Done: 'done', Rejected: 'todo', 'To Do': 'todo' }
 
 // Ricerca libera: ogni parola deve comparire (senza distinzione di
-// maiuscole) in uno dei campi testuali del complaint, ID compresi.
+// maiuscole) in uno dei campi testuali del complaint, ID compresi (anche i
+// numeri di case a 8 cifre, se in Jira mancano gli zeri davanti).
 const searchableText = (c: Complaint) =>
-  [c.salesforce_case_number, c.salesforce_case_id, c.jira_key, c.summary, c.customer_site, c.fix_versions, c.labels]
+  [
+    c.salesforce_case_number,
+    ...salesforceCaseNumbers(c.salesforce_case_number),
+    c.salesforce_case_id,
+    c.jira_key,
+    c.summary,
+    c.customer_site,
+    c.fix_versions,
+    ...c.tsb_activities.map((a) => a.key),
+    c.labels,
+  ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
@@ -175,6 +289,7 @@ export function ComplaintsPage() {
   const [jiraHidden, setJiraHidden] = useState<Set<string>>(new Set())
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [fixVersionFilter, setFixVersionFilter] = useState<Set<string>>(new Set())
+  const [tsbFilter, setTsbFilter] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const searchWords = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
@@ -203,6 +318,7 @@ export function ComplaintsPage() {
   const jiraCounts = countBy(all, (c) => [c.jira_status ?? ''])
   const severityCounts = countBy(all, (c) => [c.severity ?? NO_SEVERITY])
   const fixVersionCounts = countBy(all, fixVersionsOf)
+  const tsbCounts = countBy(all, (c) => [tsbOf(c)])
 
   const architectureOptions = architectureCounts.has(NO_ARCHITECTURE) ? [...ARCHITECTURES, NO_ARCHITECTURE] : ARCHITECTURES
   const jiraOptions = [...jiraCounts.keys()]
@@ -245,6 +361,7 @@ export function ComplaintsPage() {
         !jiraHidden.has(c.jira_status ?? '') &&
         (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)) &&
         (fixVersionFilter.size === 0 || fixVersionsOf(c).some((v) => fixVersionFilter.has(v))) &&
+        (tsbFilter.size === 0 || tsbFilter.has(tsbOf(c))) &&
         matchesSearch(c, searchWords),
     )
     .sort((a, b) => {
@@ -259,7 +376,13 @@ export function ComplaintsPage() {
       )
     })
   const filtersActive =
-    architectureFilter.size + salesforceHidden.size + jiraHidden.size + severityFilter.size + fixVersionFilter.size > 0 ||
+    architectureFilter.size +
+      salesforceHidden.size +
+      jiraHidden.size +
+      severityFilter.size +
+      fixVersionFilter.size +
+      tsbFilter.size >
+      0 ||
     searchWords.length > 0
   const clearFilters = () => {
     setSearch('')
@@ -268,6 +391,275 @@ export function ComplaintsPage() {
     setJiraHidden(new Set())
     setSeverityFilter(new Set())
     setFixVersionFilter(new Set())
+    setTsbFilter(new Set())
+  }
+
+  const sortHeader = (key: SortKey, label: string, ascTitle: string, descTitle: string, clickTitle: string) => (
+    <button
+      className="sort-btn"
+      title={sort.key !== key ? clickTitle : sort.desc ? descTitle : ascTitle}
+      onClick={() => sortBy(key)}
+    >
+      {label}
+      {sort.key === key && (sort.desc ? ' ▼' : ' ▲')}
+    </button>
+  )
+  const ariaSortOf = (key: SortKey) => (sort.key !== key ? undefined : sort.desc ? 'descending' : 'ascending')
+
+  const columns: ComplaintColumn[] = [
+    { key: 'salesforce_case', label: 'ID Salesforce', width: 95, render: (c) => <SalesforceCaseLinks complaint={c} /> },
+    { key: 'summary', label: 'Summary', render: (c) => c.summary },
+    {
+      key: 'salesforce_status',
+      label: 'Stato Salesforce',
+      width: 100,
+      className: 'editable-cell',
+      render: (c) => (
+        <select
+          className={`sf-status sf-status--${c.salesforce_status === 'Chiuso' ? 'closed' : 'open'}`}
+          value={c.salesforce_status}
+          aria-label={`Stato Salesforce di ${c.jira_key}`}
+          onChange={(e) => update.mutate({ id: c.id, data: { salesforce_status: e.target.value as SalesforceStatus } })}
+        >
+          {SALESFORCE_STATUSES.map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: 'jira_key',
+      label: 'ID Jira',
+      width: 100,
+      render: (c) => (
+        <a href={`https://inpeco.atlassian.net/browse/${c.jira_key}`} target="_blank" rel="noreferrer">
+          {c.jira_key}
+        </a>
+      ),
+    },
+    {
+      key: 'jira_status',
+      label: 'Stato Jira',
+      width: 95,
+      render: (c) =>
+        c.jira_status && <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>,
+    },
+    {
+      key: 'fix_versions',
+      label: 'Fix Version',
+      width: 115,
+      render: (c) => c.fix_versions ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'tsb',
+      label: 'TSB',
+      width: 100,
+      title: 'Activity Jira collegata con "relates to" che riporta i dettagli del TSB',
+      render: (c) =>
+        c.tsb_activities.length === 0 ? (
+          <span className="muted">-</span>
+        ) : (
+          c.tsb_activities.map((a, i) => (
+            <span key={a.key}>
+              {i > 0 && ', '}
+              <a href={`https://inpeco.atlassian.net/browse/${a.key}`} target="_blank" rel="noreferrer" title={a.summary}>
+                {a.key}
+              </a>
+            </span>
+          ))
+        ),
+    },
+    {
+      key: 'tsb_status',
+      label: 'TSB Status',
+      width: 85,
+      title: "Stato Jira dell'activity TSB",
+      render: (c) =>
+        c.tsb_activities.length === 0 ? (
+          <span className="muted">-</span>
+        ) : (
+          c.tsb_activities.map((a) => (
+            <div key={a.key} title={c.tsb_activities.length > 1 ? a.key : undefined}>
+              {a.status ? (
+                <span className={`badge ${JIRA_BADGE_CLASS[a.status] ?? 'progress'}`}>{a.status}</span>
+              ) : (
+                <span className="muted">-</span>
+              )}
+            </div>
+          ))
+        ),
+    },
+    {
+      key: 'severity',
+      label: 'Severity',
+      width: 80,
+      header: sortHeader(
+        'severity',
+        'Severity',
+        'Dalla meno grave alla più grave: clicca per invertire',
+        'Dalla più grave alla meno grave: clicca per invertire',
+        'Clicca per ordinare per Severity, dalla più grave',
+      ),
+      ariaSort: ariaSortOf('severity'),
+      style: (c) => (c.severity === 'High' ? { color: 'var(--danger)', fontWeight: 600 } : undefined),
+      render: (c) => c.severity ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'created',
+      label: 'Creato su Jira',
+      width: 90,
+      header: sortHeader(
+        'created',
+        'Creato su Jira',
+        'Dal più vecchio al più nuovo: clicca per invertire',
+        'Dal più nuovo al più vecchio: clicca per invertire',
+        'Clicca per ordinare per data di creazione, dal più nuovo',
+      ),
+      ariaSort: ariaSortOf('created'),
+      render: (c) => formatIsoDate(c.jira_created) ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'architecture',
+      label: 'Architettura',
+      width: 95,
+      className: 'editable-cell',
+      render: (c) => (
+        <select
+          value={c.architecture ?? ''}
+          aria-label={`Architettura di ${c.jira_key}`}
+          title={
+            c.architecture_manual
+              ? 'Impostata a mano: scegli "Valore da Jira" per tornare a quella ricavata dalle label'
+              : 'Ricavata dalle label Jira: scegli un valore per correggerla'
+          }
+          onChange={(e) =>
+            update.mutate({
+              id: c.id,
+              data: { architecture: e.target.value === RESET_TO_JIRA ? '' : e.target.value },
+            })
+          }
+        >
+          {!c.architecture && <option value="">-</option>}
+          {/* Valore da Jira fuori elenco (es. due label: "NA5, NA6"). */}
+          {c.architecture && !ARCHITECTURES.includes(c.architecture) && <option>{c.architecture}</option>}
+          {ARCHITECTURES.map((a) => (
+            <option key={a}>{a}</option>
+          ))}
+          {c.architecture_manual && <option value={RESET_TO_JIRA}>↺ Valore da Jira</option>}
+        </select>
+      ),
+    },
+    {
+      key: 'customer_site',
+      label: 'Sito Cliente',
+      width: 140,
+      className: 'editable-cell',
+      // key: campo non controllato, va ricreato quando il valore salvato cambia.
+      render: (c) => (
+        <input
+          key={c.customer_site ?? ''}
+          defaultValue={c.customer_site ?? ''}
+          placeholder="-"
+          title={
+            c.customer_site_manual
+              ? 'Inserito a mano: svuota il campo per tornare al valore ricavato dalle label Jira'
+              : 'Ricavato dalle label Jira: modificalo per correggerlo'
+          }
+          aria-label={`Sito Cliente di ${c.jira_key}`}
+          onBlur={(e) => {
+            const value = e.target.value.trim()
+            if (value !== (c.customer_site ?? '')) update.mutate({ id: c.id, data: { customer_site: value } })
+          }}
+        />
+      ),
+    },
+  ]
+  const defaultColumnOrder = columns.map((c) => c.key)
+
+  const [columnOrder, setColumnOrder] = useState<string[]>(() =>
+    mergeColumnOrder(readStoredList(COLUMN_ORDER_STORAGE_KEY), defaultColumnOrder),
+  )
+  useEffect(() => writeStoredList(COLUMN_ORDER_STORAGE_KEY, columnOrder), [columnOrder])
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(
+    () =>
+      new Set(
+        (readStoredList(HIDDEN_COLUMNS_STORAGE_KEY) ?? []).filter(
+          (k) => defaultColumnOrder.includes(k) && !ALWAYS_VISIBLE_COLUMN_KEYS.has(k),
+        ),
+      ),
+  )
+  useEffect(() => writeStoredList(HIDDEN_COLUMNS_STORAGE_KEY, [...hiddenColumns]), [hiddenColumns])
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const [draggedCol, setDraggedCol] = useState<string | null>(null)
+
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(readStoredWidths)
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths))
+    } catch {
+      // localStorage non disponibile: la larghezza vale fino al ricaricamento.
+    }
+  }, [columnWidths])
+  const widthOf = (col: ComplaintColumn): number | undefined => columnWidths[col.key] ?? col.width
+
+  // Bordo destro dell'intestazione trascinato: nuova larghezza della colonna.
+  const handleResizeStart = (e: ReactMouseEvent, key: string, startWidth: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.round(startWidth + (moveEvent.clientX - startX)))
+      setColumnWidths((prev) => ({ ...prev, [key]: nextWidth }))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
+  // Intestazione sempre in vista scorrendo la pagina, come nel Backlog: con
+  // larghezze fisse la tabella puo' superare la card e scorre in orizzontale
+  // dentro .table-wrap, a cui si aggancerebbe lo sticky (in verticale non
+  // scorre mai). Il "top" delle intestazioni (--thead-top) e' quindi quanto la
+  // tabella e' gia' uscita dal bordo superiore della finestra.
+  const tableWrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const updateTop = () => {
+      const wrap = tableWrapRef.current
+      if (wrap) wrap.style.setProperty('--thead-top', `${Math.max(0, -wrap.getBoundingClientRect().top)}px`)
+    }
+    updateTop()
+    window.addEventListener('scroll', updateTop, { passive: true })
+    window.addEventListener('resize', updateTop)
+    return () => {
+      window.removeEventListener('scroll', updateTop)
+      window.removeEventListener('resize', updateTop)
+    }
+  }, [])
+
+  const allOrderedColumns = columnOrder
+    .map((key) => columns.find((c) => c.key === key))
+    .filter((c): c is ComplaintColumn => !!c)
+  const shownColumns = allOrderedColumns.filter((c) => !hiddenColumns.has(c.key))
+
+  // Colonna trascinata sull'intestazione di un'altra: prende il suo posto.
+  const handleColumnDrop = (targetKey: string) => {
+    if (draggedCol !== null && draggedCol !== targetKey) {
+      setColumnOrder((prev) => {
+        const list = [...prev]
+        const fromIndex = list.indexOf(draggedCol)
+        const toIndex = list.indexOf(targetKey)
+        if (fromIndex === -1 || toIndex === -1) return prev
+        const [moved] = list.splice(fromIndex, 1)
+        list.splice(toIndex, 0, moved)
+        return list
+      })
+    }
+    setDraggedCol(null)
   }
 
   return (
@@ -326,6 +718,13 @@ export function ComplaintsPage() {
             onToggle={(v) => setFixVersionFilter((s) => toggled(s, v))}
             onClear={() => setFixVersionFilter(new Set())}
           />
+          <FilterGroup
+            label="TSB"
+            options={TSB_OPTIONS}
+            counts={tsbCounts}
+            selected={tsbFilter}
+            onToggle={(v) => setTsbFilter((s) => toggled(s, v))}
+          />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
@@ -340,6 +739,52 @@ export function ComplaintsPage() {
               </>
             )}
           </p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="column-menu">
+            <button
+              className="btn"
+              aria-expanded={columnMenuOpen}
+              title="Scegli quali colonne mostrare in tabella; per spostarle trascina le intestazioni"
+              onClick={() => setColumnMenuOpen((open) => !open)}
+            >
+              Colonne{hiddenColumns.size > 0 && ` (${hiddenColumns.size} nascoste)`} ▾
+            </button>
+            {columnMenuOpen && (
+              <>
+                <div className="column-menu-backdrop" onClick={() => setColumnMenuOpen(false)} />
+                <div className="column-menu-panel">
+                  {allOrderedColumns.map((col) => (
+                    <label key={col.key}>
+                      <input
+                        type="checkbox"
+                        checked={!hiddenColumns.has(col.key)}
+                        disabled={ALWAYS_VISIBLE_COLUMN_KEYS.has(col.key)}
+                        onChange={() => setHiddenColumns((prev) => toggled(prev, col.key))}
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                  <button className="link-btn" disabled={hiddenColumns.size === 0} onClick={() => setHiddenColumns(new Set())}>
+                    Mostra tutte
+                  </button>
+                  <button
+                    className="link-btn"
+                    disabled={columnOrder.join() === defaultColumnOrder.join()}
+                    onClick={() => setColumnOrder(defaultColumnOrder)}
+                  >
+                    Ripristina ordine
+                  </button>
+                  <button
+                    className="link-btn"
+                    disabled={Object.keys(columnWidths).length === 0}
+                    onClick={() => setColumnWidths({})}
+                  >
+                    Ripristina larghezze
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             className="btn"
             title="Scarica tutti i complaint in un file Excel con le intestazioni filtrabili (i filtri qui sopra non contano)"
@@ -348,138 +793,66 @@ export function ComplaintsPage() {
           >
             {exportExcel.isPending ? 'Esportazione…' : '⬇ Esporta in Excel (.xlsx)'}
           </button>
+          </div>
         </div>
         {exportExcel.isError && (
           <div className="error-banner">Esportazione non riuscita: {(exportExcel.error as Error).message}</div>
         )}
 
-        <div className="table-wrap table-wrap--scroll">
+        <div className="table-wrap" ref={tableWrapRef}>
           <table className="complaints-table">
+            <colgroup>
+              {shownColumns.map((col) => (
+                <col key={col.key} style={{ width: widthOf(col) }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th>ID Salesforce</th>
-                <th>Summary</th>
-                <th>Stato Salesforce</th>
-                <th>ID Jira</th>
-                <th>Stato Jira</th>
-                <th>Fix Version</th>
-                <th aria-sort={sort.key !== 'severity' ? undefined : sort.desc ? 'descending' : 'ascending'}>
-                  <button
-                    className="sort-btn"
-                    title={
-                      sort.key !== 'severity'
-                        ? 'Clicca per ordinare per Severity, dalla più grave'
-                        : sort.desc
-                          ? 'Dalla più grave alla meno grave: clicca per invertire'
-                          : 'Dalla meno grave alla più grave: clicca per invertire'
-                    }
-                    onClick={() => sortBy('severity')}
+                {shownColumns.map((col) => (
+                  <th
+                    key={col.key}
+                    aria-sort={col.ariaSort}
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggedCol(col.key)
+                      e.dataTransfer.setData('text/plain', col.key)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleColumnDrop(col.key)}
+                    onDragEnd={() => setDraggedCol(null)}
+                    className="draggable-col"
+                    style={draggedCol === col.key ? { opacity: 0.4 } : undefined}
+                    title={`${col.title ? `${col.title}. ` : ''}Trascina per spostare la colonna`}
                   >
-                    Severity{sort.key === 'severity' && (sort.desc ? ' ▼' : ' ▲')}
-                  </button>
-                </th>
-                <th aria-sort={sort.key !== 'created' ? undefined : sort.desc ? 'descending' : 'ascending'}>
-                  <button
-                    className="sort-btn"
-                    title={
-                      sort.key !== 'created'
-                        ? 'Clicca per ordinare per data di creazione, dal più nuovo'
-                        : sort.desc
-                          ? 'Dal più nuovo al più vecchio: clicca per invertire'
-                          : 'Dal più vecchio al più nuovo: clicca per invertire'
-                    }
-                    onClick={() => sortBy('created')}
-                  >
-                    Creato su Jira{sort.key === 'created' && (sort.desc ? ' ▼' : ' ▲')}
-                  </button>
-                </th>
-                <th>Architettura</th>
-                <th>Sito Cliente</th>
+                    {col.header ?? col.label}
+                    <span
+                      className="col-resize-handle"
+                      draggable={false}
+                      onMouseDown={(e) => handleResizeStart(e, col.key, e.currentTarget.parentElement?.offsetWidth ?? 100)}
+                      onDoubleClick={() =>
+                        setColumnWidths((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== col.key)))
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      title="Trascina per ridimensionare la colonna (doppio clic: larghezza iniziale)"
+                    />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {visible.map((c) => (
                 <tr key={c.id}>
-                  <td title={c.salesforce_case_id ? `Salesforce Case ID: ${c.salesforce_case_id}` : undefined}>
-                    {c.salesforce_case_number ?? <span className="muted">-</span>}
-                  </td>
-                  <td style={{ whiteSpace: 'normal', minWidth: 320 }}>{c.summary}</td>
-                  <td className="editable-cell">
-                    <select
-                      className={`sf-status sf-status--${c.salesforce_status === 'Chiuso' ? 'closed' : 'open'}`}
-                      value={c.salesforce_status}
-                      aria-label={`Stato Salesforce di ${c.jira_key}`}
-                      onChange={(e) =>
-                        update.mutate({ id: c.id, data: { salesforce_status: e.target.value as SalesforceStatus } })
-                      }
-                    >
-                      {SALESFORCE_STATUSES.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <a href={`https://inpeco.atlassian.net/browse/${c.jira_key}`} target="_blank" rel="noreferrer">
-                      {c.jira_key}
-                    </a>
-                  </td>
-                  <td>
-                    {c.jira_status && (
-                      <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>
-                    )}
-                  </td>
-                  <td>{c.fix_versions ?? <span className="muted">-</span>}</td>
-                  <td style={c.severity === 'High' ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
-                    {c.severity ?? <span className="muted">-</span>}
-                  </td>
-                  <td>{formatIsoDate(c.jira_created) ?? <span className="muted">-</span>}</td>
-                  <td className="editable-cell">
-                    <select
-                      value={c.architecture ?? ''}
-                      aria-label={`Architettura di ${c.jira_key}`}
-                      title={
-                        c.architecture_manual
-                          ? 'Impostata a mano: scegli "Valore da Jira" per tornare a quella ricavata dalle label'
-                          : 'Ricavata dalle label Jira: scegli un valore per correggerla'
-                      }
-                      onChange={(e) =>
-                        update.mutate({
-                          id: c.id,
-                          data: { architecture: e.target.value === RESET_TO_JIRA ? '' : e.target.value },
-                        })
-                      }
-                    >
-                      {!c.architecture && <option value="">-</option>}
-                      {/* Valore da Jira fuori elenco (es. due label: "NA5, NA6"). */}
-                      {c.architecture && !ARCHITECTURES.includes(c.architecture) && <option>{c.architecture}</option>}
-                      {ARCHITECTURES.map((a) => (
-                        <option key={a}>{a}</option>
-                      ))}
-                      {c.architecture_manual && <option value={RESET_TO_JIRA}>↺ Valore da Jira</option>}
-                    </select>
-                  </td>
-                  {/* key: campo non controllato, va ricreato quando il valore salvato cambia. */}
-                  <td className="editable-cell" style={{ minWidth: 190 }} key={c.customer_site ?? ''}>
-                    <input
-                      defaultValue={c.customer_site ?? ''}
-                      placeholder="-"
-                      title={
-                        c.customer_site_manual
-                          ? 'Inserito a mano: svuota il campo per tornare al valore ricavato dalle label Jira'
-                          : 'Ricavato dalle label Jira: modificalo per correggerlo'
-                      }
-                      aria-label={`Sito Cliente di ${c.jira_key}`}
-                      onBlur={(e) => {
-                        const value = e.target.value.trim()
-                        if (value !== (c.customer_site ?? '')) update.mutate({ id: c.id, data: { customer_site: value } })
-                      }}
-                    />
-                  </td>
+                  {shownColumns.map((col) => (
+                    <td key={col.key} className={col.className} style={col.style?.(c)}>
+                      {col.render(c)}
+                    </td>
+                  ))}
                 </tr>
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="muted">
+                  <td colSpan={shownColumns.length} className="muted">
                     {isLoading
                       ? 'Caricamento...'
                       : all.length === 0
@@ -493,5 +866,36 @@ export function ComplaintsPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Cella "ID Salesforce": link al case (diretto con il Case ID, altrimenti
+// alla ricerca per numero a 8 cifre); i ticket AX restano testo semplice.
+function SalesforceCaseLinks({ complaint: c }: { complaint: Complaint }) {
+  if (c.salesforce_case_id) {
+    return (
+      <a
+        href={salesforceCaseUrl(c.salesforce_case_id)}
+        target="_blank"
+        rel="noreferrer"
+        title={`Apri il case in Salesforce (Case ID ${c.salesforce_case_id})`}
+      >
+        {c.salesforce_case_number ?? c.salesforce_case_id}
+      </a>
+    )
+  }
+  const numbers = salesforceCaseNumbers(c.salesforce_case_number)
+  if (numbers.length === 0) return c.salesforce_case_number ?? <span className="muted">-</span>
+  return (
+    <span title={c.salesforce_case_number ?? undefined}>
+      {numbers.map((n, i) => (
+        <span key={n}>
+          {i > 0 && ', '}
+          <a href={salesforceSearchUrl(n)} target="_blank" rel="noreferrer" title={`Cerca il case ${n} in Salesforce`}>
+            {n}
+          </a>
+        </span>
+      ))}
+    </span>
   )
 }

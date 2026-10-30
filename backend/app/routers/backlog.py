@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.routers.settings import SETTINGS_ROW_ID
-from app.services.jira_client import JiraClientError, JiraIssue, search_issues
+from app.services.db_backup import DatabaseBackupError, backup_database
+from app.services.jira_client import JiraClientError, JiraIssue, search_issues, test_connection
 
 router = APIRouter(tags=["backlog"])
 
@@ -36,10 +37,33 @@ def list_backlog(project_id: int, db: Session = Depends(get_db)):
     _get_project_or_404(db, project_id)
     return (
         db.query(models.BacklogItem)
-        .filter(models.BacklogItem.project_id == project_id)
+        .filter(models.BacklogItem.project_id == project_id, models.BacklogItem.archived_at.is_(None))
         .order_by(models.BacklogItem.priority_order)
         .all()
     )
+
+
+@router.get("/api/projects/{project_id}/backlog/archived", response_model=list[schemas.BacklogItem])
+def list_archived_backlog(project_id: int, db: Session = Depends(get_db)):
+    """Item che la sync non ha piu' trovato nella JQL, dal piu' recente."""
+    _get_project_or_404(db, project_id)
+    return (
+        db.query(models.BacklogItem)
+        .filter(models.BacklogItem.project_id == project_id, models.BacklogItem.archived_at.is_not(None))
+        .order_by(models.BacklogItem.archived_at.desc(), models.BacklogItem.jira_key)
+        .all()
+    )
+
+
+@router.post("/api/backlog/{item_id}/restore", response_model=schemas.BacklogItem)
+def restore_backlog_item(item_id: int, db: Session = Depends(get_db)):
+    """Riporta nel backlog un item archiviato, con tutti i suoi dati. Se non
+    rientra nella JQL, la sync successiva lo archivia di nuovo."""
+    item = _get_item_or_404(db, item_id)
+    item.archived_at = None
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 @router.post("/api/projects/{project_id}/backlog", response_model=schemas.BacklogItem, status_code=201)
@@ -116,18 +140,38 @@ def sync_backlog_from_jira(project_id: int, db: Session = Depends(get_db)):
     def on_progress(phase: str, done: int, total: int) -> None:
         _sync_progress[project_id] = schemas.SyncProgress(phase=phase, done=done, total=total)
 
+    base_url = (jira_settings.jira_base_url if jira_settings else None) or ""
+    email = (jira_settings.jira_email if jira_settings else None) or ""
+    api_token = (jira_settings.jira_api_token if jira_settings else None) or ""
+
     try:
-        issues = search_issues(
-            (jira_settings.jira_base_url if jira_settings else None) or "",
-            (jira_settings.jira_email if jira_settings else None) or "",
-            (jira_settings.jira_api_token if jira_settings else None) or "",
-            project.jira_jql,
-            on_progress,
+        # Prima di tutto le credenziali: con un token scaduto la ricerca non
+        # da' errore ma risponde 200 con zero issue, /myself invece 401.
+        test_connection(base_url, email, api_token)
+        issues = search_issues(base_url, email, api_token, project.jira_jql, on_progress)
+        # Zero issue con un backlog non vuoto e' quasi sempre un problema di
+        # Jira o della JQL, non un backlog davvero finito: non si archivia
+        # niente, come per i Complaints.
+        existing_count = (
+            db.query(models.BacklogItem)
+            .filter(models.BacklogItem.project_id == project_id, models.BacklogItem.archived_at.is_(None))
+            .count()
         )
+        if not issues and existing_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Jira non ha restituito nessuna issue: sincronizzazione annullata, il backlog non è stato "
+                    "modificato. Verifica che il token Jira in Configurazione non sia scaduto e che la JQL sia corretta."
+                ),
+            )
         on_progress("saving", len(issues), len(issues))
+        backup_database(f"sync-{project.code}")
         return _save_synced_issues(db, project_id, issues)
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except DatabaseBackupError as exc:
+        raise HTTPException(status_code=500, detail=f"{exc}. Sincronizzazione annullata.") from exc
     finally:
         _sync_progress.pop(project_id, None)
 
@@ -139,7 +183,8 @@ def get_sync_progress(project_id: int):
 
 def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -> schemas.SyncResult:
     """Allinea gli item del backlog alle issue lette da Jira: crea le nuove,
-    aggiorna le esistenti, rimuove quelle non piu' nella JQL."""
+    aggiorna le esistenti (riportando nel backlog quelle archiviate), archivia
+    quelle non piu' nella JQL."""
 
     existing = {
         item.jira_key: item
@@ -148,6 +193,7 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
 
     created = 0
     updated = 0
+    restored = 0
     now = dt.datetime.utcnow()
     max_order = max((item.priority_order for item in existing.values()), default=0)
     matched_keys = {issue.key for issue in issues}
@@ -174,6 +220,9 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             item.actual_start = issue.actual_start
             item.actual_finish = issue.actual_finish
             item.last_synced_at = now
+            if item.archived_at is not None:
+                item.archived_at = None
+                restored += 1
             updated += 1
         else:
             max_order += 1
@@ -204,14 +253,17 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             db.add(item)
             created += 1
 
-    # Rimuove gli item sincronizzati in precedenza che non sono piu' nel
+    # Archivia gli item sincronizzati in precedenza che non sono piu' nel
     # risultato della JQL (es. fix version cambiata su Jira): altrimenti
-    # resterebbero nel backlog per sempre, invisibili alla sync.
+    # resterebbero nel backlog per sempre, invisibili alla sync. Non si
+    # cancellano: vedi BacklogItem.archived_at.
     removed = 0
     for jira_key, item in existing.items():
-        if jira_key not in matched_keys:
-            db.delete(item)
+        if jira_key not in matched_keys and item.archived_at is None:
+            item.archived_at = now
             removed += 1
 
     db.commit()
-    return schemas.SyncResult(created=created, updated=updated, removed=removed, total_matched=len(issues))
+    return schemas.SyncResult(
+        created=created, updated=updated, removed=removed, restored=restored, total_matched=len(issues)
+    )

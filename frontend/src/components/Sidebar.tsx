@@ -13,6 +13,7 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
+      <img className="sidebar-logo" src="/logo_Inpeco.png" alt="Inpeco" />
       <div className="sidebar-brand">
         <img src="/favicon.svg" alt="" width={28} height={28} />
         <h1>Project Controlling</h1>

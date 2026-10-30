@@ -1,7 +1,8 @@
 import datetime as dt
+import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------- Phase ----------
@@ -345,6 +346,7 @@ class BacklogItem(BacklogItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     project_id: int
+    archived_at: dt.datetime | None = None
     summary: str | None = None
     description: str | None = None
     change_description: str | None = None
@@ -366,6 +368,8 @@ class SyncResult(BaseModel):
     created: int
     updated: int
     removed: int = 0
+    # Backlog: item archiviati tornati perche' rientrati nella JQL.
+    restored: int = 0
     total_matched: int
     errors: list[str] = []
 
@@ -910,6 +914,14 @@ class DashboardSnapshotDetail(DashboardSnapshotSummary):
 
 # ---------- Complaints ----------
 
+class TsbActivity(BaseModel):
+    key: str
+    summary: str
+    # Stato Jira dell'activity (None per i dati salvati prima di questo campo,
+    # fino alla sync successiva).
+    status: str | None = None
+
+
 class Complaint(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -928,7 +940,16 @@ class Complaint(BaseModel):
     salesforce_status: Literal["Aperto", "Chiuso"] = "Aperto"
     customer_site: str | None = None
     customer_site_manual: bool = False
+    tsb_activities: list[TsbActivity] = []
     last_synced_at: dt.datetime | None = None
+
+    # Nel database e' JSON (vedi models.Complaint.tsb_activities).
+    @field_validator("tsb_activities", mode="before")
+    @classmethod
+    def _parse_tsb_activities(cls, value):
+        if isinstance(value, str):
+            return json.loads(value)
+        return value or []
 
 
 class ComplaintUpdate(BaseModel):

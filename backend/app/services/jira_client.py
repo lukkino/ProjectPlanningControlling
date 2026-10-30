@@ -3,6 +3,7 @@ from a JQL query. Only reads issues — never writes anything back to Jira.
 """
 
 import datetime as dt
+import re
 from collections.abc import Callable
 
 import httpx
@@ -590,6 +591,7 @@ class ComplaintIssue:
         salesforce_case_id: str | None,
         severity: str | None,
         fix_versions: list[str],
+        tsb_activities: list[dict],
     ):
         self.key = key
         self.summary = summary
@@ -611,6 +613,31 @@ class ComplaintIssue:
         # Campo custom Jira "Severity" (customfield_10185): menu a tendina
         # High/Medium/Low.
         self.severity = severity
+        # Activity collegate con "relates to" che descrivono il TSB che
+        # risolve il bug (vedi _extract_tsb_activities): [{key, summary,
+        # status}].
+        self.tsb_activities = tsb_activities
+
+
+# Le activity con i dettagli di un TSB (Technical Service Bulletin) hanno
+# sempre la parola TSB nel summary.
+_TSB_RE = re.compile(r"\bTSB", re.IGNORECASE)
+
+
+def _extract_tsb_activities(issuelinks: list[dict]) -> list[dict]:
+    """Issue collegate con un link "relates to" (in entrambe le direzioni:
+    il tipo Relates e' simmetrico) il cui summary contiene TSB."""
+    result = []
+    for link in issuelinks:
+        if (link.get("type") or {}).get("name") != "Relates":
+            continue
+        other = link.get("inwardIssue") or link.get("outwardIssue") or {}
+        fields = other.get("fields") or {}
+        summary = fields.get("summary") or ""
+        if other.get("key") and _TSB_RE.search(summary) and all(a["key"] != other["key"] for a in result):
+            status = (fields.get("status") or {}).get("name")
+            result.append({"key": other["key"], "summary": summary, "status": status})
+    return result
 
 
 def _approximate_count(client: httpx.Client, base_url: str, jql: str) -> int:
@@ -657,6 +684,7 @@ def fetch_complaints(
         "created",
         "resolutiondate",
         "statuscategorychangedate",
+        "issuelinks",
         SOURCE_NOTE_FIELD,
         SALESFORCE_CASE_ID_FIELD,
         SEVERITY_FIELD,
@@ -705,6 +733,7 @@ def fetch_complaints(
                             salesforce_case_id=f.get(SALESFORCE_CASE_ID_FIELD),
                             severity=(f.get(SEVERITY_FIELD) or {}).get("value"),
                             fix_versions=[v["name"] for v in (f.get("fixVersions") or []) if v.get("name")],
+                            tsb_activities=_extract_tsb_activities(f.get("issuelinks") or []),
                         )
                     )
                 # Il conteggio e' approssimato: il totale non scende mai
