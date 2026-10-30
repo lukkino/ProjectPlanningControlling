@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type RefObject } from 'react'
 import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
@@ -55,6 +55,8 @@ const MARK_CHAR_WIDTH = 6.5
 // Come sopra, per il summary scritto sopra le barre (11px): stima larga,
 // cosi' il calendario si allunga abbastanza da non tagliarlo.
 const LABEL_CHAR_WIDTH = 6.5
+// Spazio tra la fine delle barre e il nome dell'assegnatario.
+const ASSIGNEE_LABEL_GAP = 6
 const COLOR_PHASE = '#7c4dbd'
 // Sabato e domenica con lo zoom sui giorni.
 const COLOR_WEEKEND = 'color-mix(in srgb, var(--border) 30%, transparent)'
@@ -254,6 +256,9 @@ type Props = {
   planBarChange?: (item: BacklogItem, change: GanttBarChange) => BacklogPatch[]
   onBarChange?: (updates: BacklogPatch[]) => void
   isStartLocked?: (item: BacklogItem) => boolean
+  // Riga trascinata sulla colonna delle chiavi: l'item prende il posto di
+  // quello di destinazione, come nella tabella (assente = ordine fisso).
+  onRowMove?: (itemId: number, targetId: number) => void
 }
 
 const NO_PHASES: { name: string; date: string | null }[] = []
@@ -271,6 +276,7 @@ export function BacklogGanttChart({
   planBarChange,
   onBarChange,
   isStartLocked,
+  onRowMove,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
@@ -344,6 +350,10 @@ export function BacklogGanttChart({
     barDragRef.current = next
     setBarDrag(next)
   }
+
+  // Trascinamento di una riga (vedi rowDragHandlers sotto).
+  const [rowDragId, setRowDragId] = useState<number | null>(null)
+  const [rowDropId, setRowDropId] = useState<number | null>(null)
 
   // Esporta PNG: per catturare tutto il Gantt e non solo la parte visibile,
   // durante l'export il componente si allarga all'intero calendario (niente
@@ -470,6 +480,18 @@ export function BacklogGanttChart({
   const dayWidthRef = useRef(dayWidth)
   dayWidthRef.current = dayWidth
 
+  // Ultimo giorno coperto dalle barre di un item (pianificato, effettivo o in
+  // corso fino a oggi): l'assegnatario si scrive subito dopo.
+  const barEndDay = (item: BacklogItem): number | null => {
+    const actualStart = dateStrToEpochDays(item.actual_start)
+    const ends = [
+      item.planned_start ? dateStrToEpochDays(item.expected_finish) : null,
+      item.actual_start ? dateStrToEpochDays(item.actual_finish) : null,
+      actualStart !== null && !item.actual_finish && item.status === 'In Progress' ? Math.max(actualStart, todayDay) : null,
+    ].filter((day): day is number => day !== null)
+    return ends.length > 0 ? Math.max(...ends) : null
+  }
+
   // Il summary parte dall'inizio della barra e puo' essere piu' lungo di
   // quanto resta fino all'ultima data: il calendario si allunga dei giorni
   // che servono a leggerlo per intero. Non con "Intero progetto" ne' a scale
@@ -483,7 +505,14 @@ export function BacklogGanttChart({
         return anchor + Math.ceil(((item.summary ?? item.jira_key).length * LABEL_CHAR_WIDTH + 8) / dayWidth)
       })
     : []
-  const maxDay = Math.max(rangeMaxDay, ...labelEndDays)
+  const assigneeEndDays = extendForLabels
+    ? items.map((item) => {
+        const barEnd = barEndDay(item)
+        if (barEnd === null || !item.assignee) return 0
+        return barEnd + 1 + Math.ceil((item.assignee.length * LABEL_CHAR_WIDTH + ASSIGNEE_LABEL_GAP * 2) / dayWidth)
+      })
+    : []
+  const maxDay = Math.max(rangeMaxDay, ...labelEndDays, ...assigneeEndDays)
 
   // All'apertura il Gantt parte dallo zoom "Oggi ±2 settimane", invece che
   // dal primo giorno del range. Solo la prima volta che c'e' qualcosa da
@@ -572,6 +601,48 @@ export function BacklogGanttChart({
           onPointerCancel: endBarDrag,
         }
       : {}
+  // Spostamento delle righe: si afferra la chiave a sinistra e si rilascia su
+  // una riga qualsiasi, chiave o timeline. La linea blu indica dove finira'.
+  const rowsMovable = !!onRowMove && !exporting
+  const endRowDrag = () => {
+    setRowDragId(null)
+    setRowDropId(null)
+  }
+  const rowDragHandlers = (item: BacklogItem) =>
+    rowsMovable
+      ? {
+          draggable: true,
+          title: 'Trascina per spostare la riga',
+          onDragStart: (e: DragEvent<HTMLDivElement>) => {
+            setRowDragId(item.id)
+            e.dataTransfer.setData('text/plain', String(item.id))
+            e.dataTransfer.effectAllowed = 'move'
+          },
+          onDragEnd: endRowDrag,
+        }
+      : {}
+  const rowDropHandlers = (item: BacklogItem) =>
+    rowsMovable
+      ? {
+          onDragOver: (e: DragEvent<HTMLDivElement>) => {
+            if (rowDragId === null) return
+            e.preventDefault()
+            setRowDropId(item.id)
+          },
+          onDrop: (e: DragEvent<HTMLDivElement>) => {
+            e.preventDefault()
+            if (rowDragId !== null && rowDragId !== item.id) onRowMove!(rowDragId, item.id)
+            endRowDrag()
+          },
+        }
+      : {}
+  const rowDragStyle = (item: BacklogItem): CSSProperties | undefined => {
+    if (rowDragId === item.id) return { opacity: 0.4 }
+    if (rowDragId === null || rowDropId !== item.id) return undefined
+    const movingDown = items.findIndex((i) => i.id === rowDragId) < items.findIndex((i) => i.id === item.id)
+    return { boxShadow: `inset 0 ${movingDown ? -3 : 3}px 0 var(--primary)` }
+  }
+
   // Durante il trascinamento le barre mostrano gia' le date nuove (l'item e
   // quelli che si spostano con lui); altrimenti quelle salvate.
   const previewById = new Map((barDrag?.updates ?? []).map((u) => [u.id, u]))
@@ -958,9 +1029,14 @@ export function BacklogGanttChart({
         <div className="gantt-labels-col" style={{ width: LABEL_COLUMN_WIDTH }}>
           {items.map((item, row) => (
             <Fragment key={item.id}>
-              <div className="gantt-label-row" style={{ height: ROW_HEIGHT }}>
+              <div
+                className="gantt-label-row"
+                style={{ height: ROW_HEIGHT, ...rowDragStyle(item) }}
+                {...rowDragHandlers(item)}
+                {...rowDropHandlers(item)}
+              >
                 {jiraBrowseUrl ? (
-                  <a href={`${jiraBrowseUrl}${item.jira_key}`} target="_blank" rel="noreferrer">
+                  <a href={`${jiraBrowseUrl}${item.jira_key}`} target="_blank" rel="noreferrer" draggable={false}>
                     {item.jira_key}
                   </a>
                 ) : (
@@ -1031,12 +1107,17 @@ export function BacklogGanttChart({
               const aStart = dateStrToEpochDays(item.actual_start)
               const aEnd = dateStrToEpochDays(item.actual_finish)
               const labelAnchor = pStart ?? aStart
+              const assigneeEnd = barEndDay(item)
               const label = item.summary ?? item.jira_key
               const color = typeColor(item.issue_type)
 
               return (
                 <Fragment key={item.id}>
-                <div className="gantt-timeline-row" style={{ height: ROW_HEIGHT }}>
+                <div
+                  className="gantt-timeline-row"
+                  style={{ height: ROW_HEIGHT, ...rowDragStyle(item) }}
+                  {...rowDropHandlers(item)}
+                >
                   {marks.map((mark) => (
                     <div
                       key={mark.day}
@@ -1141,6 +1222,28 @@ export function BacklogGanttChart({
                         borderRadius: 3,
                       }}
                     />
+                  )}
+
+                  {/* Assegnatario a destra delle barre, trasparente al mouse per
+                      non intralciare il trascinamento. */}
+                  {item.assignee && assigneeEnd !== null && (
+                    <div
+                      className="muted"
+                      style={{
+                        position: 'absolute',
+                        left: dayToX(assigneeEnd) + dayWidth + ASSIGNEE_LABEL_GAP,
+                        top: 22,
+                        fontSize: 11,
+                        lineHeight: `${BAR_HEIGHT}px`,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: Math.max(0, chartWidth - dayToX(assigneeEnd) - dayWidth - ASSIGNEE_LABEL_GAP - 2),
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {item.assignee}
+                    </div>
                   )}
 
                   {/* In Progress senza Fine eff.: l'inizio e' certo, la fine

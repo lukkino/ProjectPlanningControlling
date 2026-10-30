@@ -50,6 +50,7 @@ class JiraIssue:
         components: str | None = None,
         dev_effort_hours: float | None = None,
         impacts_on: str | None = None,
+        assignee: str | None = None,
     ):
         self.key = key
         self.issue_type = issue_type
@@ -80,6 +81,8 @@ class JiraIssue:
         # Campo custom Jira "Impacts On" (customfield_10115, multiselect):
         # valori uniti da virgola, colonna "Impacts on" del Backlog.
         self.impacts_on = impacts_on
+        # Nome visualizzato dell'assegnatario; None se l'issue non e' assegnata.
+        self.assignee = assignee
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -484,6 +487,7 @@ def search_issues(
         "issuelinks",
         "description",
         "components",
+        "assignee",
         CHANGE_DESCRIPTION_FIELD,
         PROBLEM_CAUSE_FIELD,
         DEV_EFFORT_FIELD,
@@ -557,6 +561,7 @@ def search_issues(
                         components=components,
                         dev_effort_hours=f.get(DEV_EFFORT_FIELD),
                         impacts_on=impacts_on,
+                        assignee=(f.get("assignee") or {}).get("displayName"),
                     )
                 )
                 report("changelog", index, total)

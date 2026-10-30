@@ -210,6 +210,7 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             item.components = issue.components
             item.dev_effort_hours = issue.dev_effort_hours
             item.impacts_on = issue.impacts_on
+            item.assignee = issue.assignee
             item.issue_type = issue.issue_type
             item.jira_status = issue.status
             item.labels = labels
@@ -237,6 +238,7 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
                 components=issue.components,
                 dev_effort_hours=issue.dev_effort_hours,
                 impacts_on=issue.impacts_on,
+                assignee=issue.assignee,
                 issue_type=issue.issue_type,
                 jira_status=issue.status,
                 labels=labels,

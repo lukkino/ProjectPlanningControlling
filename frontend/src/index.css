@@ -425,6 +425,8 @@ tbody tr:hover .sticky-col { background: var(--bg); }
 }
 .gantt-label-row:first-child { border-top: none; }
 .gantt-label-row:hover { background: var(--bg); }
+.gantt-label-row[draggable='true'] { cursor: grab; }
+.gantt-label-row[draggable='true']:active { cursor: grabbing; }
 .gantt-timeline-col { position: relative; overflow-x: auto; flex: 1; min-width: 0; }
 .gantt-timeline-row { position: relative; border-top: 1px solid var(--border); }
 .gantt-timeline-row:first-child { border-top: none; }

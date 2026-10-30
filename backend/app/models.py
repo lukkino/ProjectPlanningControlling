@@ -532,6 +532,9 @@ class BacklogItem(Base):
     # Campo custom Jira "Impacts On" (valori separati da virgola): colonna
     # "Impacts on" del Backlog.
     impacts_on: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Assegnatario Jira (nome visualizzato): colonna del Backlog e etichetta
+    # a destra delle barre del Gantt.
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     labels: Mapped[str | None] = mapped_column(String(255), nullable=True)

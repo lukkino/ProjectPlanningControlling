@@ -354,6 +354,7 @@ class BacklogItem(BacklogItemBase):
     components: str | None = None
     dev_effort_hours: float | None = None
     impacts_on: str | None = None
+    assignee: str | None = None
     issue_type: str | None = None
     jira_status: str | None = None
     labels: str | None = None

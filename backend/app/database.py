@@ -163,6 +163,9 @@ def run_lightweight_migrations() -> None:
         if "impacts_on" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN impacts_on TEXT"))
+        if "assignee" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN assignee VARCHAR(255)"))
         if "archived_at" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN archived_at DATETIME"))

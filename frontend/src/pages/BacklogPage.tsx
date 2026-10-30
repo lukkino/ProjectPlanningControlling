@@ -110,6 +110,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   notes: 160,
   scenarios: 170,
   impacts_on: 160,
+  assignee: 140,
 }
 const HANDLE_COLUMN_WIDTH = 30
 const SELECT_COLUMN_WIDTH = 30
@@ -934,6 +935,12 @@ export function BacklogPage() {
       // Sincronizzato da Jira (campo "Impacts On"): non editabile qui.
       render: (item) => item.impacts_on ?? <span className="muted">—</span>,
     },
+    {
+      key: 'assignee',
+      label: 'Assignee',
+      // Sincronizzato da Jira: non editabile qui.
+      render: (item) => item.assignee ?? <span className="muted">—</span>,
+    },
   ]
   const defaultColumnOrder = columns.map((c) => c.key)
 
@@ -1175,20 +1182,17 @@ export function BacklogPage() {
     ? [...visibleItems].sort((a, b) => (STATUS_SORT_RANK[a.status] ?? 99) - (STATUS_SORT_RANK[b.status] ?? 99))
     : visibleItems
 
-  const handleDrop = (targetId: number) => {
-    if (draggedId === null || draggedId === targetId) {
-      setDraggedId(null)
-      return
-    }
+  // Sposta un item al posto di un altro: lo usano la tabella e il Gantt, che
+  // mostrano lo stesso elenco nello stesso ordine (priority_order).
+  const moveItem = (itemId: number, targetId: number) => {
     // displayItems (non visibleItems): con "Ordina per stato" attivo si
     // trascina comunque sull'elenco visibile a schermo, cosi' su/giu'
     // funziona anche li' - il nuovo priority_order si calcola tra i vicini
     // di QUELLA posizione, qualunque sia l'ordinamento in vista in quel
     // momento.
     const list = [...displayItems]
-    const fromIndex = list.findIndex((i) => i.id === draggedId)
+    const fromIndex = list.findIndex((i) => i.id === itemId)
     const toIndex = list.findIndex((i) => i.id === targetId)
-    setDraggedId(null)
     if (fromIndex === -1 || toIndex === -1) return
 
     const [moved] = list.splice(fromIndex, 1)
@@ -1204,6 +1208,10 @@ export function BacklogPage() {
     else newOrder = 1
 
     update.mutate({ id: moved.id, data: { priority_order: newOrder } })
+  }
+  const handleDrop = (targetId: number) => {
+    if (draggedId !== null && draggedId !== targetId) moveItem(draggedId, targetId)
+    setDraggedId(null)
   }
 
   // Selezione per le azioni in blocco: contano solo gli item selezionati E
@@ -1587,6 +1595,7 @@ export function BacklogPage() {
           planBarChange={planGanttChange}
           onBarChange={(updates) => applyGanttChange.mutate(updates)}
           isStartLocked={isStartLocked}
+          onRowMove={moveItem}
         />
       )}
       {view === 'gantt' && applyGanttChange.isError && (

@@ -145,6 +145,8 @@ export type BacklogItem = {
   summary: string | null
   dev_effort_hours: number | null
   impacts_on: string | null
+  // Assegnatario Jira (nome visualizzato); null se non assegnata.
+  assignee: string | null
   issue_type: string | null
   jira_status: string | null
   labels: string | null
