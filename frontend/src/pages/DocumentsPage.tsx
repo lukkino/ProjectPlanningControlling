@@ -1245,7 +1245,7 @@ export function DocumentsPage() {
             )}
             {/* Regression Analysis e Release Report: compilano Cover e foglio
                 dati dei template Excel ufficiali con i dati dell'increment. */}
-            {docType === 'execution' && (
+            {docType === 'deployment' && (
               <>
                 {/* Pulsante e "i" in un unico blocco: non si separano quando la riga va a capo. */}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

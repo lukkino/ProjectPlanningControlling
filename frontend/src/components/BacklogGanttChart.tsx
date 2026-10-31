@@ -55,6 +55,8 @@ const MARK_CHAR_WIDTH = 6.5
 // Come sopra, per il summary scritto sopra le barre (11px): stima larga,
 // cosi' il calendario si allunga abbastanza da non tagliarlo.
 const LABEL_CHAR_WIDTH = 6.5
+// Distanza dal bordo sinistro del Gantt a cui si ferma il summary scorrendo.
+const LABEL_STICKY_OFFSET = 8
 // Spazio tra la fine delle barre e il nome dell'assegnatario.
 const ASSIGNEE_LABEL_GAP = 6
 const COLOR_PHASE = '#7c4dbd'
@@ -1148,7 +1150,7 @@ export function BacklogGanttChart({
               const aStart = dateStrToEpochDays(item.actual_start)
               const aEnd = dateStrToEpochDays(item.actual_finish)
               const labelAnchor = pStart ?? aStart
-              const assigneeEnd = barEndDay(item)
+              const barEnd = barEndDay(item)
               const label = item.summary ?? item.jira_key
               const color = typeColor(item.issue_type)
 
@@ -1173,22 +1175,34 @@ export function BacklogGanttChart({
                     />
                   ))}
 
+                  {/* Il contenitore copre le barre dell'item e il summary vi
+                      resta agganciato scorrendo il Gantt: segue la barra fino
+                      alla sua fine. Se e' piu' lungo della barra non si muove. */}
                   {labelAnchor !== null && (
                     <div
-                      className="muted"
                       style={{
                         position: 'absolute',
                         left: dayToX(labelAnchor) + 2,
                         top: 2,
-                        fontSize: 11,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: Math.max(0, chartWidth - dayToX(labelAnchor) - 6),
+                        width: barEnd === null ? undefined : Math.max(0, dayToX(barEnd) + dayWidth - dayToX(labelAnchor) - 2),
                       }}
-                      title={label}
                     >
-                      {label}
+                      <div
+                        className="muted"
+                        style={{
+                          position: 'sticky',
+                          left: LABEL_STICKY_OFFSET,
+                          width: 'max-content',
+                          fontSize: 11,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          maxWidth: Math.max(0, chartWidth - dayToX(labelAnchor) - 6),
+                        }}
+                        title={label}
+                      >
+                        {label}
+                      </div>
                     </div>
                   )}
 
@@ -1267,19 +1281,19 @@ export function BacklogGanttChart({
 
                   {/* Assegnatario a destra delle barre, trasparente al mouse per
                       non intralciare il trascinamento. */}
-                  {item.assignee && assigneeEnd !== null && (
+                  {item.assignee && barEnd !== null && (
                     <div
                       className="muted"
                       style={{
                         position: 'absolute',
-                        left: dayToX(assigneeEnd) + dayWidth + ASSIGNEE_LABEL_GAP,
+                        left: dayToX(barEnd) + dayWidth + ASSIGNEE_LABEL_GAP,
                         top: 22,
                         fontSize: 11,
                         lineHeight: `${BAR_HEIGHT}px`,
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        maxWidth: Math.max(0, chartWidth - dayToX(assigneeEnd) - dayWidth - ASSIGNEE_LABEL_GAP - 2),
+                        maxWidth: Math.max(0, chartWidth - dayToX(barEnd) - dayWidth - ASSIGNEE_LABEL_GAP - 2),
                         pointerEvents: 'none',
                       }}
                     >
