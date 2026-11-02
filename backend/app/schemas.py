@@ -712,9 +712,17 @@ class PprInspectRequest(BaseModel):
     file_b64: str
 
 
+class WorkbookInspectRequest(BaseModel):
+    """Design Input o User Needs scelto nel popup di esportazione, in base64."""
+
+    file_b64: str
+
+
 class PprInspection(BaseModel):
     title: str
     last_version: int | None = None
+    # Solo Design Input e User Needs.
+    last_author: str | None = None
     last_description: str | None = None
     # Solo per l'ultimo Planning: i Deliverable Check gia' compilati.
     deliverables: list[PprDeliverable] | None = None

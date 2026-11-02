@@ -395,6 +395,8 @@ export type PprFileRole = 'previous' | 'previous_phase'
 export type PprInspection = {
   title: string
   last_version: number | null
+  // Solo Design Input e User Needs.
+  last_author?: string | null
   last_description: string | null
   // Solo per l'ultimo Planning: i Deliverable Check gia' compilati.
   deliverables: PprDeliverable[] | null

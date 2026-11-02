@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useRef, useState } from 'react'
-import { api, saveBlob, type WorkbookExportResult } from '../api/client'
+import { api, saveBlob, type WorkbookDocument, type WorkbookExportResult } from '../api/client'
 import type {
   BacklogItem,
   DocumentRevisionMeta,
@@ -356,6 +356,7 @@ function PprFilePicker({
   inspect,
   onLoad,
   onClear,
+  showRevision = true,
 }: {
   docLabel: string
   fileName: string
@@ -366,6 +367,8 @@ function PprFilePicker({
   inspect: (fileB64: string) => Promise<PprInspection>
   onLoad: (upload: PprUpload) => void
   onClear: () => void
+  // false: ultima versione e descrizione le mostra chi usa il selettore.
+  showRevision?: boolean
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const check = useMutation({
@@ -438,10 +441,12 @@ function PprFilePicker({
         {upload ? (
           <>
             {!upload.folderFile && <span>📄 {upload.name}</span>}
-            <span className="muted">
-              · ultima versione {upload.info.last_version ?? '—'}
-              {upload.info.last_description && `: ${upload.info.last_description}`}
-            </span>
+            {showRevision && (
+              <span className="muted">
+                · ultima versione {upload.info.last_version ?? '—'}
+                {upload.info.last_description && `: ${upload.info.last_description}`}
+              </span>
+            )}
             {upload.info.old_template && (
               <span className="muted" style={{ color: '#b45309' }}>
                 · vecchio template: presi solo versione e Revision History
@@ -732,60 +737,190 @@ function PprDownloadButton({
   )
 }
 
-// Esporta Design Input / User Needs: si sceglie il documento corrente
-// (.xlsx), il backend vi aggiunge in cima le righe di questo increment e
-// restituisce il file aggiornato, scaricato subito; poi un popup riassume
-// cosa e' stato aggiunto e quali righe obsolete sono state dichiarate
-// "Removed" nella revision history. `noun` e' come chiamare le righe aggiunte
-// nei messaggi ("story", "user need").
+// Esporta Design Input / User Needs: nel popup si indica l'ultima versione
+// disponibile del documento (.xlsx), proposta dalla cartella review se c'e',
+// il backend vi aggiunge in cima le righe di questo increment e restituisce
+// il file aggiornato, scaricato subito; poi un popup riassume cosa e' stato
+// aggiunto e quali righe obsolete sono state dichiarate "Removed" nella
+// revision history. Le modifiche vanno in una nuova versione oppure, se
+// l'ultima e' ancora in draft, in quella: il popup propone la seconda se
+// nessun file di quella versione e' "approved" e la sua ultima revisione e'
+// di questo increment. `noun` e' come chiamare le righe aggiunte nei
+// messaggi ("story", "user need").
 function WorkbookExportButton({
   projectId,
+  document,
   label,
-  title,
+  fileName,
+  intro,
   noun,
+  incrementCode,
   exportFile,
 }: {
   projectId: number
+  document: WorkbookDocument
   label: string
-  title: string
+  fileName: string
+  intro: string
   noun: string
-  exportFile: (file: File) => Promise<WorkbookExportResult>
+  incrementCode: string
+  exportFile: (file: File, updateDraft: boolean) => Promise<WorkbookExportResult>
 }) {
   const delivery = useReviewDelivery(projectId)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false)
+  const [upload, setUpload] = useState<PprUpload | null>(null)
+  const [candidates, setCandidates] = useState<PprCandidate[]>([])
+  // Scelta dell'utente; finche' e' null vale la proposta (looksDraft).
+  const [draftChoice, setDraftChoice] = useState<boolean | null>(null)
+  const chooseUpload = (next: PprUpload | null) => {
+    setUpload(next)
+    setDraftChoice(null)
+  }
+
+  const lastVersion = upload?.info.last_version ?? null
+  const approved =
+    !!upload &&
+    (/approved/i.test(upload.name) ||
+      candidates.some((c) => c.info?.last_version === lastVersion && /approved/i.test(c.filename)))
+  const looksDraft = !approved && !!upload?.info.last_description?.includes(incrementCode)
+  const updateDraft = lastVersion !== null && (draftChoice ?? looksDraft)
+
+  const prepare = useMutation({
+    mutationFn: async () => (delivery.inFolder ? api.documents.workbookCandidates(projectId, document) : []),
+    onSuccess: (found) => {
+      setCandidates(found)
+      chooseUpload(bestCandidate(found))
+      run.reset()
+      setOpen(true)
+    },
+  })
+
   const run = useMutation({
-    mutationFn: async (file: File) => {
-      const result = await exportFile(file)
+    mutationFn: async ({ source, draft }: { source: PprUpload; draft: boolean }) => {
+      const file = source.folderFile
+        ? await api.reviewFolder.read(projectId, source.folderFile)
+        : new File([Uint8Array.from(atob(source.b64 ?? ''), (c) => c.charCodeAt(0))], source.name)
+      const result = await exportFile(file, draft)
       // Il file cambia se ha righe nuove o una nuova riga di revisione. Il
       // riepilogo qui sotto dice gia' dov'e' finito: niente popup "Salvato".
       const changed = result.added.length > 0 || result.removed.length > 0
       const saved = changed ? await delivery.deliver([result], { showSaved: false }) : []
       return { ...result, savedAs: saved[0] ?? null }
     },
+    onSuccess: () => setOpen(false),
   })
   const changed = run.isSuccess && (run.data.added.length > 0 || run.data.removed.length > 0)
+  const close = () => {
+    if (!run.isPending) setOpen(false)
+  }
 
   return (
     <>
-      <button className="btn btn-primary" title={title} onClick={() => fileRef.current?.click()} disabled={run.isPending}>
-        {run.isPending ? 'Esportazione...' : `📄 Esporta ${label}`}
+      <button className="btn btn-primary" onClick={() => prepare.mutate()} disabled={prepare.isPending}>
+        {prepare.isPending ? 'Preparazione…' : `📄 Esporta ${label}`}
       </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          // Svuotato subito: scegliere di nuovo lo stesso file deve far ripartire l'esportazione.
-          e.target.value = ''
-          if (file) run.mutate(file)
-        }}
-      />
       {/* flexBasis 100%: il messaggio va a capo sotto i pulsanti della sottosezione. */}
-      {run.isError && (
+      {prepare.isError && (
         <div className="error-banner" style={{ flexBasis: '100%', marginBottom: 0 }}>
-          Esportazione {label} non riuscita: {(run.error as Error).message}
+          {(prepare.error as Error).message}
+        </div>
+      )}
+      {open && (
+        // onMouseDown: vedi DocumentDownloadButton.
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+          <div className="modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Esporta {label}</h3>
+            <p style={{ marginTop: 0 }}>
+              <strong>Carica prima l'ultima versione disponibile del documento</strong>
+              {delivery.inFolder ? ' (proposta dalla cartella review)' : ''}: {intro}
+            </p>
+            <PprFilePicker
+              docLabel={label}
+              fileName={fileName}
+              purpose="a cui aggiungere le righe"
+              hint="Obbligatorio: scegli l'ultima versione disponibile"
+              upload={upload}
+              candidates={candidates}
+              inspect={(b64) => api.documents.workbookInspect(projectId, document, b64)}
+              onLoad={chooseUpload}
+              onClear={() => chooseUpload(null)}
+              showRevision={false}
+            />
+            {candidates
+              .filter((c) => c.error)
+              .map((c) => (
+                <div key={c.filename} className="muted" style={{ color: '#b45309', marginBottom: 8 }}>
+                  Non letto, potrebbe essere la versione più recente: {c.filename} ({c.error})
+                </div>
+              ))}
+            {upload && (
+              <div className="form-row">
+                <label>Ultima version history</label>
+                {upload.info.last_version === null ? (
+                  <span className="muted">
+                    Revision history non riconosciuta nella Cover: versione e revision history saranno da aggiornare a mano.
+                  </span>
+                ) : (
+                  <div className="table-wrap" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 70 }}>Version</th>
+                          <th style={{ width: 130 }}>Author</th>
+                          <th>Change Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>{upload.info.last_version}</td>
+                          <td>{upload.info.last_author ?? <span className="muted">—</span>}</td>
+                          <td style={{ whiteSpace: 'normal' }}>
+                            {upload.info.last_description ?? <span className="muted">—</span>}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+            {lastVersion !== null && (
+              <div className="form-row">
+                <label>Dove aggiungere le modifiche</label>
+                <label style={{ display: 'flex', gap: 6, fontWeight: 400 }}>
+                  <input type="radio" checked={!updateDraft} onChange={() => setDraftChoice(false)} />
+                  Nuova versione {lastVersion + 1}, con una nuova riga nella revision history
+                </label>
+                <label style={{ display: 'flex', gap: 6, fontWeight: 400 }}>
+                  <input type="radio" checked={updateDraft} onChange={() => setDraftChoice(true)} />
+                  Versione {lastVersion} ancora in draft: resta la {lastVersion} e si aggiorna la sua riga di revision history
+                </label>
+                {updateDraft && approved && (
+                  <span className="muted" style={{ color: '#b45309' }}>
+                    Attenzione: la versione {lastVersion} risulta approvata (file "approved").
+                  </span>
+                )}
+              </div>
+            )}
+            {run.isError && (
+              <div className="error-banner">
+                Esportazione {label} non riuscita: {(run.error as Error).message}
+              </div>
+            )}
+            <div className="form-actions">
+              <button className="btn" onClick={close} disabled={run.isPending}>
+                Annulla
+              </button>
+              <button
+                className="btn btn-primary"
+                title={upload ? undefined : "Carica prima l'ultima versione del documento"}
+                onClick={() => upload && run.mutate({ source: upload, draft: updateDraft })}
+                disabled={run.isPending || !upload}
+              >
+                {run.isPending ? 'Esportazione…' : delivery.inFolder ? 'Esporta e salva' : 'Esporta e scarica'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {run.isSuccess && (
@@ -812,7 +947,9 @@ function WorkbookExportButton({
                   </>
                 )}
                 {run.data.version != null
-                  ? `Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
+                  ? run.variables?.draft
+                    ? `Versione ${run.data.version} aggiornata, senza crearne una nuova: la sua riga di revision history riporta le modifiche.`
+                    : `Documento portato alla versione ${run.data.version}, con la nuova riga nella revision history.`
                   : 'Versione e revision history non aggiornate (Cover non riconosciuta): da fare a mano.'}
               </p>
             ) : (
@@ -1217,17 +1354,23 @@ export function DocumentsPage() {
                 </span>
                 <WorkbookExportButton
                   projectId={project.id}
+                  document="design-input"
                   label="Design Input"
+                  fileName="TIH-DI-PTBSYS.xlsx"
                   noun="story"
-                  title={`Scegli il documento Design Input (TIH-DI, .xlsx): le Story di questo increment (lette da Jira: fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes`}
-                  exportFile={(file) => api.documents.designInput(project.id, file)}
+                  intro={`le Story di questo increment (lette da Jira: fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "Design Input - Stories", con "Increment ${project.code}" nella colonna Notes.`}
+                  incrementCode={project.code}
+                  exportFile={(file, draft) => api.documents.designInput(project.id, file, draft)}
                 />
                 <WorkbookExportButton
                   projectId={project.id}
+                  document="user-needs"
                   label="User Needs"
+                  fileName="TIH-UN-PTBSYS.xlsx"
                   noun="user need"
-                  title={`Scegli il documento User Needs (TIH-UN, .xlsx): le User Need di questo increment (lette da Jira: Epic con Epic Category "UN" e fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes`}
-                  exportFile={(file) => api.documents.userNeeds(project.id, file)}
+                  intro={`le User Need di questo increment (lette da Jira: Epic con Epic Category "UN" e fix version ${project.code}, anche non ancora in Done, escluse le obsolete) vengono aggiunte in cima al foglio "User Needs", con "Increment ${project.code}" nella colonna Notes.`}
+                  incrementCode={project.code}
+                  exportFile={(file, draft) => api.documents.userNeeds(project.id, file, draft)}
                 />
                 <RequirementsCheckButton
                   label="Design Input"

@@ -418,25 +418,23 @@ export function BacklogPage() {
     onSuccess: invalidate,
   })
 
-  // Barre del Pianificato modificate col mouse nel Gantt, con le stesse
-  // regole della tabella:
+  // Barre del Pianificato modificate col mouse nel Gantt:
   // - spostare la barra e' come cambiare lo Start pian.: la Fine pian. si
-  //   ricalcola dal Sizing (senza Sizing si sposta di quanto lo Start) e gli
-  //   item sotto si ripianificano in cascata (vedi reschedule);
+  //   ricalcola dal Sizing (senza Sizing si sposta di quanto lo Start);
   // - bordo destro: come cambiare la Fine pian.;
   // - bordo sinistro: nuovo Start con la fine ferma.
   // Coi bordi la durata cambia, quindi il Sizing (gg) diventa quella nuova
   // in giorni lavorativi. In tutti i casi poi i successori lungo i
-  // predecessori (scheduleFromPredecessors).
+  // predecessori (scheduleFromPredecessors). Niente cascata sulla posizione
+  // in lista: riscriverebbe le date messe a mano sugli item sotto, anche
+  // Done e nascosti dai filtri. Per riallinearli c'e' "Pianificazione a
+  // cascata".
   const planGanttChange = (item: BacklogItem, change: GanttBarChange): BacklogPatch[] => {
     const patches = new Map<number, Partial<BacklogItem>>()
     if (change.mode === 'move') {
       const expected_finish =
         addWorkingDays(change.planned_start, item.planned_duration_days, offDays) ?? change.expected_finish
       patches.set(item.id, { planned_start: change.planned_start, expected_finish })
-      const chain = cascadeChain()
-      const index = chain.findIndex((i) => i.id === item.id)
-      if (index !== -1) cascadeAfter(chain, index, expected_finish, patches)
     } else {
       patches.set(item.id, {
         planned_start: change.planned_start,
@@ -448,16 +446,25 @@ export function BacklogPage() {
   }
   // Salvataggio in blocco, con le date nuove subito in cache: al rilascio le
   // barre restano dove le ha lasciate il trascinamento invece di tornare
-  // indietro finche' non arriva la risposta.
+  // indietro finche' non arriva la risposta. Con piu' spostamenti ravvicinati
+  // i salvataggi vanno uno alla volta (scope), una rilettura gia' partita
+  // viene annullata perche' riporterebbe le date vecchie, e si rilegge solo
+  // dopo l'ultimo salvataggio.
+  const ganttMutationKey = ['gantt-bars', project.id]
   const applyGanttChange = useMutation({
+    mutationKey: ganttMutationKey,
+    scope: { id: `gantt-bars-${project.id}` },
     mutationFn: (updates: BacklogPatch[]) => api.backlog.bulkUpdate(project.id, updates),
-    onMutate: (updates) => {
+    onMutate: async (updates) => {
+      await queryClient.cancelQueries({ queryKey: ['backlog', project.id] })
       const byId = new Map(updates.map((u) => [u.id, u]))
       queryClient.setQueryData<BacklogItem[]>(['backlog', project.id], (old) =>
         old?.map((i) => (byId.has(i.id) ? { ...i, ...byId.get(i.id) } : i)),
       )
     },
-    onSettled: invalidate,
+    onSettled: () => {
+      if (queryClient.isMutating({ mutationKey: ganttMutationKey }) === 1) invalidate()
+    },
   })
   const isStartLocked = (item: BacklogItem) => resolvePredecessors(item, itemsByKey).some((p) => p.expected_finish)
 

@@ -20,6 +20,7 @@ from app.services.design_input import (
     UserNeed,
     add_stories,
     add_user_needs,
+    inspect_workbook,
     read_ids,
 )
 from app.services.document_generator import (
@@ -272,10 +273,73 @@ def download_kickoff_presentation(project_id: int, db: Session = Depends(get_db)
     )
 
 
+# Documenti a cui l'esportazione aggiunge righe: foglio dei dati e inizio del
+# nome del file.
+WORKBOOK_DOCUMENTS = {
+    "design-input": (SHEET_NAME, "TIH-DI-PTBSYS"),
+    "user-needs": (USER_NEEDS_SHEET_NAME, "TIH-UN-PTBSYS"),
+}
+
+
+def _get_workbook_document_or_404(document: str) -> tuple[str, str]:
+    if document not in WORKBOOK_DOCUMENTS:
+        raise HTTPException(status_code=404, detail=f"Documento sconosciuto: {document}")
+    return WORKBOOK_DOCUMENTS[document]
+
+
+def _workbook_inspection(content: bytes, sheet_name: str) -> schemas.PprInspection:
+    version, author, description = inspect_workbook(content, sheet_name)
+    return schemas.PprInspection(
+        title=sheet_name, last_version=version, last_author=author, last_description=description
+    )
+
+
+@router.post("/api/projects/{project_id}/documents/{document}/inspect", response_model=schemas.PprInspection)
+def workbook_inspect(project_id: int, document: str, payload: schemas.WorkbookInspectRequest, db: Session = Depends(get_db)):
+    """Controlla il documento scelto nel popup di esportazione (Design Input o
+    User Needs) e ne legge l'ultima versione. Il file non viene salvato."""
+    sheet_name, _ = _get_workbook_document_or_404(document)
+    _get_project_or_404(db, project_id)
+    try:
+        return _workbook_inspection(_decode_b64(payload.file_b64, "Documento"), sheet_name)
+    except DesignInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/projects/{project_id}/documents/{document}/candidates", response_model=list[schemas.PprCandidate])
+def workbook_candidates(project_id: int, document: str, db: Session = Depends(get_db)):
+    """Versioni del documento presenti nella cartella review dell'increment,
+    dalla piu' recente e gia' controllate come in workbook_inspect. Vuoto
+    senza cartella."""
+    sheet_name, prefix = _get_workbook_document_or_404(document)
+    folder = existing_folder(_get_project_or_404(db, project_id).review_documents_folder)
+    if folder is None:
+        return []
+    files = [
+        p
+        for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() == ".xlsx" and p.name.lower().startswith(prefix.lower())
+    ]
+    candidates = []
+    for path in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True):
+        candidate = schemas.PprCandidate(
+            filename=path.name, modified=dt.datetime.fromtimestamp(path.stat().st_mtime)
+        )
+        try:
+            candidate.info = _workbook_inspection(path.read_bytes(), sheet_name)
+        except PermissionError:
+            candidate.error = "aperto in un altro programma: chiudilo e riapri questo popup"
+        except (DesignInputError, OSError) as exc:
+            candidate.error = str(exc)
+        candidates.append(candidate)
+    return candidates
+
+
 @router.post("/api/projects/{project_id}/documents/design-input")
 def add_stories_to_design_input(
     project_id: int,
     filename: str = Query("TIH-DI-PTBSYS.xlsx"),
+    update_draft: bool = Query(False),
     workbook: bytes = Body(..., media_type="application/octet-stream"),
     db: Session = Depends(get_db),
 ):
@@ -284,8 +348,9 @@ def add_stories_to_design_input(
     increment aggiunte in cima al foglio "Design Input - Stories". Le Story
     dell'increment sono lette da Jira: quelle con la fix version
     dell'increment, in qualunque stato (anche non ancora Done), escluse
-    quelle obsolete, che vengono solo segnalate. Il file non viene salvato
-    sul server."""
+    quelle obsolete, che vengono solo segnalate. Con update_draft le
+    modifiche restano nell'ultima versione, non ancora approvata, invece di
+    crearne una nuova. Il file non viene salvato sul server."""
     project = _get_project_or_404(db, project_id)
     own, excluded, obsolete = _increment_requirements(db, project, "Story")
     stories = [
@@ -299,14 +364,25 @@ def add_stories_to_design_input(
         for issue in own
     ]
     try:
-        result = add_stories(workbook, stories, notes=f"Increment {project.code}", obsolete=obsolete)
+        result = add_stories(
+            workbook, stories, notes=f"Increment {project.code}", obsolete=obsolete, update_draft=update_draft
+        )
     except DesignInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-DI-PTBSYS"
-    response = _xlsx_response(result.content, f"{stem} - {project.code}")
+    response = _xlsx_response(result.content, _export_stem("design-input", filename, result.version, project))
     _set_export_headers(response, "X-Stories", result, excluded)
     return response
+
+
+def _export_stem(document: str, filename: str, version: int | None, project: models.Project) -> str:
+    """Nome del file esportato: col numero di versione del documento, non
+    quello del file di partenza (che puo' dire "41-approved")."""
+    _, code = WORKBOOK_DOCUMENTS[document]
+    if version is not None:
+        return f"{code}.{version} - {project.code}"
+    stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or code
+    return stem if stem.endswith(f" - {project.code}") else f"{stem} - {project.code}"
 
 
 def _set_export_headers(response: Response, prefix: str, result: ExportResult, excluded: list[str]) -> None:
@@ -336,6 +412,7 @@ def _issue_number(jira_key: str) -> int:
 def add_user_needs_to_document(
     project_id: int,
     filename: str = Query("TIH-UN-PTBSYS.xlsx"),
+    update_draft: bool = Query(False),
     workbook: bytes = Body(..., media_type="application/octet-stream"),
     db: Session = Depends(get_db),
 ):
@@ -354,12 +431,12 @@ def add_user_needs_to_document(
             [UserNeed(key=issue["key"], text=issue["summary"]) for issue in own],
             notes=f"Increment {project.code}",
             obsolete=obsolete,
+            update_draft=update_draft,
         )
     except DesignInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    stem = re.sub(r"[^\w\-. ()+]", "_", filename.rsplit(".", 1)[0], flags=re.ASCII) or "TIH-UN-PTBSYS"
-    response = _xlsx_response(result.content, f"{stem} - {project.code}")
+    response = _xlsx_response(result.content, _export_stem("user-needs", filename, result.version, project))
     _set_export_headers(response, "X-User-Needs", result, excluded)
     return response
 

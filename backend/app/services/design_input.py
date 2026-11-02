@@ -17,7 +17,7 @@ import io
 import math
 import re
 import zipfile
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 SHEET_NAME = "Design Input - Stories"
 COLUMNS = "ABCDEF"  # ID, Title, Description, Components, Label, Notes
@@ -37,6 +37,11 @@ COVER_SHEET_NAME = "Cover"
 # (es. "TIH-UN-PTBSYS.28").
 _DOC_CODE = r"[A-Z]{2,}(?:-[A-Z0-9]+)+"
 MIN_REVISION_ROW_HEIGHT = 19.5
+# Fogli storici: restano fermi alla loro versione.
+OLD_SHEET_SUFFIX = "_old"
+# I titoli con la versione stanno nelle prime righe dei fogli.
+TITLE_ROWS = 3
+_ISSUE_KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+(?![-\d])")
 
 _ROW = re.compile(r'<row\b[^>]*\br="(\d+)"[^>]*?(?:/>|>.*?</row>)', re.S)
 _CELL = re.compile(r'<c\b[^>]*\br="([A-Z]+)\d+"[^>]*?(?:/>|>.*?</c>)', re.S)
@@ -82,8 +87,9 @@ class ExportResult:
     le righe obsolete presenti nel foglio e scritte come "Removed" nella
     nuova riga di revision history: le righe NON vengono cancellate, vanno
     tolte a mano. `still_present` sono le obsolete ancora nel foglio ma gia'
-    scritte come "Removed" in una revisione precedente. `version` e' la nuova
-    versione del documento, None se la Cover non e' stata aggiornata."""
+    scritte come "Removed" in una revisione precedente. `version` e' la
+    versione del documento dopo l'esportazione, None se la Cover non e' stata
+    aggiornata."""
 
     def __init__(
         self,
@@ -112,6 +118,15 @@ def _normalized(text: str) -> str:
     """Testo ridotto all'essenziale per riconoscere due righe uguali: senza
     differenze di maiuscole, spazi, a capo o punto finale."""
     return re.sub(r"\s+", " ", text or "").strip().rstrip(".").strip().lower()
+
+
+def _current_sheet_names(archive: zipfile.ZipFile) -> list[str]:
+    """Nomi dei fogli del documento, senza quelli storici."""
+    workbook = archive.read("xl/workbook.xml").decode("utf-8")
+    names = [
+        unescape(re.search(r'\bname="([^"]*)"', m.group(0)).group(1)) for m in re.finditer(r"<sheet\b[^>]*>", workbook)
+    ]
+    return [name for name in names if not name.lower().endswith(OLD_SHEET_SUFFIX)]
 
 
 def _sheet_path(archive: zipfile.ZipFile, sheet_name: str) -> str:
@@ -199,11 +214,18 @@ def _sentences(*parts: str) -> str:
     return " ".join(part for part in parts if part)
 
 
-def add_stories(workbook_bytes: bytes, stories: list[Story], notes: str, obsolete: set[str] = frozenset()) -> ExportResult:
+def add_stories(
+    workbook_bytes: bytes,
+    stories: list[Story],
+    notes: str,
+    obsolete: set[str] = frozenset(),
+    update_draft: bool = False,
+) -> ExportResult:
     """Aggiunge al documento le story non ancora presenti. `stories`
     nell'ordine in cui devono comparire dall'alto. `obsolete` sono gli ID
     delle story obsolete: quelle presenti nel foglio vengono scritte come
-    "Removed" nella revision history (vedi ExportResult.removed)."""
+    "Removed" nella revision history (vedi ExportResult.removed).
+    `update_draft`: vedi _export."""
     entries = [
         (
             story.key,
@@ -223,11 +245,16 @@ def add_stories(workbook_bytes: bytes, stories: list[Story], notes: str, obsolet
             f"Added the following new stories for {notes}: {', '.join(added)}." if added else "",
             f"Removed the following obsolete stories: {', '.join(removed)}." if removed else "",
         ),
+        update_draft,
     )
 
 
 def add_user_needs(
-    workbook_bytes: bytes, user_needs: list[UserNeed], notes: str, obsolete: set[str] = frozenset()
+    workbook_bytes: bytes,
+    user_needs: list[UserNeed],
+    notes: str,
+    obsolete: set[str] = frozenset(),
+    update_draft: bool = False,
 ) -> ExportResult:
     """Come add_stories, per il foglio "User Needs" del documento TIH-UN:
     colonne ID, Text, Components (sempre "N/A"), Project Name (copiato dalle
@@ -252,6 +279,7 @@ def add_user_needs(
             f"Added new UN {', '.join(added)} for {notes}." if added else "",
             f"Removed obsolete UN {', '.join(removed)}." if removed else "",
         ),
+        update_draft,
     )
 
 
@@ -272,6 +300,33 @@ def read_ids(workbook_bytes: bytes, sheet_name: str) -> list[str]:
     return [row_id for row_id in ids[ids.index("ID") + 1 :] if row_id]
 
 
+def inspect_workbook(workbook_bytes: bytes, sheet_name: str) -> tuple[int | None, str | None, str | None]:
+    """Controlla un documento prima dell'esportazione: deve avere il foglio
+    giusto. Restituisce versione, autore e descrizione dell'ultima riga della
+    revision history della Cover, tutti None se non si riconosce."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(workbook_bytes))
+        _sheet_path(archive, sheet_name)
+        shared = _shared_strings(archive)
+    except (zipfile.BadZipFile, KeyError, AttributeError, UnicodeDecodeError) as exc:
+        raise DesignInputError("Il file selezionato non è un file Excel (.xlsx) valido") from exc
+
+    try:
+        cover_xml = archive.read(_sheet_path(archive, COVER_SHEET_NAME)).decode("utf-8")
+    except (DesignInputError, KeyError, UnicodeDecodeError):
+        return None, None, None
+    last = _last_revision(cover_xml, shared)
+    if last is None:
+        return None, None, None
+    _, last_xml, version = last
+    cells = _cells_of(last_xml)
+    return (
+        version,
+        _cell_text(cells.get("C", ""), shared).strip() or None,
+        _cell_text(cells.get("E", ""), shared).strip() or None,
+    )
+
+
 def _export(
     workbook_bytes: bytes,
     sheet_name: str,
@@ -280,10 +335,14 @@ def _export(
     entries: list[tuple[str, list, float]],
     obsolete: set[str],
     revision_text,
+    update_draft: bool = False,
 ) -> ExportResult:
     """Aggiunge le righe al foglio e, se ne ha aggiunte o se il foglio
     contiene righe obsolete non ancora dichiarate, porta avanti la versione
-    del documento con una nuova riga di revision history."""
+    del documento con una nuova riga di revision history. Con `update_draft`
+    l'ultima versione non e' ancora approvata: resta quella, e la sua riga di
+    revision history si aggiorna. In entrambi i casi il titolo di tutti i
+    fogli non storici riporta la versione del documento."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(workbook_bytes))
         sheet_path = _sheet_path(archive, sheet_name)
@@ -318,13 +377,24 @@ def _export(
     # versione resta da aggiornare a mano (version = None).
     version = None
     try:
-        revised = _add_revision(cover_xml, shared, revision_text(added_keys, removed)) if cover_xml else None
+        if not cover_xml:
+            revised = None
+        elif update_draft:
+            revised = _update_revision(cover_xml, shared, revision_text, added_keys, removed)
+        else:
+            revised = _add_revision(cover_xml, shared, revision_text(added_keys, removed))
     except (KeyError, AttributeError):
         revised = None
     if revised:
         cover_xml, old_version, version = revised
+        code = _document_code(cover_xml, shared, old_version)
         parts[cover_path] = _bump_version(cover_xml, shared, old_version, version)
         parts[sheet_path] = _bump_version(new_xml, shared, old_version, version)
+        if code:
+            for name in _current_sheet_names(archive):
+                path = _sheet_path(archive, name)
+                if path not in parts:
+                    parts[path] = _retitle_sheet(archive.read(path).decode("utf-8"), shared, code, version)
     else:
         # Niente revisione scritta: le obsolete non risultano dichiarate.
         removed, still_present = [], present
@@ -507,11 +577,9 @@ def _removed_in_revisions(cover_xml: str, shared: list[str]) -> set[str]:
     return removed
 
 
-def _add_revision(cover_xml: str, shared: list[str], text: str) -> tuple[str, int, int] | None:
-    """Aggiunge una riga in fondo alla revision history della Cover (colonne
-    Version / Author / Change Description), copiando formato e autore
-    dall'ultima revisione. Restituisce (XML aggiornato, versione precedente,
-    nuova versione), o None se la revision history non si riconosce."""
+def _last_revision(cover_xml: str, shared: list[str]) -> tuple[int, str, int] | None:
+    """Ultima riga della revision history della Cover: (numero di riga, XML
+    della riga, versione), o None se la revision history non si riconosce."""
     data = re.search(r"<sheetData>(.*)</sheetData>", cover_xml, re.S)
     if data is None:
         return None
@@ -524,9 +592,18 @@ def _add_revision(cover_xml: str, shared: list[str], text: str) -> tuple[str, in
         for number, row_xml in rows
         if number > header[0] and (version := _cell_number(_cells_of(row_xml).get("B", ""))) is not None
     ]
-    if not revisions:
+    return max(revisions) if revisions else None
+
+
+def _add_revision(cover_xml: str, shared: list[str], text: str) -> tuple[str, int, int] | None:
+    """Aggiunge una riga in fondo alla revision history della Cover (colonne
+    Version / Author / Change Description), copiando formato e autore
+    dall'ultima revisione. Restituisce (XML aggiornato, versione precedente,
+    nuova versione), o None se la revision history non si riconosce."""
+    last = _last_revision(cover_xml, shared)
+    if last is None:
         return None
-    last_row, last_xml, old_version = max(revisions)
+    last_row, last_xml, old_version = last
     new_row, new_version = last_row + 1, old_version + 1
 
     # Stessa riga dell'ultima revisione (stili, celle vuote con i bordi,
@@ -540,19 +617,68 @@ def _add_revision(cover_xml: str, shared: list[str], text: str) -> tuple[str, in
     row_xml = row_xml.replace(cells["B"], re.sub(r"<v>\d+</v>", f"<v>{new_version}</v>", cells["B"]))
     row_xml = row_xml.replace(description, _cell("E", new_row, style.group(1) if style else "", text))
 
-    # Altezza: quante righe di testo servono nella larghezza delle colonne
-    # unite della descrizione (es. E:L).
-    merges = re.findall(rf'<mergeCell\b[^>]*\bref="([A-Z]+){last_row}:([A-Z]+){last_row}"', cover_xml)
+    merges = _description_merges(cover_xml, last_row)
+    row_xml = _fit_description(cover_xml, row_xml, merges, text)
+    new_merges = [f'<mergeCell ref="{start}{new_row}:{end}{new_row}"/>' for start, end in merges]
+    return _insert_rows(cover_xml, new_row, [row_xml], new_merges), old_version, new_version
+
+
+def _description_merges(cover_xml: str, row: int) -> list[tuple[str, str]]:
+    return re.findall(rf'<mergeCell\b[^>]*\bref="([A-Z]+){row}:([A-Z]+){row}"', cover_xml)
+
+
+def _fit_description(cover_xml: str, row_xml: str, merges: list[tuple[str, str]], text: str) -> str:
+    """Altezza della riga: quante righe di testo servono nella larghezza
+    delle colonne unite della descrizione (es. E:L)."""
     last_column = next((end for start, end in merges if start == "E"), "E")
     widths = _column_widths(cover_xml)
     width = sum(widths.get(i, 9.14) for i in range(_column_index("E"), _column_index(last_column) + 1))
     height = max(MIN_REVISION_ROW_HEIGHT, _wrapped_lines(text, max(20, int(width * 0.95))) * 15.0 + 6.0)
     opening = re.match(r"<row\b[^>]*>", row_xml).group(0)
     resized = re.sub(r'\s(?:ht|customHeight)="[^"]*"', "", opening)[:-1] + f' ht="{round(height, 2)}" customHeight="1">'
-    row_xml = resized + row_xml[len(opening) :]
+    return resized + row_xml[len(opening) :]
 
-    new_merges = [f'<mergeCell ref="{start}{new_row}:{end}{new_row}"/>' for start, end in merges]
-    return _insert_rows(cover_xml, new_row, [row_xml], new_merges), old_version, new_version
+
+def _update_revision(
+    cover_xml: str, shared: list[str], revision_text, added: list[str], removed: list[str]
+) -> tuple[str, int, int] | None:
+    """Aggiunge le modifiche alla descrizione dell'ultima revisione, senza
+    cambiare versione. Se la descrizione e' quella generata da qui le chiavi
+    entrano nei suoi elenchi; se e' stata scritta a mano resta intatta e la
+    frase nuova va in coda. Restituisce (XML aggiornato, versione, versione)."""
+    last = _last_revision(cover_xml, shared)
+    if last is None:
+        return None
+    row, row_xml, version = last
+    cells = _cells_of(row_xml)
+    description = cells.get("E")
+    if description is None:
+        return None
+    old = _cell_text(description, shared).strip()
+
+    def keys_after(word: str) -> list[str]:
+        sentences = re.findall(rf"(?i)\b{word}\b[^.]*", old)
+        return [key for sentence in sentences for key in _ISSUE_KEY.findall(sentence)]
+
+    old_added, old_removed = keys_after("added"), keys_after("removed")
+    if revision_text(old_added, old_removed) == old:
+        text = revision_text(old_added + added, old_removed + removed)
+    else:
+        text = f"{old} {revision_text(added, removed)}".strip()
+    style = re.search(r'\bs="(\d+)"', description)
+    new_row = row_xml.replace(description, _cell("E", row, style.group(1) if style else "", text))
+    new_row = _fit_description(cover_xml, new_row, _description_merges(cover_xml, row), text)
+    return cover_xml.replace(row_xml, new_row, 1), version, version
+
+
+def _document_code(cover_xml: str, shared: list[str], version: int) -> str | None:
+    """Codice del documento (es. "TIH-DI-PTBSYS") dal titolo della Cover."""
+    pattern = re.compile(rf"({_DOC_CODE})\.{version}(?!\d)")
+    for cell in _CELL.finditer(cover_xml):
+        found = pattern.search(_cell_text(cell.group(0), shared))
+        if found:
+            return found.group(1)
+    return None
 
 
 def _column_index(letters: str) -> int:
@@ -578,15 +704,27 @@ def _bump_version(sheet_xml: str, shared: list[str], old_version: int, new_versi
     riportano la versione corrente del documento (celle e intestazione/pie'
     di pagina). I riferimenti a versioni diverse da quella corrente (es. i
     fogli storici fermi a una versione precedente) non vengono toccati."""
-    pattern = re.compile(rf"({_DOC_CODE})\.{old_version}(?!\d)")
-    replacement = rf"\g<1>.{new_version}"
+    return _replace_titles(sheet_xml, shared, re.compile(rf"({_DOC_CODE})\.{old_version}(?!\d)"), rf"\g<1>.{new_version}")
 
+
+def _retitle_sheet(sheet_xml: str, shared: list[str], code: str, version: int) -> str:
+    """Porta alla versione del documento i titoli di un altro foglio non
+    storico, da qualunque versione fossero rimasti. Solo le prime righe: nel
+    resto del foglio ci sono i testi dei requisiti."""
+    return _replace_titles(sheet_xml, shared, re.compile(rf"{re.escape(code)}\.\d+"), f"{code}.{version}", TITLE_ROWS)
+
+
+def _replace_titles(
+    sheet_xml: str, shared: list[str], pattern: re.Pattern, replacement: str, max_row: int | None = None
+) -> str:
     def fix_cell(m: re.Match) -> str:
         cell_xml = m.group(0)
+        ref = re.search(r'\br="([A-Z]+)(\d+)"', cell_xml)
+        if max_row is not None and int(ref.group(2)) > max_row:
+            return cell_xml
         text = _cell_text(cell_xml, shared)
         if not pattern.search(text):
             return cell_xml
-        ref = re.search(r'\br="([A-Z]+)(\d+)"', cell_xml)
         style = re.search(r'\bs="(\d+)"', cell_xml)
         return _cell(ref.group(1), int(ref.group(2)), style.group(1) if style else "", pattern.sub(replacement, text))
 

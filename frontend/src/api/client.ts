@@ -94,8 +94,16 @@ export type WorkbookExportResult = {
   stillPresent: string[]
 }
 
-async function addRowsToWorkbook(path: string, file: File, headerPrefix: string): Promise<WorkbookExportResult> {
-  const response = await fetch(`/api${path}?${new URLSearchParams({ filename: file.name })}`, {
+export type WorkbookDocument = 'design-input' | 'user-needs'
+
+async function addRowsToWorkbook(
+  path: string,
+  file: File,
+  headerPrefix: string,
+  updateDraft: boolean,
+): Promise<WorkbookExportResult> {
+  const qs = new URLSearchParams({ filename: file.name, update_draft: String(updateDraft) })
+  const response = await fetch(`/api${path}?${qs}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
     body: file,
@@ -385,10 +393,15 @@ export const api = {
     kickoffPresentation: (projectId: number) =>
       downloadFile(`/projects/${projectId}/documents/kickoff-presentation`),
     // Design Input (TIH-DI) e User Needs (TIH-UN): vedi addRowsToWorkbook.
-    designInput: (projectId: number, file: File) =>
-      addRowsToWorkbook(`/projects/${projectId}/documents/design-input`, file, 'X-Stories'),
-    userNeeds: (projectId: number, file: File) =>
-      addRowsToWorkbook(`/projects/${projectId}/documents/user-needs`, file, 'X-User-Needs'),
+    designInput: (projectId: number, file: File, updateDraft: boolean) =>
+      addRowsToWorkbook(`/projects/${projectId}/documents/design-input`, file, 'X-Stories', updateDraft),
+    userNeeds: (projectId: number, file: File, updateDraft: boolean) =>
+      addRowsToWorkbook(`/projects/${projectId}/documents/user-needs`, file, 'X-User-Needs', updateDraft),
+    // Popup di esportazione: stesso formato dei documenti PPR, vedi PprFilePicker.
+    workbookInspect: (projectId: number, document: WorkbookDocument, fileB64: string) =>
+      post<PprInspection>(`/projects/${projectId}/documents/${document}/inspect`, { file_b64: fileB64 }),
+    workbookCandidates: (projectId: number, document: WorkbookDocument) =>
+      request<PprCandidate[]>(`/projects/${projectId}/documents/${document}/candidates`),
     // Confronta il documento (Design Input o User Needs) con Jira: il file non
     // viene modificato.
     designInputCheck: (projectId: number, file: File) => checkWorkbook(projectId, 'design-input', file),
@@ -445,6 +458,10 @@ export const api = {
   reviewFolder: {
     status: (projectId: number) => request<FolderStatus>(`/projects/${projectId}/review-folder`),
     save: saveToReviewFolder,
+    read: async (projectId: number, filename: string) => {
+      const { blob } = await downloadFile(`/projects/${projectId}/review-folder/files`, { filename })
+      return new File([blob], filename)
+    },
     // Apre la cartella in Esplora risorse, o un suo file, sulla macchina del backend.
     open: (projectId: number, filename?: string) =>
       post<void>(`/projects/${projectId}/review-folder/open${filename ? `?${new URLSearchParams({ filename })}` : ''}`),

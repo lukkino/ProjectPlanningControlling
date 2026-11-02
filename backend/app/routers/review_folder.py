@@ -1,6 +1,7 @@
 import os
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -50,6 +51,19 @@ def save_review_file(
         # Tipicamente il file e' aperto in Excel/PowerPoint.
         raise HTTPException(status_code=423, detail=f"{filename} non si puo' scrivere: e' aperto in un altro programma?") from exc
     return schemas.SavedFile(filename=path.name)
+
+
+@router.get("/api/projects/{project_id}/review-folder/files")
+def read_review_file(project_id: int, filename: str = Query(...), db: Session = Depends(get_db)):
+    """Contenuto di un file della cartella review."""
+    folder = require_folder(_get_project_or_404(db, project_id).review_documents_folder, LABEL)
+    path = file_in_folder(folder, filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File non trovato: {filename}")
+    try:
+        return Response(content=path.read_bytes(), media_type="application/octet-stream")
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=f"{filename} non si puo' leggere: e' aperto in un altro programma?") from exc
 
 
 @router.post("/api/projects/{project_id}/review-folder/open", status_code=204)
