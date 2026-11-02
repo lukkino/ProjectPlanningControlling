@@ -405,6 +405,7 @@ export const api = {
       request<PprCandidate[]>(`/projects/${projectId}/documents/${document}/candidates`),
     // Confronta il documento (Design Input o User Needs) con Jira: il file non
     // viene modificato.
+    scopeNarrative: (projectId: number) => request<{ html: string }>(`/projects/${projectId}/documents/scope-narrative`),
     incrementRequirements: (projectId: number, document: WorkbookDocument) =>
       request<IncrementRequirements>(`/projects/${projectId}/documents/${document}/requirements`),
     designInputCheck: (projectId: number, file: File) => checkWorkbook(projectId, 'design-input', file),

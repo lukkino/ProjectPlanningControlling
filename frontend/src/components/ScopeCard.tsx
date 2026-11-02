@@ -363,18 +363,46 @@ function ScopeEditor({ initialText, saving, error, onSave, onCancel }: EditorPro
   )
 }
 
-type Props = { projectId: number; scope: string | null }
+type Props = { projectId: number; scope: string | null; narrative: string | null }
+
+type ScopeTab = 'schematic' | 'narrative'
+
+const SCOPE_TABS: { value: ScopeTab; label: string }[] = [
+  { value: 'schematic', label: 'Schematico' },
+  { value: 'narrative', label: 'Discorsivo' },
+]
+
+// Copia sia il testo formattato, per Word e Outlook, sia quello semplice,
+// con una riga vuota tra i blocchi.
+async function copyRichText(html: string) {
+  const blocks = new DOMParser().parseFromString(html, 'text/html').body.children
+  const plain = Array.from(blocks, (block) => block.textContent).join('\n\n')
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plain], { type: 'text/plain' }),
+    }),
+  ])
+}
 
 // Scope dell'increment modificabile direttamente dalla Dashboard, senza
 // passare dal modale "Modifica increment", con un editor di testo formattato
 // (stili, colori, elenchi annidati, tabelle, link...). Le caselle degli
-// elenchi di controllo si spuntano anche senza entrare in modifica.
-export function ScopeCard({ projectId, scope }: Props) {
+// elenchi di controllo si spuntano anche senza entrare in modifica. Il tab
+// Discorsivo tiene una seconda versione, da copiare in Change Order e Release
+// Notice: si parte da una proposta ricavata dal backlog, che resta da
+// rivedere e diventa definitiva solo col Salva.
+export function ScopeCard({ projectId, scope, narrative }: Props) {
+  const [tab, setTab] = useState<ScopeTab>('schematic')
   const [editing, setEditing] = useState(false)
+  const [editorText, setEditorText] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const queryClient = useQueryClient()
+  const current = tab === 'schematic' ? scope : narrative
 
   const save = useMutation({
-    mutationFn: (value: string | null) => api.projects.update(projectId, { scope: value }),
+    mutationFn: (value: string | null) =>
+      api.projects.update(projectId, tab === 'schematic' ? { scope: value } : { scope_narrative: value }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -384,9 +412,30 @@ export function ScopeCard({ projectId, scope }: Props) {
     },
   })
 
-  const startEditing = () => {
+  const startEditing = (text: string | null) => {
     save.reset()
+    setEditorText(text)
     setEditing(true)
+  }
+
+  const generate = useMutation({
+    mutationFn: () => api.documents.scopeNarrative(projectId),
+    onSuccess: ({ html }) => startEditing(html),
+  })
+
+  const copy = useMutation({
+    mutationFn: () => copyRichText(narrative ?? ''),
+    onSuccess: () => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    },
+  })
+
+  const chooseTab = (value: ScopeTab) => {
+    save.reset()
+    generate.reset()
+    copy.reset()
+    setTab(value)
   }
 
   return (
@@ -394,27 +443,69 @@ export function ScopeCard({ projectId, scope }: Props) {
       <div className="page-header" style={{ marginBottom: 10, alignItems: 'center' }}>
         <h3 style={{ margin: 0 }}>Scope</h3>
         {!editing && (
-          <button className="btn" onClick={startEditing}>
-            Modifica
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {tab === 'narrative' && narrative && (
+              <button className="btn" onClick={() => copy.mutate()} disabled={copy.isPending}>
+                {copied ? 'Copiato' : 'Copia'}
+              </button>
+            )}
+            {tab === 'narrative' && (
+              <button
+                className="btn"
+                title="Propone un testo ricavato da Scope, Story e Bug in scope. Si apre in modifica: il testo salvato cambia solo col Salva."
+                onClick={() => generate.mutate()}
+                disabled={generate.isPending}
+              >
+                {generate.isPending ? 'Generazione...' : narrative ? 'Rigenera dal backlog' : 'Genera dal backlog'}
+              </button>
+            )}
+            <button className="btn" onClick={() => startEditing(current)}>
+              Modifica
+            </button>
+          </div>
         )}
       </div>
 
-      {!editing &&
-        (scope ? (
-          <RichText text={scope} onCheck={(value) => save.mutate(value)} syncPaused={save.isPending} />
-        ) : (
-          <p className="muted" style={{ margin: 0 }}>Nessuno scope definito.</p>
+      <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
+        {SCOPE_TABS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={tab === option.value}
+            className={tab === option.value ? 'active' : undefined}
+            disabled={editing}
+            onClick={() => chooseTab(option.value)}
+          >
+            {option.label}
+          </button>
         ))}
-      {!editing && save.isError && (
+      </div>
+
+      {!editing &&
+        (current ? (
+          <RichText
+            key={tab}
+            text={current}
+            onCheck={tab === 'schematic' ? (value) => save.mutate(value) : undefined}
+            syncPaused={save.isPending}
+          />
+        ) : (
+          <p className="muted" style={{ margin: 0 }}>
+            {tab === 'schematic' ? 'Nessuno scope definito.' : 'Nessun testo discorsivo: generalo dal backlog o scrivilo a mano.'}
+          </p>
+        ))}
+      {!editing && (save.isError || generate.isError || copy.isError) && (
         <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
-          Salvataggio non riuscito: {(save.error as Error).message}
+          {save.isError && `Salvataggio non riuscito: ${(save.error as Error).message}`}
+          {generate.isError && `Generazione non riuscita: ${(generate.error as Error).message}`}
+          {copy.isError && `Copia non riuscita: ${(copy.error as Error).message}`}
         </div>
       )}
 
       {editing && (
         <ScopeEditor
-          initialText={scope}
+          initialText={editorText}
           saving={save.isPending}
           error={save.error as Error | null}
           onSave={(value) => save.mutate(value)}

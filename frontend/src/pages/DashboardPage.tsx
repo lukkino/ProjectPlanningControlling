@@ -528,7 +528,7 @@ export function DashboardPage() {
         )}
       </div>
 
-      <ScopeCard projectId={project.id} scope={project.scope} />
+      <ScopeCard projectId={project.id} scope={project.scope} narrative={project.scope_narrative} />
 
       <div className="card">
         <div className="grid-4">

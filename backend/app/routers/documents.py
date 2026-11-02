@@ -40,7 +40,7 @@ from app.services.ppr_document import (
 )
 from app.services.project_folders import existing_folder, file_in_folder, require_folder
 from app.services.jira_client import JiraClientError, fetch_requirement_issues
-from app.services.kickoff_presentation import generate_kickoff_presentation
+from app.services.kickoff_presentation import generate_kickoff_presentation, scope_narrative_html
 
 router = APIRouter(tags=["documents"])
 
@@ -259,18 +259,29 @@ def download_kickoff_presentation(project_id: int, db: Session = Depends(get_db)
     major requirements e timeline compilati dai dati dell'increment (vedi
     services/kickoff_presentation.py)."""
     project = _get_project_or_404(db, project_id)
-    # Numero del case Salesforce dei Bug dell'increment che sono complaint.
-    bug_keys = [i.jira_key for i in project.backlog_items if i.issue_type == "Bug"]
-    complaint_numbers = {
-        c.jira_key: c.salesforce_case_number or ""
-        for c in db.query(models.Complaint).filter(models.Complaint.jira_key.in_(bug_keys))
-    }
-    content, filename_stem = generate_kickoff_presentation(project, complaint_numbers)
+    content, filename_stem = generate_kickoff_presentation(project, _complaint_numbers(db, project))
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename_stem}.pptx"'},
     )
+
+
+def _complaint_numbers(db: Session, project: models.Project) -> dict[str, str]:
+    """Numero del case Salesforce dei Bug dell'increment che sono complaint."""
+    bug_keys = [i.jira_key for i in project.backlog_items if i.issue_type == "Bug"]
+    return {
+        c.jira_key: c.salesforce_case_number or ""
+        for c in db.query(models.Complaint).filter(models.Complaint.jira_key.in_(bug_keys))
+    }
+
+
+@router.get("/api/projects/{project_id}/documents/scope-narrative", response_model=schemas.ScopeNarrative)
+def generate_scope_narrative(project_id: int, db: Session = Depends(get_db)):
+    """Proposta di Scope discorsivo ricavata da Scope, Story e Bug in scope,
+    con le regole della presentazione di Kick-off. Non viene salvata."""
+    project = _get_project_or_404(db, project_id)
+    return schemas.ScopeNarrative(html=scope_narrative_html(project, _complaint_numbers(db, project)))
 
 
 # Documenti a cui l'esportazione aggiunge righe: foglio dei dati e inizio del

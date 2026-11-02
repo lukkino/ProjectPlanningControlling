@@ -470,6 +470,7 @@ class ProjectBase(BaseModel):
     name: str
     status: str = "Kick-off"
     scope: str | None = None
+    scope_narrative: str | None = None
     start_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
@@ -496,6 +497,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = None
     status: str | None = None
     scope: str | None = None
+    scope_narrative: str | None = None
     start_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
@@ -652,6 +654,10 @@ class DocumentRevisionMeta(BaseModel):
 
     next_version: int
     last_revision_text: str
+
+
+class ScopeNarrative(BaseModel):
+    html: str
 
 
 class IncrementRequirement(BaseModel):

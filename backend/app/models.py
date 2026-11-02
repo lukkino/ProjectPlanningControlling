@@ -120,6 +120,8 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(64), default="Kick-off")
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Lo Scope in forma discorsiva, per Change Order e Release Notice.
+    scope_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Copia in sola lettura della data aggiornata della fase "Code freeze"
     # (la data ufficiale, vedi routers/projects.sync_code_freeze): la

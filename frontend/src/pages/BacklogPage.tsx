@@ -59,6 +59,12 @@ const STATUS_SORT_RANK: Record<string, number> = { Done: 0, 'In Progress': 1, 'T
 const CVE_PATTERN = /\bCVE\b/i
 const isCveBug = (i: BacklogItem) => i.issue_type?.toLowerCase() === 'bug' && CVE_PATTERN.test(i.summary ?? '')
 
+// Complaint: Bug presente nell'area Complaints o col numero del case in testa
+// al summary ("[69019] Missing ..."), come nella presentazione di Kick-off.
+const COMPLAINT_PREFIX_PATTERN = /^\s*\[\d{4,6}\]/
+const isComplaintBug = (i: BacklogItem, complaintKeys: Set<string>) =>
+  i.issue_type?.toLowerCase() === 'bug' && (complaintKeys.has(i.jira_key) || COMPLAINT_PREFIX_PATTERN.test(i.summary ?? ''))
+
 // v2: "Durata effettiva" spostata accanto a "Sizing (gg)". Un ordine gia'
 // salvato con la v1 viene migrato riposizionando solo quella colonna, cosi'
 // il resto dell'ordine personalizzato si conserva.
@@ -143,6 +149,7 @@ export function BacklogPage() {
   const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
   const [hideDone, setHideDone] = useState(true)
   const [hideCve, setHideCve] = useState(true)
+  const [onlyComplaints, setOnlyComplaints] = useState(false)
   // Filtro "Impacts on": nessun valore selezionato = nessun filtro; con piu'
   // valori, l'item deve averne almeno uno ('any') o tutti ('all').
   const [impactFilter, setImpactFilter] = useState<Set<string>>(new Set())
@@ -213,6 +220,8 @@ export function BacklogPage() {
 
   // Stessa query cache di ForecastingPage: serve solo a capire quali PBI
   // rientrano nell'ultima previsione, per evidenziarli in tabella.
+  const { data: complaints } = useQuery({ queryKey: ['complaints'], queryFn: api.complaints.list })
+
   const { data: simulations } = useQuery({
     queryKey: ['forecasting', project.id],
     queryFn: () => api.forecasting.list(project.id),
@@ -1152,6 +1161,8 @@ export function BacklogPage() {
   }
 
   const cveCount = (items ?? []).filter(isCveBug).length
+  const complaintKeys = new Set((complaints ?? []).map((c) => c.jira_key))
+  const complaintCount = (items ?? []).filter((i) => isComplaintBug(i, complaintKeys)).length
 
   const impactCounts = (items ?? []).reduce<Record<string, number>>((acc, i) => {
     for (const impact of impactsOf(i)) acc[impact] = (acc[impact] ?? 0) + 1
@@ -1179,6 +1190,7 @@ export function BacklogPage() {
       (!onlyCodefreeze || i.included_in_codefreeze || i.is_activity) &&
       (!hideDone || i.status !== 'Done') &&
       (!hideCve || !isCveBug(i)) &&
+      (!onlyComplaints || isComplaintBug(i, complaintKeys)) &&
       (!i.issue_type || !hiddenTypes.has(i.issue_type)) &&
       matchesImpactFilter(i),
   )
@@ -1483,6 +1495,14 @@ export function BacklogPage() {
         >
           <input type="checkbox" checked={hideCve} onChange={(e) => setHideCve(e.target.checked)} />
           Nascondi bug CVE ({cveCount})
+        </label>
+
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title="Bug presenti nell'area Complaints o col numero del case in testa al summary"
+        >
+          <input type="checkbox" checked={onlyComplaints} onChange={(e) => setOnlyComplaints(e.target.checked)} />
+          Mostra solo Complaints ({complaintCount})
         </label>
 
         <label

@@ -264,6 +264,7 @@ export type Project = {
   name: string
   status: string
   scope: string | null
+  scope_narrative: string | null
   start_date: string | null
   code_freeze_date: string | null
   planned_finish_date: string | null

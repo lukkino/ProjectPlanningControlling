@@ -283,6 +283,9 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN scenarios_folder TEXT"))
                 conn.execute(text("ALTER TABLE projects ADD COLUMN review_documents_folder TEXT"))
+        if "scope_narrative" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN scope_narrative TEXT"))
 
         # estimated_budget_hours/estimated_budget_material sono relitti di
         # uno schema precedente allo split Project/Increment (il budget vive

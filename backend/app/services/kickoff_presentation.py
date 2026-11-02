@@ -19,6 +19,7 @@ import math
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
+from html import escape
 from io import BytesIO
 
 from pptx import Presentation
@@ -306,6 +307,18 @@ def _scope_text(project: models.Project, topics: list[_Topic], complaint_numbers
     if not paragraphs:
         paragraphs.append([("No Story or Bug in scope for this increment.", False)])
     return paragraphs
+
+
+def scope_narrative_html(project: models.Project, complaint_numbers: dict[str, str]) -> str:
+    """Lo stesso testo discorsivo della presentazione, come HTML per l'editor
+    della Dashboard."""
+    paragraphs = _scope_text(project, _topics(project, _requirement_stories(project)), complaint_numbers)
+    return "".join(
+        "<p>"
+        + "".join(f"<strong>{escape(text, quote=False)}</strong>" if bold else escape(text, quote=False) for text, bold in runs)
+        + "</p>"
+        for runs in paragraphs
+    )
 
 
 def _separator(index: int, count: int) -> str:

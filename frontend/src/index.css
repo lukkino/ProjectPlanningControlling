@@ -244,7 +244,8 @@ input, select, textarea {
   margin-bottom: 20px;
 }
 
-.tabs a {
+.tabs a,
+.tabs button {
   padding: 10px 16px;
   text-decoration: none;
   color: var(--text-muted);
@@ -252,7 +253,19 @@ input, select, textarea {
   border-bottom: 2px solid transparent;
 }
 
-.tabs a.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.tabs button {
+  background: none;
+  border-width: 0 0 2px;
+  border-style: solid;
+  border-color: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tabs button:disabled { cursor: default; }
+
+.tabs a.active,
+.tabs button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 
 .page-header {
   display: flex;
