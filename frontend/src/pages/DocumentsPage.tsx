@@ -5,6 +5,7 @@ import type {
   BacklogItem,
   DocumentRevisionMeta,
   ImplementedByTask,
+  IncrementRequirement,
   PprCandidate,
   PprDeliverable,
   PprInspection,
@@ -1176,6 +1177,114 @@ function RequirementsCheckButton({
   )
 }
 
+function IncrementRequirementsTable({
+  items,
+  withDetails,
+  withReason,
+}: {
+  items: IncrementRequirement[]
+  withDetails: boolean
+  withReason?: boolean
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 110 }}>ID</th>
+            <th>Summary</th>
+            <th>Stato</th>
+            {withDetails && <th>Components</th>}
+            {withDetails && <th>Labels</th>}
+            {withReason && <th>Motivo</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.key}>
+              <td>{jiraLink(item.key)}</td>
+              <td style={{ whiteSpace: 'normal', minWidth: 260 }}>{item.summary}</td>
+              <td>{item.status}</td>
+              {withDetails && <td style={{ whiteSpace: 'normal' }}>{item.components.join(', ') || '—'}</td>}
+              {withDetails && <td style={{ whiteSpace: 'normal' }}>{item.labels.join(', ') || '—'}</td>}
+              {withReason && <td>{item.reason}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const REQUIREMENT_DOCUMENTS: { document: WorkbookDocument; label: string }[] = [
+  { document: 'design-input', label: 'Story (Design Input)' },
+  { document: 'user-needs', label: 'User Needs' },
+]
+
+// Story e User Need create per l'increment, cioe' quelle che l'esportazione
+// aggiunge a Design Input e User Needs. Vengono lette da Jira alla prima
+// scelta, non all'apertura della pagina: la lettura richiede qualche secondo.
+function IncrementRequirementsCard({ projectId, code }: { projectId: number; code: string }) {
+  const [document, setDocument] = useState<WorkbookDocument | null>(null)
+  const query = useQuery({
+    queryKey: ['increment-requirements', projectId, document],
+    queryFn: () => api.documents.incrementRequirements(projectId, document as WorkbookDocument),
+    enabled: document !== null,
+  })
+  const data = query.data
+  const withDetails = document === 'design-input'
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Story e User Need dell'increment</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Da Jira, con le stesse regole dell'esportazione: fix version {code}, in qualunque stato, escluse le obsolete.
+      </p>
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+        {REQUIREMENT_DOCUMENTS.map((option) => (
+          <button
+            key={option.document}
+            className={document === option.document ? 'btn btn-primary' : 'btn'}
+            onClick={() => setDocument(option.document)}
+          >
+            {option.label}
+          </button>
+        ))}
+        {document && (
+          <button className="btn" onClick={() => query.refetch()} disabled={query.isFetching}>
+            {query.isFetching ? 'Lettura da Jira...' : '↻ Aggiorna da Jira'}
+          </button>
+        )}
+      </div>
+      {query.isError && (
+        <div className="error-banner" style={{ marginTop: 12, marginBottom: 0 }}>
+          Lettura da Jira non riuscita: {(query.error as Error).message}
+        </div>
+      )}
+      {data && (
+        <>
+          <div style={{ marginTop: 12, marginBottom: 8 }}>
+            <strong>Vanno nel documento ({data.included.length})</strong>
+          </div>
+          {data.included.length > 0 ? (
+            <IncrementRequirementsTable items={data.included} withDetails={withDetails} />
+          ) : (
+            <div className="muted">Nessuna issue con questa fix version.</div>
+          )}
+          {data.left_out.length > 0 && (
+            <>
+              <div style={{ marginTop: 16, marginBottom: 8 }}>
+                <strong>Con la stessa fix version, ma lasciate fuori ({data.left_out.length})</strong>
+              </div>
+              <IncrementRequirementsTable items={data.left_out} withDetails={withDetails} withReason />
+            </>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function parseImplementedBy(json: string | null): ImplementedByTask[] {
   if (!json) return []
   try {
@@ -1414,6 +1523,8 @@ export function DocumentsPage() {
           </div>
         </div>
       ))}
+
+      <IncrementRequirementsCard projectId={project.id} code={project.code} />
 
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, fontSize: 13 }}>

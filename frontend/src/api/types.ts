@@ -352,6 +352,22 @@ export type DocumentRevisionMeta = {
   last_revision_text: string
 }
 
+export type IncrementRequirement = {
+  key: string
+  summary: string
+  status: string
+  components: string[]
+  labels: string[]
+  reason: string
+}
+
+// Story o User Need con la fix version dell'increment: quelle che vanno nel
+// documento e quelle lasciate fuori.
+export type IncrementRequirements = {
+  included: IncrementRequirement[]
+  left_out: IncrementRequirement[]
+}
+
 export type RequirementCheckItem = {
   key: string
   summary: string

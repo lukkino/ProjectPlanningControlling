@@ -279,6 +279,7 @@ WORKBOOK_DOCUMENTS = {
     "design-input": (SHEET_NAME, "TIH-DI-PTBSYS"),
     "user-needs": (USER_NEEDS_SHEET_NAME, "TIH-UN-PTBSYS"),
 }
+REQUIREMENT_ISSUE_TYPES = {"design-input": "Story", "user-needs": "Epic"}
 
 
 def _get_workbook_document_or_404(document: str) -> tuple[str, str]:
@@ -478,18 +479,51 @@ def _increment_requirements(
     esserci."""
     everything = _fetch_requirements(db, project, issue_type)
     obsolete = {issue["key"] for issue in everything if issue["eligible"] and issue["obsolete"]}
-    issues = [issue for issue in everything if _in_increment(issue, project)]
-    own = sorted(
-        (issue for issue in issues if issue["eligible"] and not issue["obsolete"]),
+    own, left_out = _split_increment(everything, project)
+    return own, [f"{issue['key']} ({_left_out_reason(issue)})" for issue in left_out], obsolete
+
+
+def _split_increment(issues: list[dict], project: models.Project) -> tuple[list[dict], list[dict]]:
+    """Le issue con la fix version dell'increment, dalla piu' recente: quelle
+    che vanno nel documento e quelle lasciate fuori."""
+    mine = sorted(
+        (issue for issue in issues if _in_increment(issue, project)),
         key=lambda issue: _issue_number(issue["key"]),
         reverse=True,
     )
-    excluded = [
-        f"{issue['key']} ({'obsoleta' if issue['eligible'] else 'Epic Category ' + (issue['category'] or 'vuota')})"
-        for issue in issues
-        if not issue["eligible"] or issue["obsolete"]
-    ]
-    return own, excluded, obsolete
+    return (
+        [issue for issue in mine if issue["eligible"] and not issue["obsolete"]],
+        [issue for issue in mine if not issue["eligible"] or issue["obsolete"]],
+    )
+
+
+def _left_out_reason(issue: dict) -> str:
+    return "obsoleta" if issue["eligible"] else f"Epic Category {issue['category'] or 'vuota'}"
+
+
+@router.get("/api/projects/{project_id}/documents/{document}/requirements", response_model=schemas.IncrementRequirements)
+def increment_requirements(project_id: int, document: str, db: Session = Depends(get_db)):
+    """Le Story o User Need create per questo increment, lette da Jira con le
+    stesse regole dell'esportazione: quelle che andranno nel documento e
+    quelle con la stessa fix version lasciate fuori, col motivo."""
+    _get_workbook_document_or_404(document)
+    project = _get_project_or_404(db, project_id)
+    own, left_out = _split_increment(_fetch_requirements(db, project, REQUIREMENT_ISSUE_TYPES[document]), project)
+
+    def item(issue: dict, reason: str = "") -> schemas.IncrementRequirement:
+        return schemas.IncrementRequirement(
+            key=issue["key"],
+            summary=issue["summary"],
+            status=issue["status"],
+            components=issue["components"],
+            labels=sorted(issue["labels"]),
+            reason=reason,
+        )
+
+    return schemas.IncrementRequirements(
+        included=[item(issue) for issue in own],
+        left_out=[item(issue, _left_out_reason(issue)) for issue in left_out],
+    )
 
 
 @router.post("/api/projects/{project_id}/documents/user-needs/check", response_model=schemas.RequirementsCheck)

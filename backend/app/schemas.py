@@ -654,6 +654,23 @@ class DocumentRevisionMeta(BaseModel):
     last_revision_text: str
 
 
+class IncrementRequirement(BaseModel):
+    key: str
+    summary: str = ""
+    status: str = ""
+    components: list[str] = []
+    labels: list[str] = []
+    # Perche' resta fuori dal documento; vuoto se ci va.
+    reason: str = ""
+
+
+class IncrementRequirements(BaseModel):
+    """Story o User Need con la fix version dell'increment."""
+
+    included: list[IncrementRequirement]
+    left_out: list[IncrementRequirement]
+
+
 class RequirementCheckItem(BaseModel):
     key: str
     summary: str = ""
