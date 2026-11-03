@@ -372,6 +372,18 @@ const SCOPE_TABS: { value: ScopeTab; label: string }[] = [
   { value: 'narrative', label: 'Discorsivo' },
 ]
 
+// Pannello collassato o aperto: preferenza del browser, uguale per tutti
+// gli increment.
+const COLLAPSED_STORAGE_KEY = 'scope-card-collapsed'
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 // Copia sia il testo formattato, per Word e Outlook, sia quello semplice,
 // con una riga vuota tra i blocchi.
 async function copyRichText(html: string) {
@@ -397,6 +409,7 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   const [editing, setEditing] = useState(false)
   const [editorText, setEditorText] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const queryClient = useQueryClient()
   const current = tab === 'schematic' ? scope : narrative
 
@@ -438,34 +451,57 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
     setTab(value)
   }
 
+  const toggleCollapsed = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    try {
+      localStorage.setItem(COLLAPSED_STORAGE_KEY, next ? '1' : '0')
+    } catch {
+      // localStorage non disponibile: la scelta vale solo per questa visita
+    }
+  }
+
   return (
     <div className="card">
-      <div className="page-header" style={{ marginBottom: 10, alignItems: 'center' }}>
+      <div className="page-header" style={{ marginBottom: collapsed ? 0 : 10, alignItems: 'center' }}>
         <h3 style={{ margin: 0 }}>Scope</h3>
-        {!editing && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {tab === 'narrative' && narrative && (
-              <button className="btn" onClick={() => copy.mutate()} disabled={copy.isPending}>
-                {copied ? 'Copiato' : 'Copia'}
-              </button>
-            )}
-            {tab === 'narrative' && (
-              <button
-                className="btn"
-                title="Propone un testo ricavato da Scope, Story e Bug in scope. Si apre in modifica: il testo salvato cambia solo col Salva."
-                onClick={() => generate.mutate()}
-                disabled={generate.isPending}
-              >
-                {generate.isPending ? 'Generazione...' : narrative ? 'Rigenera dal backlog' : 'Genera dal backlog'}
-              </button>
-            )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {!editing && !collapsed && tab === 'narrative' && narrative && (
+            <button className="btn" onClick={() => copy.mutate()} disabled={copy.isPending}>
+              {copied ? 'Copiato' : 'Copia'}
+            </button>
+          )}
+          {!editing && !collapsed && tab === 'narrative' && (
+            <button
+              className="btn"
+              title="Propone un testo ricavato da Scope, Story e Bug in scope. Si apre in modifica: il testo salvato cambia solo col Salva."
+              onClick={() => generate.mutate()}
+              disabled={generate.isPending}
+            >
+              {generate.isPending ? 'Generazione...' : narrative ? 'Rigenera dal backlog' : 'Genera dal backlog'}
+            </button>
+          )}
+          {!editing && !collapsed && (
             <button className="btn" onClick={() => startEditing(current)}>
               Modifica
             </button>
-          </div>
-        )}
+          )}
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ minWidth: 110 }}
+            title={collapsed ? 'Mostra lo Scope' : 'Nascondi lo Scope'}
+            aria-expanded={!collapsed}
+            disabled={editing}
+            onClick={toggleCollapsed}
+          >
+            {collapsed ? '▼ Espandi' : '▲ Comprimi'}
+          </button>
+        </div>
       </div>
 
+      {!collapsed && (
+      <>
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
         {SCOPE_TABS.map((option) => (
           <button
@@ -511,6 +547,8 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
           onSave={(value) => save.mutate(value)}
           onCancel={() => setEditing(false)}
         />
+      )}
+      </>
       )}
     </div>
   )

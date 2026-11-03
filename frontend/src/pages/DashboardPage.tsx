@@ -528,6 +528,8 @@ export function DashboardPage() {
         )}
       </div>
 
+      <PhasesCard projectId={project.id} currentStatus={project.status} />
+
       <ScopeCard projectId={project.id} scope={project.scope} narrative={project.scope_narrative} />
 
       <div className="card">
@@ -604,8 +606,6 @@ export function DashboardPage() {
       </div>
 
       <RecentlyClosedCard items={backlogItems} period={closedPeriod} setPeriod={setClosedPeriod} />
-
-      <PhasesCard projectId={project.id} currentStatus={project.status} />
 
       <div className="card">
         <h3>Ore usate nel tempo</h3>
