@@ -131,6 +131,9 @@ export function ProjectLayout() {
         <NavLink to={`/projects/${id}/progetti`} className={({ isActive }) => (isActive ? 'active' : '')}>
           Progetti
         </NavLink>
+        <NavLink to={`/projects/${id}/components`} className={({ isActive }) => (isActive ? 'active' : '')}>
+          Components &amp; PN
+        </NavLink>
       </div>
 
       <Outlet context={{ project } satisfies { project: ProjectDetail }} />

@@ -8,6 +8,7 @@ import { ConfigurationPage } from './pages/ConfigurationPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ForecastingPage } from './pages/ForecastingPage'
+import { IncrementComponentsPage } from './pages/IncrementComponentsPage'
 import { IncrementDetailPage } from './pages/IncrementDetailPage'
 import { IncrementsPage } from './pages/IncrementsPage'
 import { MonteCarloPage } from './pages/MonteCarloPage'
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="montecarlo" element={<MonteCarloPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="progetti" element={<ProjectIncrementLinkPage />} />
+            <Route path="components" element={<IncrementComponentsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

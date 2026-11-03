@@ -847,3 +847,16 @@ class ReleaseComponent(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     release: Mapped[Release] = relationship(back_populates="components")
+
+
+class ComponentCatalogEntry(Base):
+    """Componente creato a mano dalla tab "Components & PN" perche' assente
+    dalla sezione Releases. pn_family: la parte del PN prima del punto (es.
+    PTB-SRV), da cui si calcola il PN proposto."""
+
+    __tablename__ = "component_catalog"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    pn_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
+

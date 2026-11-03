@@ -196,9 +196,6 @@ export function ReleasesPage() {
     ...mutationOptions,
   })
   const createRelease = useMutation({ mutationFn: () => api.releases.create(), ...mutationOptions })
-  const createComponent = useMutation({ mutationFn: (id: number) => api.releases.createComponent(id), ...mutationOptions })
-  const deleteRelease = useMutation({ mutationFn: (id: number) => api.releases.remove(id), ...mutationOptions })
-  const deleteComponent = useMutation({ mutationFn: (id: number) => api.releases.removeComponent(id), ...mutationOptions })
   const exportExcel = useMutation({
     mutationFn: api.releases.exportExcel,
     onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
@@ -346,8 +343,6 @@ export function ReleasesPage() {
                       </button>
                     </th>
                   ))}
-                  <th className="releases-th" />
-                  <th className="releases-th" />
                 </tr>
               </thead>
               {/* Un tbody per release: il riquadro che la isola dalle altre. */}
@@ -356,14 +351,13 @@ export function ReleasesPage() {
                 {groupIndex > 0 && (
                   <tbody className="releases-gap" aria-hidden="true">
                     <tr>
-                      <td colSpan={COLUMNS.length + 2} />
+                      <td colSpan={COLUMNS.length} />
                     </tr>
                   </tbody>
                 )}
                 <tbody className="releases-group">
                 {group.map((row, index) => {
                   const first = index === 0
-                  const span = first ? group.length : 0
                   const { release, component } = row
                   return (
                     <tr key={`${release.id}-${component?.id ?? 'none'}`}>
@@ -373,43 +367,6 @@ export function ReleasesPage() {
                         const pnRows = pnSpan(group, index)
                         return pnRows > 0 ? renderCell(group.slice(index, index + pnRows), column) : null
                       })}
-                      <td style={{ verticalAlign: 'top' }}>
-                        {component && (
-                          <button
-                            className="btn"
-                            title="Elimina il componente"
-                            aria-label="Elimina il componente"
-                            onClick={() => {
-                              if (window.confirm(`Eliminare ${component.component || 'il componente'} da ${release.increment_code || 'questa release'}?`)) {
-                                deleteComponent.mutate(component.id)
-                              }
-                            }}
-                          >
-                            🗑
-                          </button>
-                        )}
-                      </td>
-                      {span > 0 && (
-                        <td rowSpan={span} style={{ verticalAlign: 'top' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button className="btn" onClick={() => createComponent.mutate(release.id)}>
-                              + Componente
-                            </button>
-                            <button
-                              className="btn"
-                              title="Elimina la release e i suoi componenti"
-                              aria-label="Elimina la release"
-                              onClick={() => {
-                                if (window.confirm(`Eliminare ${release.increment_code || 'questa release'} con tutti i suoi componenti?`)) {
-                                  deleteRelease.mutate(release.id)
-                                }
-                              }}
-                            >
-                              🗑 Release
-                            </button>
-                          </div>
-                        </td>
-                      )}
                     </tr>
                   )
                 })}
@@ -419,7 +376,7 @@ export function ReleasesPage() {
               {visibleRows.length === 0 && (
                 <tbody>
                   <tr>
-                    <td colSpan={COLUMNS.length + 2} className="muted">
+                    <td colSpan={COLUMNS.length} className="muted">
                       Nessuna riga corrisponde ai filtri.
                     </td>
                   </tr>

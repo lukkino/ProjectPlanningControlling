@@ -10,7 +10,59 @@ from app.services.releases import export_releases
 router = APIRouter(prefix="/api/releases", tags=["releases"])
 
 
+def _project_ptih_codes(project: models.Project) -> str | None:
+    """Codici PTIH dei progetti collegati per intero all'increment."""
+    return ", ".join(p.code for p in project.progetti) or None
+
+
+def sync_release_from_project(release: models.Release, project: models.Project) -> None:
+    """Riporta sulla release i dati dell'increment: Project ID, date e Change
+    Order. Solo quelli valorizzati sull'increment, per non cancellare quanto
+    gia' scritto nella release (es. i dati importati dal foglio)."""
+    values = {
+        "ptih_code": _project_ptih_codes(project),
+        "start_date": project.start_date,
+        "expected_release_date": project.planned_finish_date,
+        "actual_release_date": project.release_date,
+        "change_order": project.change_order_label,
+    }
+    for field, value in values.items():
+        if value is not None:
+            setattr(release, field, value)
+
+
+def _add_missing_project_releases(db: Session) -> None:
+    """Ogni increment dell'app ha la sua release: se manca la si crea vuota,
+    col solo codice, in fondo. Si riempie compilando i componenti dalla tab
+    "Components & PN" dell'increment (vedi increment_components.py)."""
+    existing = {code for (code,) in db.query(models.Release.increment_code) if code}
+    missing = [project for project in db.query(models.Project).order_by(models.Project.code) if project.code not in existing]
+    if not missing:
+        return
+    last = db.query(func.max(models.Release.sort_order)).scalar() or 0
+    for offset, project in enumerate(missing, 1):
+        db.add(models.Release(increment_code=project.code, sort_order=last + offset))
+    db.commit()
+
+
+def _fill_missing_ptih_codes(db: Session) -> None:
+    """Project ID vuoto: lo si prende dal progetto collegato all'increment
+    nella sua tab Progetti, se c'e'. Quello gia' scritto non si tocca."""
+    projects = {project.code: project for project in db.query(models.Project)}
+    changed = False
+    for release in db.query(models.Release).filter(models.Release.ptih_code.is_(None)):
+        project = projects.get(release.increment_code)
+        codes = _project_ptih_codes(project) if project else None
+        if codes:
+            release.ptih_code = codes
+            changed = True
+    if changed:
+        db.commit()
+
+
 def _list(db: Session) -> list[models.Release]:
+    _add_missing_project_releases(db)
+    _fill_missing_ptih_codes(db)
     return db.query(models.Release).order_by(models.Release.sort_order, models.Release.id).all()
 
 

@@ -1026,3 +1026,35 @@ class ComplaintUpdate(BaseModel):
 
 class ComplaintsSettings(BaseModel):
     base_jql: str
+
+
+class ComponentCatalogWrite(BaseModel):
+    name: str
+    pn_family: str | None = None
+
+
+class ComponentCatalogItem(ComponentCatalogWrite):
+    # PN che si proporrebbe aggiungendo il componente a un increment.
+    next_pn: str | None = None
+
+
+class IncrementComponentCreate(BaseModel):
+    name: str
+
+
+class IncrementComponentUpdate(BaseModel):
+    pn: str | None = None
+    fix_version: str | None = None
+    detail: str | None = None
+    note: str | None = None
+
+
+class IncrementComponentRead(BaseModel):
+    id: int
+    name: str
+    pn: str | None
+    fix_version: str | None
+    detail: str | None
+    note: str | None
+    # Altri increment (Releases o tab di altri increment) con lo stesso PN.
+    pn_used_by: list[str]

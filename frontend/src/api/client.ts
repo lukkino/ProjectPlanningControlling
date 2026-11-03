@@ -46,6 +46,8 @@ import type {
   IncrementRequirements,
   Release,
   ReleaseComponent,
+  ComponentCatalogItem,
+  IncrementComponent,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -482,6 +484,18 @@ export const api = {
       put<ReleaseComponent>(`/releases/components/${id}`, data),
     removeComponent: (id: number) => del(`/releases/components/${id}`),
     exportExcel: () => downloadFile('/releases/export'),
+  },
+  incrementComponents: {
+    catalog: () => request<ComponentCatalogItem[]>('/component-catalog'),
+    createCatalogEntry: (data: { name: string; pn_family: string | null }) =>
+      post<ComponentCatalogItem>('/component-catalog', data),
+    list: (projectId: number) => request<IncrementComponent[]>(`/projects/${projectId}/components`),
+    create: (projectId: number, name: string) => post<IncrementComponent>(`/projects/${projectId}/components`, { name }),
+    update: (id: number, data: Partial<Omit<IncrementComponent, 'id' | 'pn_used_by'>>) =>
+      put<IncrementComponent>(`/increment-components/${id}`, data),
+    remove: (id: number) => del(`/increment-components/${id}`),
+    release: (projectId: number) => request<Release | null>(`/projects/${projectId}/release`),
+    syncRelease: (projectId: number) => post<Release>(`/projects/${projectId}/release/sync`),
   },
   settings: {
     get: () => request<AppSettings>('/settings'),

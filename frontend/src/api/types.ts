@@ -362,6 +362,22 @@ export type ReleaseComponent = {
   note: string | null
 }
 
+export type ComponentCatalogItem = {
+  name: string
+  pn_family: string | null
+  next_pn: string | null
+}
+
+export type IncrementComponent = {
+  id: number
+  name: string
+  pn: string | null
+  fix_version: string | null
+  detail: string | null
+  note: string | null
+  pn_used_by: string[]
+}
+
 export type Release = {
   id: number
   ptih_code: string | null
