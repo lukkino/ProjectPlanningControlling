@@ -807,3 +807,43 @@ class Complaint(Base):
     # None se non ce ne sono.
     tsb_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Release(Base):
+    """Una release del sistema: dati dell'increment e, sotto, i componenti
+    rilasciati. Non e' collegata ai Project: nasce dal foglio PTBSYS-03 del
+    file dei componenti, importato una volta sola."""
+
+    __tablename__ = "releases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ptih_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    increment_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    expected_release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    actual_release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    change_order: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    process: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    components: Mapped[list["ReleaseComponent"]] = relationship(
+        back_populates="release",
+        cascade="all, delete-orphan",
+        order_by="ReleaseComponent.sort_order, ReleaseComponent.id",
+    )
+
+
+class ReleaseComponent(Base):
+    __tablename__ = "release_components"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    release_id: Mapped[int] = mapped_column(ForeignKey("releases.id", ondelete="CASCADE"))
+    pn: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    component: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fix_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    release: Mapped[Release] = relationship(back_populates="components")

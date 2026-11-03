@@ -1,0 +1,445 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Fragment, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
+import { api, saveBlob } from '../api/client'
+import type { Release, ReleaseComponent } from '../api/types'
+
+const BLANK_LABEL = '(vuote)'
+// Sfondo dei componenti dell'ultimo rilascio completato (giallo, come nel foglio).
+const LATEST_RELEASE_BACKGROUND = '#fff6bf'
+
+type Row = { release: Release; component: ReleaseComponent | null }
+
+type Column = {
+  key: string
+  label: string
+  // Dato della release (cella unica sulle righe dei suoi componenti) o del componente.
+  level: 'release' | 'component'
+  kind: 'text' | 'multiline' | 'date'
+  minWidth: number
+  // Testo centrato in orizzontale e in verticale sulle righe che la cella copre.
+  centered?: boolean
+  // Resta visibile a sinistra scorrendo la tabella in orizzontale.
+  sticky?: boolean
+}
+
+const COLUMNS: Column[] = [
+  { key: 'ptih_code', label: 'Project ID', level: 'release', kind: 'text', minWidth: 100, centered: true },
+  { key: 'increment_code', label: 'Increment', level: 'release', kind: 'text', minWidth: 130, centered: true, sticky: true },
+  { key: 'pn', label: 'PN', level: 'component', kind: 'text', minWidth: 120, centered: true },
+  { key: 'component', label: 'Componente', level: 'component', kind: 'text', minWidth: 210 },
+  { key: 'fix_version', label: 'Fix version', level: 'component', kind: 'text', minWidth: 80 },
+  { key: 'detail', label: 'Dettaglio', level: 'component', kind: 'multiline', minWidth: 240 },
+  { key: 'note', label: 'Note', level: 'component', kind: 'multiline', minWidth: 140 },
+  { key: 'objective', label: 'Obbiettivo', level: 'release', kind: 'multiline', minWidth: 240 },
+  { key: 'start_date', label: 'Start Date', level: 'release', kind: 'date', minWidth: 125 },
+  { key: 'expected_release_date', label: 'Expected Release', level: 'release', kind: 'date', minWidth: 125 },
+  { key: 'actual_release_date', label: 'Actual Release', level: 'release', kind: 'date', minWidth: 125 },
+  { key: 'change_order', label: 'Change Order', level: 'release', kind: 'text', minWidth: 110 },
+  { key: 'process', label: 'Process', level: 'release', kind: 'multiline', minWidth: 170 },
+]
+
+const formatDate = (value: string) => value.split('-').reverse().join('/')
+
+const rawValue = (row: Row, column: Column): string => {
+  const source = column.level === 'release' ? row.release : row.component
+  if (!source) return ''
+  return ((source as Record<string, unknown>)[column.key] as string | null) ?? ''
+}
+
+// Il valore come si legge: e' quello che usano filtri e ricerca.
+const displayValue = (row: Row, column: Column): string => {
+  const value = rawValue(row, column)
+  if (column.kind === 'date' && value) return formatDate(value)
+  return value
+}
+
+// Testo che si salva uscendo dal campo; key sul valore per riallinearlo dopo
+// il salvataggio.
+function EditableField({
+  value,
+  kind,
+  label,
+  onSave,
+}: {
+  value: string
+  kind: Column['kind']
+  label: string
+  onSave: (value: string | null) => void
+}) {
+  const save = (next: string) => {
+    if (next.trim() !== value) onSave(next.trim() || null)
+  }
+  if (kind === 'multiline') {
+    return (
+      <textarea
+        key={value}
+        aria-label={label}
+        defaultValue={value}
+        rows={Math.max(1, value.split('\n').length)}
+        onBlur={(e) => save(e.target.value)}
+      />
+    )
+  }
+  return (
+    <input
+      key={value}
+      aria-label={label}
+      type={kind === 'date' ? 'date' : 'text'}
+      defaultValue={value}
+      onBlur={(e) => save(e.target.value)}
+      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+    />
+  )
+}
+
+type OpenFilter = { column: Column; left: number; top: number }
+
+function ColumnFilter({
+  filter,
+  options,
+  selected,
+  onToggle,
+  onClear,
+  onClose,
+}: {
+  filter: OpenFilter
+  options: string[]
+  selected: Set<string>
+  onToggle: (value: string) => void
+  onClear: () => void
+  onClose: () => void
+}) {
+  return (
+    <>
+      <div className="releases-backdrop" onMouseDown={onClose} />
+      <div className="releases-filter" style={{ left: filter.left, top: filter.top }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <strong>{filter.column.label}</strong>
+          <button className="btn" onClick={onClear} disabled={selected.size === 0}>
+            Azzera
+          </button>
+        </div>
+        <div className="releases-filter-list">
+          {options.map((value) => (
+            <label key={value} title={value}>
+              <input type="checkbox" checked={selected.has(value)} onChange={() => onToggle(value)} />
+              <span>{value || BLANK_LABEL}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+// Quante righe occupa la cella del PN: sulla prima di componenti consecutivi
+// con lo stesso PN tutte quelle, sulle altre nessuna. PN vuoto: mai unito.
+function pnSpan(rows: Row[], index: number): number {
+  const pn = rows[index].component?.pn
+  if (!pn) return 1
+  if (rows[index - 1]?.component?.pn === pn) return 0
+  let span = 1
+  while (rows[index + span]?.component?.pn === pn) span += 1
+  return span
+}
+
+// L'ultimo rilascio completato: la release con l'Actual Release piu' recente
+// (date ISO, confrontabili come stringhe). Stessa regola dell'export Excel.
+function latestCompletedReleaseId(releases: Release[]): number | null {
+  let latest: Release | null = null
+  for (const release of releases) {
+    if (release.actual_release_date && (!latest || release.actual_release_date > (latest.actual_release_date as string))) {
+      latest = release
+    }
+  }
+  return latest?.id ?? null
+}
+
+// Righe visibili raggruppate per release, nell'ordine in cui arrivano.
+function groupByRelease(rows: Row[]): Row[][] {
+  const groups: Row[][] = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (last && last[0].release.id === row.release.id) last.push(row)
+    else groups.push([row])
+  }
+  return groups
+}
+
+// Sezione Releases: release e componenti del sistema, modificabili qui.
+// Nata dal foglio PTBSYS-03 del file dei componenti, importato una volta sola:
+// ora il dato sta nell'app e il foglio si ottiene con "Esporta Excel".
+export function ReleasesPage() {
+  const queryClient = useQueryClient()
+  const { data: releases, isLoading, error } = useQuery({ queryKey: ['releases'], queryFn: api.releases.list })
+  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<Record<string, Set<string>>>({})
+  const [openFilter, setOpenFilter] = useState<OpenFilter | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const mutationOptions = {
+    onSuccess: () => {
+      setActionError(null)
+      return queryClient.invalidateQueries({ queryKey: ['releases'] })
+    },
+    onError: (e: Error) => setActionError(e.message),
+  }
+  const updateRelease = useMutation({
+    mutationFn: ({ id, field, value }: { id: number; field: string; value: string | null }) =>
+      api.releases.update(id, { [field]: value }),
+    ...mutationOptions,
+  })
+  const updateComponent = useMutation({
+    mutationFn: ({ id, field, value }: { id: number; field: string; value: string | null }) =>
+      api.releases.updateComponent(id, { [field]: value }),
+    ...mutationOptions,
+  })
+  const createRelease = useMutation({ mutationFn: () => api.releases.create(), ...mutationOptions })
+  const createComponent = useMutation({ mutationFn: (id: number) => api.releases.createComponent(id), ...mutationOptions })
+  const deleteRelease = useMutation({ mutationFn: (id: number) => api.releases.remove(id), ...mutationOptions })
+  const deleteComponent = useMutation({ mutationFn: (id: number) => api.releases.removeComponent(id), ...mutationOptions })
+  const exportExcel = useMutation({
+    mutationFn: api.releases.exportExcel,
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+    onError: (e: Error) => setActionError(e.message),
+  })
+
+  const latestReleaseId = latestCompletedReleaseId(releases ?? [])
+  const rows = (releases ?? []).flatMap<Row>((release) =>
+    release.components.length > 0
+      ? release.components.map((component) => ({ release, component }))
+      : [{ release, component: null }],
+  )
+
+  const needle = search.trim().toLowerCase()
+  const visibleRows = rows.filter(
+    (row) =>
+      COLUMNS.every((column) => {
+        const selected = filters[column.key]
+        return !selected || selected.size === 0 || selected.has(displayValue(row, column))
+      }) && (!needle || COLUMNS.some((column) => displayValue(row, column).toLowerCase().includes(needle))),
+  )
+  const hasFilters = !!needle || Object.values(filters).some((selected) => selected.size > 0)
+
+  const toggleValue = (key: string, value: string) => {
+    setFilters((prev) => {
+      const next = new Set(prev[key])
+      if (next.has(value)) next.delete(value)
+      else next.add(value)
+      return { ...prev, [key]: next }
+    })
+  }
+
+  const openColumnFilter = (column: Column, button: HTMLElement) => {
+    const box = button.getBoundingClientRect()
+    setOpenFilter({ column, left: Math.min(box.left, window.innerWidth - 280), top: box.bottom + 4 })
+  }
+
+  // covered: le righe che la cella copre (piu' di una se unita); la modifica
+  // di una cella di componente unita vale per tutti i componenti coperti.
+  const renderCell = (covered: Row[], column: Column): ReactNode => {
+    const row = covered[0]
+    const style: CSSProperties = {
+      whiteSpace: 'normal',
+      // Le celle della release coprono tutte le sue righe: centrate in verticale.
+      verticalAlign: column.centered || column.level === 'release' ? 'middle' : 'top',
+      minWidth: column.minWidth,
+    }
+    const { release, component } = row
+    if (column.level === 'component' && !component) {
+      return (
+        <td key={column.key} className="muted" style={style}>
+          —
+        </td>
+      )
+    }
+    const components = covered.map((r) => r.component as ReleaseComponent)
+    if (column.level === 'component' && release.id === latestReleaseId) {
+      style.background = LATEST_RELEASE_BACKGROUND
+    }
+    const save = (value: string | null) => {
+      if (column.level === 'release') {
+        updateRelease.mutate({ id: release.id, field: column.key, value })
+      } else {
+        components.forEach((c) => updateComponent.mutate({ id: c.id, field: column.key, value }))
+      }
+    }
+    return (
+      <td
+        key={column.key}
+        className={`editable-cell${column.centered ? ' releases-centered' : ''}${column.sticky ? ' releases-sticky' : ''}`}
+        rowSpan={covered.length > 1 ? covered.length : undefined}
+        style={style}
+      >
+        <EditableField value={rawValue(row, column)} kind={column.kind} label={column.label} onSave={save} />
+      </td>
+    )
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div className="page-header" style={{ marginBottom: 0 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Releases</h3>
+            <span className="sub muted">Contenuto componenti PTBSYS-03 (New Architecture NA7). Le modifiche si salvano uscendo dal campo. In giallo l'ultimo rilascio completato.</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={() => exportExcel.mutate()} disabled={exportExcel.isPending}>
+              {exportExcel.isPending ? 'Esportazione...' : '⬇ Esporta Excel'}
+            </button>
+            <button className="btn btn-primary" onClick={() => createRelease.mutate()} disabled={createRelease.isPending}>
+              + Release
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+          <input
+            type="search"
+            placeholder="Cerca in tutte le colonne..."
+            aria-label="Cerca in tutte le colonne"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: 320, maxWidth: '100%' }}
+          />
+          <span className="muted" style={{ fontSize: 13 }}>
+            {visibleRows.length} righe su {rows.length}
+          </span>
+          {hasFilters && (
+            <button
+              className="btn"
+              onClick={() => {
+                setFilters({})
+                setSearch('')
+              }}
+            >
+              Azzera filtri
+            </button>
+          )}
+        </div>
+
+        {(error || actionError) && (
+          <div className="error-banner">{actionError ?? (error as Error).message}</div>
+        )}
+        {isLoading && <p className="muted" style={{ margin: 0 }}>Caricamento...</p>}
+
+        {releases && (
+          <div className="table-wrap table-wrap--scroll" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+            <table>
+              <thead>
+                <tr>
+                  {COLUMNS.map((column) => (
+                    <th key={column.key} className={`releases-th${column.sticky ? ' releases-sticky' : ''}`}>
+                      {column.label}{' '}
+                      <button
+                        type="button"
+                        className={`releases-filter-btn${(filters[column.key]?.size ?? 0) > 0 ? ' active' : ''}`}
+                        title={`Filtra ${column.label}`}
+                        aria-label={`Filtra ${column.label}`}
+                        onClick={(e) => openColumnFilter(column, e.currentTarget)}
+                      >
+                        ▾
+                      </button>
+                    </th>
+                  ))}
+                  <th className="releases-th" />
+                  <th className="releases-th" />
+                </tr>
+              </thead>
+              {/* Un tbody per release: il riquadro che la isola dalle altre. */}
+              {groupByRelease(visibleRows).map((group, groupIndex) => (
+                <Fragment key={group[0].release.id}>
+                {groupIndex > 0 && (
+                  <tbody className="releases-gap" aria-hidden="true">
+                    <tr>
+                      <td colSpan={COLUMNS.length + 2} />
+                    </tr>
+                  </tbody>
+                )}
+                <tbody className="releases-group">
+                {group.map((row, index) => {
+                  const first = index === 0
+                  const span = first ? group.length : 0
+                  const { release, component } = row
+                  return (
+                    <tr key={`${release.id}-${component?.id ?? 'none'}`}>
+                      {COLUMNS.map((column) => {
+                        if (column.level === 'release') return first ? renderCell(group, column) : null
+                        if (column.key !== 'pn') return renderCell([row], column)
+                        const pnRows = pnSpan(group, index)
+                        return pnRows > 0 ? renderCell(group.slice(index, index + pnRows), column) : null
+                      })}
+                      <td style={{ verticalAlign: 'top' }}>
+                        {component && (
+                          <button
+                            className="btn"
+                            title="Elimina il componente"
+                            aria-label="Elimina il componente"
+                            onClick={() => {
+                              if (window.confirm(`Eliminare ${component.component || 'il componente'} da ${release.increment_code || 'questa release'}?`)) {
+                                deleteComponent.mutate(component.id)
+                              }
+                            }}
+                          >
+                            🗑
+                          </button>
+                        )}
+                      </td>
+                      {span > 0 && (
+                        <td rowSpan={span} style={{ verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn" onClick={() => createComponent.mutate(release.id)}>
+                              + Componente
+                            </button>
+                            <button
+                              className="btn"
+                              title="Elimina la release e i suoi componenti"
+                              aria-label="Elimina la release"
+                              onClick={() => {
+                                if (window.confirm(`Eliminare ${release.increment_code || 'questa release'} con tutti i suoi componenti?`)) {
+                                  deleteRelease.mutate(release.id)
+                                }
+                              }}
+                            >
+                              🗑 Release
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+                </tbody>
+                </Fragment>
+              ))}
+              {visibleRows.length === 0 && (
+                <tbody>
+                  <tr>
+                    <td colSpan={COLUMNS.length + 2} className="muted">
+                      Nessuna riga corrisponde ai filtri.
+                    </td>
+                  </tr>
+                </tbody>
+              )}
+            </table>
+          </div>
+        )}
+      </div>
+
+      {openFilter && (
+        <ColumnFilter
+          filter={openFilter}
+          options={Array.from(new Set(rows.map((row) => displayValue(row, openFilter.column))))}
+          selected={filters[openFilter.column.key] ?? new Set()}
+          onToggle={(value) => toggleValue(openFilter.column.key, value)}
+          onClear={() => setFilters((prev) => ({ ...prev, [openFilter.column.key]: new Set() }))}
+          onClose={() => setOpenFilter(null)}
+        />
+      )}
+    </div>
+  )
+}

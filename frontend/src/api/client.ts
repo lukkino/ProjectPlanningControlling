@@ -44,6 +44,8 @@ import type {
   TestConnectionResult,
   RequirementsCheck,
   IncrementRequirements,
+  Release,
+  ReleaseComponent,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -469,6 +471,17 @@ export const api = {
     // Apre la cartella in Esplora risorse, o un suo file, sulla macchina del backend.
     open: (projectId: number, filename?: string) =>
       post<void>(`/projects/${projectId}/review-folder/open${filename ? `?${new URLSearchParams({ filename })}` : ''}`),
+  },
+  releases: {
+    list: () => request<Release[]>('/releases'),
+    create: () => post<Release>('/releases', {}),
+    update: (id: number, data: Partial<Omit<Release, 'id' | 'components'>>) => put<Release>(`/releases/${id}`, data),
+    remove: (id: number) => del(`/releases/${id}`),
+    createComponent: (releaseId: number) => post<ReleaseComponent>(`/releases/${releaseId}/components`, {}),
+    updateComponent: (id: number, data: Partial<Omit<ReleaseComponent, 'id'>>) =>
+      put<ReleaseComponent>(`/releases/components/${id}`, data),
+    removeComponent: (id: number) => del(`/releases/components/${id}`),
+    exportExcel: () => downloadFile('/releases/export'),
   },
   settings: {
     get: () => request<AppSettings>('/settings'),

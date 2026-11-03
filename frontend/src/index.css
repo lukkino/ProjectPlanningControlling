@@ -600,14 +600,15 @@ tr.phase-current input { background: #e6eefc; }
   overflow-y: auto;
 }
 
-.editable-cell input, .editable-cell select {
+.editable-cell input, .editable-cell select, .editable-cell textarea {
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
   padding: 2px 4px;
 }
-.editable-cell input:hover, .editable-cell select:hover { border-color: var(--border); }
-.editable-cell input:focus, .editable-cell select:focus { border-color: var(--primary); outline: none; background: var(--surface); }
+.editable-cell textarea { display: block; resize: vertical; font: inherit; color: inherit; box-sizing: border-box; }
+.editable-cell input:hover, .editable-cell select:hover, .editable-cell textarea:hover { border-color: var(--border); }
+.editable-cell input:focus, .editable-cell select:focus, .editable-cell textarea:focus { border-color: var(--primary); outline: none; background: var(--surface); }
 
 /* Backlog: menu a tendina "Colonne" con le checkbox per nascondere/mostrare
    le colonne della tabella. Il backdrop a tutto schermo lo chiude al click
@@ -893,3 +894,44 @@ tr.phase-current input { background: #e6eefc; }
 .nwd-off { background: #fde4cc; color: #9a4f05; font-weight: 600; }
 .nwd-today { border-color: var(--danger); }
 .nwd-selected { background: var(--primary); color: white; }
+
+/* Sezione Releases. */
+.releases-th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+/* Ogni release in un riquadro: bordo marcato attorno al suo tbody, staccato
+   dal successivo da una fascia vuota (tbody .releases-gap). */
+.releases-group { border: 2px solid var(--text-muted); }
+.releases-gap td { height: 12px; padding: 0; border: none; background: var(--bg); }
+.releases-gap tr:hover { background: none; }
+.releases-centered { text-align: center; }
+/* Colonna Increment bloccata a sinistra nello scroll orizzontale: sfondo
+   pieno per coprire le celle che le scorrono sotto, bordo destro disegnato
+   come ombra perche' con border-collapse il bordo non segue la cella. */
+.releases-sticky { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--border); }
+.releases-th.releases-sticky { z-index: 3; }
+.releases-centered input { text-align: center; }
+.releases-filter-btn {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.releases-filter-btn:hover { border-color: var(--border); }
+.releases-filter-btn.active { background: var(--primary); color: #fff; }
+.releases-backdrop { position: fixed; inset: 0; z-index: 30; }
+.releases-filter {
+  position: fixed;
+  z-index: 31;
+  width: 260px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+}
+.releases-filter-list { max-height: 260px; overflow-y: auto; margin-top: 6px; }
+.releases-filter-list label { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.releases-filter-list span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

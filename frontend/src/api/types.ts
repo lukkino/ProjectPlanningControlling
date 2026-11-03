@@ -353,6 +353,28 @@ export type DocumentRevisionMeta = {
   last_revision_text: string
 }
 
+export type ReleaseComponent = {
+  id: number
+  pn: string | null
+  component: string | null
+  fix_version: string | null
+  detail: string | null
+  note: string | null
+}
+
+export type Release = {
+  id: number
+  ptih_code: string | null
+  increment_code: string | null
+  objective: string | null
+  start_date: string | null
+  expected_release_date: string | null
+  actual_release_date: string | null
+  change_order: string | null
+  process: string | null
+  components: ReleaseComponent[]
+}
+
 export type IncrementRequirement = {
   key: string
   summary: string

@@ -15,10 +15,11 @@ import { OverviewDashboardPage } from './pages/OverviewDashboardPage'
 import { ProjectIncrementLinkPage } from './pages/ProjectIncrementLinkPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
+import { ReleasesPage } from './pages/ReleasesPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases']
 
 export default function App() {
   const location = useLocation()
@@ -43,6 +44,7 @@ export default function App() {
             <Route index element={<ComplaintsPage />} />
             <Route path="kpi" element={<ComplaintsKpiPage />} />
           </Route>
+          <Route path="/releases" element={<ReleasesPage />} />
           <Route path="/settings" element={<ConfigurationPage />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/increments" element={<IncrementsPage />} />

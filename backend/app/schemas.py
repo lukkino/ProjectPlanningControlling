@@ -656,6 +656,38 @@ class DocumentRevisionMeta(BaseModel):
     last_revision_text: str
 
 
+class ReleaseComponentWrite(BaseModel):
+    pn: str | None = None
+    component: str | None = None
+    fix_version: str | None = None
+    detail: str | None = None
+    note: str | None = None
+
+
+class ReleaseComponentRead(ReleaseComponentWrite):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReleaseWrite(BaseModel):
+    ptih_code: str | None = None
+    increment_code: str | None = None
+    objective: str | None = None
+    start_date: dt.date | None = None
+    expected_release_date: dt.date | None = None
+    actual_release_date: dt.date | None = None
+    change_order: str | None = None
+    process: str | None = None
+
+
+class ReleaseRead(ReleaseWrite):
+    id: int
+    components: list[ReleaseComponentRead]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ScopeNarrative(BaseModel):
     html: str
 
