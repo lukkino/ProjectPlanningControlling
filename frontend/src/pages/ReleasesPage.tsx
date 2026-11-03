@@ -36,6 +36,7 @@ const COLUMNS: Column[] = [
   { key: 'start_date', label: 'Start Date', level: 'release', kind: 'date', minWidth: 125 },
   { key: 'expected_release_date', label: 'Expected Release', level: 'release', kind: 'date', minWidth: 125 },
   { key: 'actual_release_date', label: 'Actual Release', level: 'release', kind: 'date', minWidth: 125 },
+  { key: 'duration', label: 'Durata Increment', level: 'release', kind: 'text', minWidth: 120, centered: true },
   { key: 'change_order', label: 'Change Order', level: 'release', kind: 'text', minWidth: 110 },
   { key: 'process', label: 'Process', level: 'release', kind: 'multiline', minWidth: 170 },
   { key: 'ptih_code', label: 'Project ID', level: 'release', kind: 'text', minWidth: 100, centered: true },
@@ -43,7 +44,30 @@ const COLUMNS: Column[] = [
 
 const formatDate = (value: string) => value.split('-').reverse().join('/')
 
+// Durata di un increment chiuso, da Start Date ad Actual Release, in mesi
+// di calendario e giorni (es. 4 mesi 13 giorni). Vuota finche' non e' rilasciato.
+function durationLabel(release: Release): string {
+  const { start_date: start, actual_release_date: end } = release
+  if (!start || !end || end < start) return ''
+  const [sy, sm, sd] = start.split('-').map(Number)
+  const [ey, em, ed] = end.split('-').map(Number)
+  let months = (ey - sy) * 12 + (em - sm)
+  // Il mese non e' compiuto se il giorno di fine viene prima di quello di
+  // inizio (per i mesi piu' corti vale l'ultimo giorno del mese).
+  const anchor = (y: number, m: number) => Math.min(sd, new Date(Date.UTC(y, m, 0)).getUTCDate())
+  if (ed < anchor(ey, em)) months -= 1
+  const y = sy + Math.floor((sm - 1 + months) / 12)
+  const m = ((sm - 1 + months) % 12) + 1
+  const from = Date.UTC(y, m - 1, anchor(y, m))
+  const days = Math.round((Date.UTC(ey, em - 1, ed) - from) / 86_400_000)
+  const parts = []
+  if (months > 0) parts.push(months === 1 ? '1 mese' : `${months} mesi`)
+  if (days > 0 || months === 0) parts.push(days === 1 ? '1 giorno' : `${days} giorni`)
+  return parts.join(' ')
+}
+
 const rawValue = (row: Row, column: Column): string => {
+  if (column.key === 'duration') return durationLabel(row.release)
   const source = column.level === 'release' ? row.release : row.component
   if (!source) return ''
   return ((source as Record<string, unknown>)[column.key] as string | null) ?? ''
@@ -308,6 +332,20 @@ export function ReleasesPage() {
     const components = covered.map((r) => r.component as ReleaseComponent)
     if (column.level === 'component' && release.id === latestReleaseId) {
       style.background = LATEST_RELEASE_BACKGROUND
+    }
+    // Durata: calcolata dalle date, si aggiorna da sola quando l'increment
+    // viene rilasciato (Actual Release).
+    if (column.key === 'duration') {
+      return (
+        <td
+          key={column.key}
+          rowSpan={covered.length > 1 ? covered.length : undefined}
+          style={{ ...style, textAlign: 'center' }}
+          title="Da Start Date ad Actual Release: calcolata quando l'increment è rilasciato"
+        >
+          {rawValue(row, column) || <span className="muted">—</span>}
+        </td>
+      )
     }
     // Scopo discorsivo dell'increment: sostituisce quello della release, qui
     // solo lettura (si modifica nella Dashboard dell'increment).
