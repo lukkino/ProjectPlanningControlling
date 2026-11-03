@@ -5,6 +5,7 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from app import models, schemas
+from app.services.budget import has_hours_budget, has_material_budget, hours_budget, material_budget_by_category
 from app.routers.settings import SETTINGS_ROW_ID
 from app.services.jira_client import (
     CVE_BUG_REPORTER_EMAIL,
@@ -67,11 +68,13 @@ def _split_budget_lines(
 
 
 def _budget_hours_total(increment: models.Increment) -> float:
-    """Budget ore di un progetto: dall'ultimo snapshot dello Storico, o il
-    budget stimato finche' lo Storico e' vuoto."""
+    """Budget ore di un progetto: dall'ultimo snapshot dello Storico; finche'
+    lo Storico non ha un budget ore, dal Dettaglio budget ore progetto (o
+    dal vecchio budget stimato, per i progetti creati prima)."""
     hours_lines, _, latest_by_line = _split_budget_lines(increment)
     return (
         sum(latest_by_line[b.id].budget_value for b in hours_lines if b.id in latest_by_line)
+        or (hours_budget(increment) if has_hours_budget(increment) else 0)
         or increment.estimated_budget_hours
     )
 
@@ -196,9 +199,13 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     hours_lines, material_lines, latest_by_line = _split_budget_lines(increment)
 
     budget_hours_total = _budget_hours_total(increment)
-    budget_material_total = sum(
-        latest_by_line[b.id].budget_value for b in material_lines if b.id in latest_by_line
-    ) or increment.estimated_budget_material
+    # Come per le ore: dallo Storico, finche' vuoto dal Budget materiali
+    # congelato con "Aggiorna materiali progetto" (o dal vecchio budget stimato).
+    budget_material_total = (
+        sum(latest_by_line[b.id].budget_value for b in material_lines if b.id in latest_by_line)
+        or (sum(material_budget_by_category(increment).values()) if has_material_budget(increment) else 0)
+        or increment.estimated_budget_material
+    )
 
     logged_hours_total = _used_hours_total(increment)
 
@@ -213,6 +220,8 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         estimated_budget_hours=increment.estimated_budget_hours,
         estimated_budget_material=increment.estimated_budget_material,
         project_id=increment.project_id,
+        budget_frozen_at=increment.budget_frozen_at,
+        budget_corrected_at=increment.budget_corrected_at,
         created_at=increment.created_at,
         updated_at=increment.updated_at,
         sub_projects=list(increment.sub_projects),

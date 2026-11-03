@@ -40,6 +40,12 @@ class Increment(Base):
     calc_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     calc_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     calc_vacation_days: Mapped[float] = mapped_column(Float, default=0)
+    # "Congela budget": da qui il budget iniziale (Dettaglio budget ore e
+    # Dettaglio materiali) non cambia piu', solo le review (services/budget.py).
+    budget_frozen_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Ultima correzione del budget iniziale fatta dopo il congelamento
+    # (errori, risorsa dimenticata), senza passare da una review.
+    budget_corrected_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -55,6 +61,15 @@ class Increment(Base):
     )
     hours_reviews: Mapped[list["IncrementHoursReview"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementHoursReview.order"
+    )
+    material_costs: Mapped[list["IncrementMaterialCost"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementMaterialCost.order"
+    )
+    material_budget_rows: Mapped[list["IncrementMaterialBudgetRow"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementMaterialBudgetRow.order"
+    )
+    budget_reviews: Mapped[list["IncrementBudgetReview"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementBudgetReview.order"
     )
     snapshots: Mapped[list["IncrementSnapshot"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementSnapshot.snapshot_date"
@@ -301,6 +316,10 @@ class IncrementResourceType(Base):
     # (es. 0.5).
     resource_count: Mapped[float] = mapped_column(Float, default=1)
     hours_per_day: Mapped[float] = mapped_column(Float, default=8)
+    # Reparto DEV del file di budget (es. DEV060 SW Design) e societa'
+    # delle risorse stimate (senza persone); con le persone vale la loro.
+    department: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    company: Mapped[str] = mapped_column(String(8), default="SpA")
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     increment: Mapped["Increment"] = relationship(back_populates="resource_types")
@@ -323,6 +342,9 @@ class IncrementTeamMember(Base):
     resource_type_id: Mapped[int] = mapped_column(ForeignKey("increment_resource_types.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(128))
     hours_per_day: Mapped[float] = mapped_column(Float, default=8)
+    # Societa' della persona (SpA/SA/TPM): le ore del file di budget sono
+    # divise per societa'.
+    company: Mapped[str] = mapped_column(String(8), default="SpA")
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     resource_type: Mapped["IncrementResourceType"] = relationship(back_populates="members")
@@ -368,6 +390,9 @@ class IncrementHoursDetailRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(128))
+    # Reparto DEV e societa' (SpA/SA/TPM): una riga per tipologia e societa'.
+    department: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    company: Mapped[str] = mapped_column(String(8), default="SpA")
     resource_count: Mapped[float] = mapped_column(Float, default=0)
     hours: Mapped[float] = mapped_column(Float, default=0)
     order: Mapped[int] = mapped_column(Integer, default=0)
@@ -377,6 +402,122 @@ class IncrementHoursDetailRow(Base):
     review_values: Mapped[list["IncrementHoursReviewValue"]] = relationship(
         back_populates="row", cascade="all, delete-orphan"
     )
+
+
+class IncrementMaterialCost(Base):
+    """Budget materiali del progetto, in lavorazione: una voce di costo
+    (descrizione e importo in euro), inserita a mano accanto al Calcolatore
+    ore. Vale per il progetto solo dopo "Aggiorna materiali progetto", che la
+    copia in IncrementMaterialBudgetRow (come le ore del Calcolatore nel
+    Dettaglio budget ore)."""
+
+    __tablename__ = "increment_material_costs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    # Categoria e sezione del foglio Materials and Expenses (vedi
+    # services/budget.MATERIAL_CATEGORIES/MATERIAL_SECTIONS); la sezione e'
+    # vuota per Consultancies e Travel Expenses.
+    category: Mapped[str] = mapped_column(String(64))
+    section: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(255))
+    # Costo = costo unitario x unita' per modulo x numero di moduli.
+    unit_cost: Mapped[float] = mapped_column(Float, default=0)
+    units: Mapped[float] = mapped_column(Float, default=1)
+    modules: Mapped[float] = mapped_column(Float, default=1)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="material_costs")
+
+
+class IncrementMaterialBudgetRow(Base):
+    """Dettaglio materiali progetto (budget iniziale): le voci del Budget
+    materiali copiate col pulsante "Aggiorna materiali progetto" (non
+    seguono le modifiche successive), come le ore del Calcolatore nel
+    Dettaglio budget ore. Vedi services/budget.py."""
+
+    __tablename__ = "increment_material_budget_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    # Categoria e sezione del foglio Materials and Expenses (vedi
+    # services/budget.MATERIAL_CATEGORIES/MATERIAL_SECTIONS); la sezione e'
+    # vuota per Consultancies e Travel Expenses.
+    category: Mapped[str] = mapped_column(String(64))
+    section: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(255))
+    # Costo = costo unitario x unita' per modulo x numero di moduli.
+    unit_cost: Mapped[float] = mapped_column(Float, default=0)
+    units: Mapped[float] = mapped_column(Float, default=1)
+    modules: Mapped[float] = mapped_column(Float, default=1)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+    increment: Mapped["Increment"] = relationship(back_populates="material_budget_rows")
+
+
+class IncrementBudgetReview(Base):
+    """Review di budget del progetto (foglio Budget Review del file): dopo
+    il congelamento, aggiunge righe di extra (ore o costi, anche negativi)
+    al budget iniziale. Il budget che vale e' cumulativo."""
+
+    __tablename__ = "increment_budget_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    review_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="budget_reviews")
+    hours_items: Mapped[list["IncrementBudgetReviewHours"]] = relationship(
+        back_populates="review", cascade="all, delete-orphan", order_by="IncrementBudgetReviewHours.order"
+    )
+    material_items: Mapped[list["IncrementBudgetReviewMaterial"]] = relationship(
+        back_populates="review", cascade="all, delete-orphan", order_by="IncrementBudgetReviewMaterial.order"
+    )
+
+
+class IncrementBudgetReviewHours(Base):
+    """Ore extra di una review: un'attivita' di un reparto DEV, divisa per
+    societa' (SpA/SA/TPM), come nel foglio Budget Review."""
+
+    __tablename__ = "increment_budget_review_hours"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("increment_budget_reviews.id", ondelete="CASCADE"))
+    department: Mapped[str] = mapped_column(String(16))
+    description: Mapped[str] = mapped_column(String(255))
+    spa: Mapped[float] = mapped_column(Float, default=0)
+    sa: Mapped[float] = mapped_column(Float, default=0)
+    tpm: Mapped[float] = mapped_column(Float, default=0)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    review: Mapped["IncrementBudgetReview"] = relationship(back_populates="hours_items")
+
+
+class IncrementBudgetReviewMaterial(Base):
+    """Costo extra di una review: una riga materiali come nel Dettaglio
+    materiali (costo unitario x unita' x moduli, anche negativo)."""
+
+    __tablename__ = "increment_budget_review_materials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("increment_budget_reviews.id", ondelete="CASCADE"))
+    # Categoria e sezione del foglio Materials and Expenses (vedi
+    # services/budget.MATERIAL_CATEGORIES/MATERIAL_SECTIONS); la sezione e'
+    # vuota per Consultancies e Travel Expenses.
+    category: Mapped[str] = mapped_column(String(64))
+    section: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(255))
+    # Costo = costo unitario x unita' per modulo x numero di moduli.
+    unit_cost: Mapped[float] = mapped_column(Float, default=0)
+    units: Mapped[float] = mapped_column(Float, default=1)
+    modules: Mapped[float] = mapped_column(Float, default=1)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    review: Mapped["IncrementBudgetReview"] = relationship(back_populates="material_items")
 
 
 class IncrementHoursReview(Base):

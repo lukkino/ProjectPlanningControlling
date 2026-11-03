@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
+import { BudgetReviewsCard } from '../components/BudgetReviewsCard'
 import { HoursDetailCard } from '../components/HoursDetailCard'
 import { HoursCalculatorCard } from '../components/HoursCalculatorCard'
+import { MaterialCostsCard } from '../components/MaterialCostsCard'
+import { MaterialDetailCard } from '../components/MaterialDetailCard'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
 import { IncrementFormModal } from '../components/IncrementFormModal'
 import { RichText } from '../components/ScopeCard'
@@ -25,6 +28,29 @@ export function IncrementDetailPage() {
   })
 
   const { data: allProjects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
+
+  // Congelamento del budget iniziale (poi solo review) ed export del file
+  // di budget dal template aziendale.
+  const [budgetError, setBudgetError] = useState<string | null>(null)
+  const refreshFrozen = () => {
+    setBudgetError(null)
+    for (const key of ['increment', 'hours-detail', 'material-budget', 'budget-reviews']) {
+      queryClient.invalidateQueries({ queryKey: [key, id] })
+    }
+  }
+  const freeze = useMutation({
+    mutationFn: (on: boolean) => (on ? api.budget.freeze(id) : api.budget.unfreeze(id)),
+    onSuccess: refreshFrozen,
+    onError: (e: Error) => setBudgetError(e.message),
+  })
+  const exportBudget = useMutation({
+    mutationFn: () => api.budget.exportFile(id),
+    onSuccess: ({ blob, filename }) => {
+      setBudgetError(null)
+      saveBlob(blob, filename)
+    },
+    onError: (e: Error) => setBudgetError(e.message),
+  })
 
   const remove = useMutation({
     mutationFn: () => api.increments.remove(id),
@@ -80,7 +106,43 @@ export function IncrementDetailPage() {
             {increment.notes && ` · ${increment.notes}`}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {increment.budget_frozen_at ? (
+            <button
+              className="btn"
+              disabled={freeze.isPending}
+              title="Il budget iniziale torna modificabile (Aggiorna ore/materiali progetto)"
+              onClick={() =>
+                confirm('Annullare il congelamento? Il budget iniziale torna modificabile; le review restano.') &&
+                freeze.mutate(false)
+              }
+            >
+              🔒 Budget congelato il {formatIsoDate(increment.budget_frozen_at.slice(0, 10))}
+              {increment.budget_corrected_at &&
+                ` · corretto il ${formatIsoDate(increment.budget_corrected_at.slice(0, 10))}`}
+            </button>
+          ) : (
+            <button
+              className="btn"
+              disabled={freeze.isPending}
+              title="Il budget iniziale diventa definitivo: da qui cambia solo con le review di budget"
+              onClick={() =>
+                confirm(
+                  'Congelare il budget? Dettaglio budget ore e Dettaglio materiali diventano il budget iniziale definitivo: da qui cambiano solo con le review di budget.',
+                ) && freeze.mutate(true)
+              }
+            >
+              Congela budget
+            </button>
+          )}
+          <button
+            className="btn btn-primary"
+            disabled={exportBudget.isPending}
+            title="Scarica il file di budget del progetto (template aziendale)"
+            onClick={() => exportBudget.mutate()}
+          >
+            {exportBudget.isPending ? 'Esportazione…' : '⬇ Esporta budget'}
+          </button>
           <button className="btn" onClick={() => setShowEdit(true)}>
             Modifica
           </button>
@@ -118,13 +180,21 @@ export function IncrementDetailPage() {
           </div>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nel Consumo risorse progetto sotto): le ore
-          usate vengono dall'ultimo snapshot e restano a 0 finché il Consumo risorse progetto è vuoto, anche se il progetto è collegato a un
-          increment.
+          Budget e ore usate sono proprio di questo progetto (dettaglio per voce nel Consumo risorse progetto sotto): vengono
+          dall'ultimo snapshot. Finché il Consumo risorse progetto non ha un budget ore, il Budget ore è il totale del Dettaglio
+          budget ore progetto (ultima revisione compilata, se no le ore calcolate) e il Budget materiali il totale del Budget
+          materiali progetto; le ore usate restano a 0 finché non c'è uno
+          snapshot, anche se il progetto è collegato a un increment.
         </p>
       </div>
 
+      {budgetError && <div className="error-banner">{budgetError}</div>}
+
       <HoursDetailCard incrementId={increment.id} />
+
+      <MaterialDetailCard incrementId={increment.id} />
+
+      <BudgetReviewsCard incrementId={increment.id} frozen={!!increment.budget_frozen_at} />
 
       <IncrementHistoryCard incrementId={increment.id} subProjects={increment.sub_projects} />
 
@@ -133,6 +203,8 @@ export function IncrementDetailPage() {
         projectStartDate={increment.start_date}
         projectEndDate={increment.end_date}
       />
+
+      <MaterialCostsCard incrementId={increment.id} />
 
       <SubProjectsCard increment={increment} />
 

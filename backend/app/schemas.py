@@ -2,7 +2,7 @@ import datetime as dt
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, computed_field
 
 
 # ---------- Phase ----------
@@ -160,6 +160,9 @@ class IncrementResourceTypeBase(BaseModel):
     name: str
     resource_count: float = Field(default=1, ge=0)
     hours_per_day: float = Field(default=8, ge=0, le=24)
+    # Reparto DEV del file di budget e societa' delle risorse stimate.
+    department: str | None = None
+    company: Literal["SpA", "SA", "TPM"] = "SpA"
     order: int = 0
 
 
@@ -171,6 +174,8 @@ class IncrementResourceTypeUpdate(BaseModel):
     name: str | None = None
     resource_count: float | None = Field(default=None, ge=0)
     hours_per_day: float | None = Field(default=None, ge=0, le=24)
+    department: str | None = None
+    company: Literal["SpA", "SA", "TPM"] | None = None
     order: int | None = None
 
 
@@ -197,11 +202,14 @@ class TeamMemberCreate(BaseModel):
     name: str
     # None = le ore/giorno di default della tipologia.
     hours_per_day: float | None = Field(default=None, ge=0, le=24)
+    # None = la societa' della tipologia.
+    company: Literal["SpA", "SA", "TPM"] | None = None
 
 
 class TeamMemberUpdate(BaseModel):
     name: str | None = None
     hours_per_day: float | None = Field(default=None, ge=0, le=24)
+    company: Literal["SpA", "SA", "TPM"] | None = None
     order: int | None = None
 
 
@@ -211,6 +219,7 @@ class TeamMember(BaseModel):
     resource_type_id: int
     name: str
     hours_per_day: float
+    company: str = "SpA"
     order: int
     absences: list[MemberAbsence] = []
 
@@ -239,48 +248,139 @@ class HoursCalculator(BaseModel):
     resource_types: list[IncrementResourceType] = []
 
 
-# ---------- Dettaglio budget ore progetto ----------
+# ---------- Budget di progetto (vedi services/budget.py) ----------
+
+Company = Literal["SpA", "SA", "TPM"]
+
 
 class HoursDetailRowInput(BaseModel):
-    """Una riga mandata da "Aggiorna ore progetto": i valori del calcolatore."""
+    """Una riga mandata da "Aggiorna ore progetto": una tipologia del
+    calcolatore e una societa'."""
 
     name: str
+    department: str | None = None
+    company: Company = "SpA"
     resource_count: float = Field(default=0, ge=0)
     hours: float = Field(default=0, ge=0)
 
 
 class HoursDetailRowUpdate(BaseModel):
-    hours: float = Field(ge=0)
+    hours: float | None = Field(default=None, ge=0)
+    department: str | None = None
 
 
 class HoursDetailRow(BaseModel):
-    id: int
-    name: str
-    resource_count: float
-    hours: float
-    # Ore per revisione: chiave = id della revisione; manca se non inserite.
-    review_hours: dict[int, float] = {}
-
-
-class HoursReview(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    order: int
-
-
-class HoursReviewUpdate(BaseModel):
-    name: str
-
-
-class HoursReviewValueUpdate(BaseModel):
-    # null = svuota la cella.
-    hours: float | None = Field(default=None, ge=0)
+    department: str | None = None
+    company: str
+    resource_count: float
+    hours: float
 
 
 class HoursDetail(BaseModel):
     rows: list[HoursDetailRow] = []
-    reviews: list[HoursReview] = []
+    # Budget congelato il (None = non congelato).
+    frozen_at: dt.datetime | None = None
+
+
+class MaterialWrite(BaseModel):
+    """Una riga materiali (bozza o review di budget)."""
+
+    category: str | None = None
+    section: str | None = None
+    description: str | None = None
+    unit_cost: float | None = None
+    units: float | None = None
+    modules: float | None = None
+
+
+class MaterialFields(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    category: str
+    section: str | None = None
+    description: str
+    unit_cost: float
+    units: float
+    modules: float
+
+    @computed_field
+    @property
+    def amount(self) -> float:
+        return self.unit_cost * self.units * self.modules
+
+
+class MaterialCost(MaterialFields):
+    id: int
+
+
+class MaterialBudgetRow(MaterialFields):
+    pass
+
+
+class MaterialBudget(BaseModel):
+    # Dettaglio materiali (budget iniziale), da "Aggiorna materiali
+    # progetto"; published_at None se non e' mai stato aggiornato.
+    rows: list[MaterialBudgetRow]
+    published_at: dt.datetime | None = None
+    frozen_at: dt.datetime | None = None
+
+
+class BudgetStatus(BaseModel):
+    frozen_at: dt.datetime | None = None
+
+
+class BudgetDepartment(BaseModel):
+    code: str
+    name: str
+
+
+class BudgetCatalog(BaseModel):
+    departments: list[BudgetDepartment]
+    companies: list[str]
+    categories: list[str]
+    sections: list[str]
+    categories_without_sections: list[str]
+
+
+class BudgetReviewWrite(BaseModel):
+    name: str | None = None
+    review_date: dt.date | None = None
+    note: str | None = None
+
+
+class BudgetReviewHoursWrite(BaseModel):
+    department: str | None = None
+    description: str | None = None
+    spa: float | None = None
+    sa: float | None = None
+    tpm: float | None = None
+
+
+class BudgetReviewHours(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department: str
+    description: str
+    spa: float
+    sa: float
+    tpm: float
+
+
+class BudgetReviewMaterial(MaterialFields):
+    id: int
+
+
+class BudgetReview(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    review_date: dt.date | None = None
+    note: str | None = None
+    order: int
+    hours_items: list[BudgetReviewHours] = []
+    material_items: list[BudgetReviewMaterial] = []
 
 
 # ---------- BacklogItem ----------
@@ -604,6 +704,9 @@ class SubProject(BaseModel):
 class Increment(IncrementBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    # Budget congelato il (None = non ancora congelato).
+    budget_frozen_at: dt.datetime | None = None
+    budget_corrected_at: dt.datetime | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
     sub_projects: list[SubProject] = []

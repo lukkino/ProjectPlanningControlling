@@ -350,6 +350,36 @@ def run_lightweight_migrations() -> None:
                 )
 
 
+def run_budget_migrations() -> None:
+    """Colonne del budget di progetto (reparto e societa', congelamento):
+    a parte da run_lightweight_migrations, che esce prima in alcuni casi."""
+    from app.services.budget import default_department  # import locale: models importa Base da qui
+
+    inspector = inspect(engine)
+    added = {
+        "increments": [("budget_frozen_at", "DATETIME"), ("budget_corrected_at", "DATETIME")],
+        "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
+        "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'")],
+        "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
+    }
+    for table, columns in added.items():
+        existing = {col["name"] for col in inspector.get_columns(table)}
+        for name, sql_type in columns:
+            if name in existing:
+                continue
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+                if name == "company":
+                    conn.execute(text(f"UPDATE {table} SET company = 'SpA' WHERE company IS NULL"))
+                if name == "department":
+                    # Reparto proposto per le tipologie di default.
+                    rows = conn.execute(text(f"SELECT id, name FROM {table}")).fetchall()
+                    for row_id, row_name in rows:
+                        code = default_department(row_name or "")
+                        if code:
+                            conn.execute(text(f"UPDATE {table} SET department = :code WHERE id = :id"), {"code": code, "id": row_id})
+
+
 def get_db():
     db: Session = SessionLocal()
     try:

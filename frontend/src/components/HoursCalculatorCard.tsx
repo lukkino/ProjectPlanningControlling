@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
 import { api } from '../api/client'
-import type { AbsenceKind, HoursCalculator, IncrementResourceType, MemberAbsence, TeamMember } from '../api/types'
+import type { AbsenceKind, Company, HoursCalculator, IncrementResourceType, MemberAbsence, TeamMember } from '../api/types'
 import { formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { DateInput } from './DateInput'
+import { useBudgetCatalog } from '../lib/budget'
 
 type Props = {
   incrementId: number
@@ -177,7 +178,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
     onSuccess: invalidate,
   })
   const updateMember = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<TeamMember, 'name' | 'hours_per_day'>> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company'>> }) =>
       api.hoursCalculator.updateMember(id, data),
     onSuccess: invalidate,
   })
@@ -195,12 +196,25 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
     onSuccess: invalidate,
   })
 
+  const { data: catalog } = useBudgetCatalog()
+  const { data: hoursDetail } = useQuery({
+    queryKey: ['hours-detail', incrementId],
+    queryFn: () => api.hoursDetail.get(incrementId),
+  })
+  const frozen = !!hoursDetail?.frozen_at
+
   // "Aggiorna ore progetto": copia le ore calcolate nel Dettaglio budget ore
-  // progetto (le righe con lo stesso nome tengono le ore delle review).
+  // progetto, una riga per tipologia e societa'.
   const publish = useMutation({
-    mutationFn: (rows: { name: string; resource_count: number; hours: number }[]) =>
-      api.hoursDetail.setRows(incrementId, rows),
-    onSuccess: (saved) => queryClient.setQueryData(['hours-detail', incrementId], saved),
+    mutationFn: (
+      rows: { name: string; department: string | null; company: Company; resource_count: number; hours: number }[],
+    ) => api.hoursDetail.setRows(incrementId, rows, frozen),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['hours-detail', incrementId], saved)
+      // Il Budget ore del Totale progetto puo' venire dal dettaglio.
+      queryClient.invalidateQueries({ queryKey: ['increment', incrementId] })
+      queryClient.invalidateQueries({ queryKey: ['increment-snapshots', incrementId] })
+    },
   })
 
   const error =
@@ -267,13 +281,43 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
       return next
     })
 
+  // Una riga per tipologia e societa': con le persone, le loro ore divise
+  // per la societa' di ciascuna; senza, tutta la tipologia nella sua.
+  const publishRows = () =>
+    calc.resource_types.flatMap((t) => {
+      if (t.members.length === 0)
+        return [{ name: t.name, department: t.department, company: t.company, resource_count: t.resource_count, hours: hoursOf(t) ?? 0 }]
+      const companies = [...new Set(t.members.map((m) => m.company))]
+      return companies.map((company) => {
+        const members = t.members.filter((m) => m.company === company)
+        return {
+          name: t.name,
+          department: t.department,
+          company,
+          resource_count: members.length,
+          hours: members.reduce((sum, m) => sum + (memberHours(m) ?? 0), 0),
+        }
+      })
+    })
+
   const handlePublish = () => {
     if (netDays === null) return
-    if (!confirm('Aggiornare il Dettaglio budget ore progetto con le ore calcolate qui? Eventuali ore corrette a mano (es. arrotondate) vengono sovrascritte; le ore delle review restano.')) return
-    publish.mutate(
-      calc.resource_types.map((t) => ({ name: t.name, resource_count: typeResources(t), hours: hoursOf(t) ?? 0 })),
-    )
+    const message = frozen
+      ? 'Il budget è congelato. Correggere il budget ore iniziale con le ore calcolate qui, senza una review? Usalo per errori o risorse dimenticate: le variazioni di budget vere vanno in una review. Le ore corrette a mano nel Dettaglio vengono sovrascritte.'
+      : 'Aggiornare il Dettaglio budget ore progetto con le ore calcolate qui? Eventuali ore corrette a mano (es. arrotondate) vengono sovrascritte.'
+    if (!confirm(message)) return
+    publish.mutate(publishRows())
   }
+
+  const companySelect = (value: Company, onChange: (company: Company) => void, label: string) => (
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Company)}>
+      {(catalog?.companies ?? ['SpA', 'SA', 'TPM']).map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
+  )
 
   return (
     <div className="card">
@@ -287,16 +331,24 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
             className="btn btn-primary"
             disabled={netDays === null || calc.resource_types.length === 0 || publish.isPending}
             title={
-              netDays === null
-                ? 'Imposta data di inizio e data di fine per calcolare le ore'
-                : 'Copia le ore calcolate nel Dettaglio budget ore progetto'
+              frozen
+                ? 'Budget congelato: corregge il budget ore iniziale (errori, risorse dimenticate) senza review'
+                : netDays === null
+                  ? 'Imposta data di inizio e data di fine per calcolare le ore'
+                  : 'Copia le ore calcolate nel Dettaglio budget ore progetto'
             }
             onClick={handlePublish}
           >
-            {publish.isPending ? 'Aggiornamento…' : '↑ Aggiorna ore progetto'}
+            {publish.isPending ? 'Aggiornamento…' : frozen ? '✎ Correggi ore progetto' : '↑ Aggiorna ore progetto'}
           </button>
         </div>
       </div>
+      {frozen && (
+        <p style={{ marginTop: 0, fontSize: 13, color: 'var(--warning)' }}>
+          Budget congelato: "Correggi ore progetto" sostituisce il budget ore iniziale con le ore calcolate qui, senza
+          review (per un errore o una risorsa dimenticata). Le variazioni di budget vere vanno in una review di budget.
+        </p>
+      )}
       {publish.isSuccess && (
         <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
           Dettaglio budget ore progetto aggiornato.
@@ -373,6 +425,8 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
           <thead>
             <tr>
               <th style={{ minWidth: 200 }}>Tipologia di risorsa / persona</th>
+              <th title="Reparto DEV del file di budget">Reparto</th>
+              <th title="Società delle ore nel file di budget">Società</th>
               <th className="text-right">N. risorse</th>
               <th className="text-right">Ore produttive / giorno</th>
               <th className="text-right">Giorni disponibili</th>
@@ -414,6 +468,29 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                         )}
                       </div>
                     </td>
+                    <td className="editable-cell">
+                      <select
+                        aria-label="Reparto"
+                        value={t.department ?? ''}
+                        onChange={(e) => updateType.mutate({ id: t.id, data: { department: e.target.value || null } })}
+                      >
+                        {!t.department && <option value="">— scegli —</option>}
+                        {(catalog?.departments ?? []).map((d) => (
+                          <option key={d.code} value={d.code}>
+                            {d.code} {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    {hasMembers ? (
+                      <td className="muted" title="Dalle persone del team">
+                        {[...new Set(t.members.map((m) => m.company))].join(', ')}
+                      </td>
+                    ) : (
+                      <td className="editable-cell" title="Società delle risorse stimate (e delle persone nuove)">
+                        {companySelect(t.company, (company) => updateType.mutate({ id: t.id, data: { company } }), 'Società')}
+                      </td>
+                    )}
                     {hasMembers ? (
                       <td className="text-right" title="Numero di persone del team in questa tipologia">
                         {t.members.length}
@@ -502,6 +579,10 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                           </td>
                           <td />
                           <td className="editable-cell">
+                            {companySelect(m.company, (company) => updateMember.mutate({ id: m.id, data: { company } }), `Società di ${m.name}`)}
+                          </td>
+                          <td />
+                          <td className="editable-cell">
                             <input
                               type="number"
                               min={0}
@@ -563,6 +644,8 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                         />
                       </td>
                       <td />
+                      <td />
+                      <td />
                       {/* Ore al giorno proposte alle persone nuove della tipologia. */}
                       <td className="editable-cell" title="Ore al giorno proposte per le persone nuove">
                         <input
@@ -591,7 +674,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
             })}
             {calc.resource_types.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={9} className="muted">
                   Nessuna tipologia di risorsa definita.
                 </td>
               </tr>
@@ -609,6 +692,8 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                     </span>
                   )}
                 </td>
+                <td />
+                <td />
                 <td className="text-right">
                   <strong>{fmt(totalResources)}</strong>
                 </td>

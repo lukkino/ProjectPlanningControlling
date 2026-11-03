@@ -1011,3 +1011,20 @@ tr.phase-current input { background: #e6eefc; }
   font-size: 12px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
+
+/* Review di budget (pagina del progetto). */
+.budget-review {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.budget-review summary { cursor: pointer; }
+.budget-review-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.budget-review-head label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }

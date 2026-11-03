@@ -72,6 +72,9 @@ export type IncrementResourceType = {
   name: string
   resource_count: number
   hours_per_day: number
+  // Reparto DEV del file di budget e societa' delle risorse stimate.
+  department: string | null
+  company: Company
   order: number
   // Persone della tipologia (composizione del team di progetto): se ce ne
   // sono, le ore della tipologia sono la somma delle loro.
@@ -84,9 +87,13 @@ export type TeamMember = {
   resource_type_id: number
   name: string
   hours_per_day: number
+  company: Company
   order: number
   absences: MemberAbsence[]
 }
+
+// Societa' delle ore nel file di budget.
+export type Company = 'SpA' | 'SA' | 'TPM'
 
 export type AbsenceKind = 'Ferie' | 'Malattia' | 'Altro'
 
@@ -111,24 +118,60 @@ export type HoursCalculator = {
 
 // Dettaglio budget ore progetto: le ore per tipologia di risorsa copiate dal
 // calcolatore ("Aggiorna ore progetto") e le colonne di revisione.
+// Dettaglio budget ore progetto: una riga per tipologia e societa'.
 export type HoursDetailRow = {
   id: number
   name: string
+  department: string | null
+  company: Company
   resource_count: number
   hours: number
-  // Ore per revisione: chiave = id della revisione; manca se non inserite.
-  review_hours: Record<number, number>
-}
-
-export type HoursReview = {
-  id: number
-  name: string
-  order: number
 }
 
 export type HoursDetail = {
   rows: HoursDetailRow[]
-  reviews: HoursReview[]
+  // Budget congelato il (null = non congelato).
+  frozen_at: string | null
+}
+
+// Riga materiali: costo = costo unitario x unita' per modulo x moduli.
+export type MaterialFields = {
+  category: string
+  section: string | null
+  description: string
+  unit_cost: number
+  units: number
+  modules: number
+  amount: number
+}
+
+export type BudgetCatalog = {
+  departments: { code: string; name: string }[]
+  companies: Company[]
+  categories: string[]
+  sections: string[]
+  categories_without_sections: string[]
+}
+
+export type BudgetReviewHours = {
+  id: number
+  department: string
+  description: string
+  spa: number
+  sa: number
+  tpm: number
+}
+
+export type BudgetReviewMaterial = MaterialFields & { id: number }
+
+export type BudgetReview = {
+  id: number
+  name: string
+  review_date: string | null
+  note: string | null
+  order: number
+  hours_items: BudgetReviewHours[]
+  material_items: BudgetReviewMaterial[]
 }
 
 export type ImplementedByTask = {
@@ -314,6 +357,9 @@ export type Increment = {
   // Increment (Project) a cui il progetto e' collegato per intero; null
   // anche quando e' collegato tramite i sotto-progetti.
   project_id: number | null
+  // Budget congelato il (null = non ancora congelato).
+  budget_frozen_at: string | null
+  budget_corrected_at: string | null
   created_at: string
   updated_at: string
   sub_projects: SubProject[]
@@ -452,6 +498,17 @@ export type PprDocumentMeta = DocumentRevisionMeta & {
 export type PprFileRole = 'previous' | 'previous_phase'
 
 // Documento atteso a una review (Deliverable Check del template MOD-PPR).
+// Voce del Budget materiali di un progetto.
+// Voce del Budget materiali (bozza) di un progetto.
+export type MaterialCost = MaterialFields & { id: number }
+
+// Dettaglio materiali progetto: le voci copiate con "Aggiorna materiali progetto".
+export interface MaterialBudget {
+  rows: MaterialFields[]
+  published_at: string | null
+  frozen_at: string | null
+}
+
 export interface PprReviewDeliverable {
   name: string
   requirement: string | null

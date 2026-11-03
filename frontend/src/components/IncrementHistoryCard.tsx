@@ -363,25 +363,17 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                               </select>
                             </div>
                           </td>
-                          <td className="editable-cell">
-                            {line.is_hours ? (
-                              <input
-                                type="number"
-                                defaultValue={value?.budget_value ?? 0}
-                                onBlur={(e) =>
-                                  value && updateValue.mutate({ id: value.id, data: { budget_value: Number(e.target.value) } })
-                                }
-                              />
-                            ) : (
-                              <input
-                                key={value?.budget_value}
-                                defaultValue={formatValue(value?.budget_value ?? 0, false)}
-                                onBlur={(e) =>
-                                  value &&
-                                  updateValue.mutate({ id: value.id, data: { budget_value: parseCurrencyInput(e.target.value) } })
-                                }
-                              />
-                            )}
+                          {/* Budget in sola lettura: viene dal Dettaglio budget ore
+                              e dal Budget materiali ("Aggiorna ore/materiali progetto"). */}
+                          <td
+                            style={{ fontWeight: 600 }}
+                            title={
+                              line.is_hours
+                                ? 'Dal Dettaglio budget ore progetto: si aggiorna da lì'
+                                : 'Dal Budget materiali progetto (voci di questa categoria): si aggiorna con "Aggiorna materiali progetto"'
+                            }
+                          >
+                            {formatValue(value?.budget_value ?? 0, line.is_hours)}
                           </td>
                           <td className={entries.length > 0 ? undefined : 'editable-cell'}>
                             {line.is_hours ? (

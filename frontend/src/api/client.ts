@@ -34,6 +34,12 @@ import type {
   PprFileRole,
   PprInspection,
   PprReviewDeliverable,
+  MaterialCost,
+  MaterialBudget,
+  MaterialFields,
+  BudgetCatalog,
+  BudgetReview,
+  BudgetReviewHours,
   Project,
   ProjectDetail,
   ScenariosStatus,
@@ -300,7 +306,7 @@ export const api = {
     // Persone del team di una tipologia e le loro ferie.
     addMember: (resourceTypeId: number, data: { name: string; hours_per_day?: number }) =>
       post<TeamMember>(`/increments/resource-types/${resourceTypeId}/members`, data),
-    updateMember: (id: number, data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'order'>>) =>
+    updateMember: (id: number, data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company' | 'order'>>) =>
       put<TeamMember>(`/increments/members/${id}`, data),
     removeMember: (id: number) => del(`/increments/members/${id}`),
     addAbsence: (
@@ -310,20 +316,55 @@ export const api = {
       post<MemberAbsence>(`/increments/members/${memberId}/absences`, data),
     removeAbsence: (id: number) => del(`/increments/absences/${id}`),
   },
+  // Budget di progetto: catalogo del file di budget, congelamento, export.
+  budget: {
+    catalog: () => request<BudgetCatalog>('/increments/budget-catalog'),
+    freeze: (incrementId: number) => post<{ frozen_at: string | null }>(`/increments/${incrementId}/budget/freeze`, {}),
+    unfreeze: (incrementId: number) =>
+      request<{ frozen_at: string | null }>(`/increments/${incrementId}/budget/freeze`, { method: 'DELETE' }),
+    exportFile: (incrementId: number) => downloadFile(`/increments/${incrementId}/budget/export`),
+    reviews: (incrementId: number) => request<BudgetReview[]>(`/increments/${incrementId}/budget-reviews`),
+    createReview: (incrementId: number, data: Partial<Pick<BudgetReview, 'name' | 'review_date' | 'note'>>) =>
+      post<BudgetReview>(`/increments/${incrementId}/budget-reviews`, data),
+    updateReview: (id: number, data: Partial<Pick<BudgetReview, 'name' | 'review_date' | 'note'>>) =>
+      put<BudgetReview>(`/increments/budget-reviews/${id}`, data),
+    removeReview: (id: number) => del(`/increments/budget-reviews/${id}`),
+    addReviewHours: (reviewId: number, data: Partial<Omit<BudgetReviewHours, 'id'>>) =>
+      post<BudgetReview>(`/increments/budget-reviews/${reviewId}/hours`, data),
+    updateReviewHours: (id: number, data: Partial<Omit<BudgetReviewHours, 'id'>>) =>
+      put<BudgetReview>(`/increments/budget-review-hours/${id}`, data),
+    removeReviewHours: (id: number) => request<BudgetReview>(`/increments/budget-review-hours/${id}`, { method: 'DELETE' }),
+    addReviewMaterial: (reviewId: number, data: Partial<Omit<MaterialFields, 'amount'>>) =>
+      post<BudgetReview>(`/increments/budget-reviews/${reviewId}/materials`, data),
+    updateReviewMaterial: (id: number, data: Partial<Omit<MaterialFields, 'amount'>>) =>
+      put<BudgetReview>(`/increments/budget-review-materials/${id}`, data),
+    removeReviewMaterial: (id: number) =>
+      request<BudgetReview>(`/increments/budget-review-materials/${id}`, { method: 'DELETE' }),
+  },
+  materialCosts: {
+    list: (incrementId: number) => request<MaterialCost[]>(`/increments/${incrementId}/material-costs`),
+    create: (incrementId: number, data: Partial<Omit<MaterialFields, 'amount'>>) =>
+      post<MaterialCost>(`/increments/${incrementId}/material-costs`, data),
+    update: (id: number, data: Partial<Omit<MaterialFields, 'amount'>>) =>
+      put<MaterialCost>(`/increments/material-costs/${id}`, data),
+    remove: (id: number) => del(`/increments/material-costs/${id}`),
+    budget: (incrementId: number) => request<MaterialBudget>(`/increments/${incrementId}/material-budget`),
+    // "Aggiorna materiali progetto": congela le voci di adesso.
+    // correction: correzione del budget iniziale gia' congelato.
+    publish: (incrementId: number, correction = false) =>
+      put<MaterialBudget>(`/increments/${incrementId}/material-budget${correction ? '?correction=true' : ''}`, {}),
+  },
   hoursDetail: {
     get: (incrementId: number) => request<HoursDetail>(`/increments/${incrementId}/hours-detail`),
-    // "Aggiorna ore progetto": le righe diventano le tipologie del calcolatore.
-    setRows: (incrementId: number, rows: Pick<HoursDetailRow, 'name' | 'resource_count' | 'hours'>[]) =>
-      put<HoursDetail>(`/increments/${incrementId}/hours-detail/rows`, rows),
-    // Ore di una riga corrette a mano (es. arrotondate).
-    setRowHours: (rowId: number, hours: number) => put<HoursDetail>(`/increments/hours-detail/rows/${rowId}`, { hours }),
-    addReview: (incrementId: number) => post<HoursDetail>(`/increments/${incrementId}/hours-detail/reviews`),
-    renameReview: (reviewId: number, name: string) =>
-      put<HoursDetail>(`/increments/hours-detail/reviews/${reviewId}`, { name }),
-    removeReview: (reviewId: number) => del(`/increments/hours-detail/reviews/${reviewId}`),
-    // hours null = svuota la cella.
-    setReviewHours: (reviewId: number, rowId: number, hours: number | null) =>
-      put<HoursDetail>(`/increments/hours-detail/reviews/${reviewId}/rows/${rowId}`, { hours }),
+    // "Aggiorna ore progetto": una riga per tipologia e societa' del calcolatore.
+    setRows: (
+      incrementId: number,
+      rows: Pick<HoursDetailRow, 'name' | 'department' | 'company' | 'resource_count' | 'hours'>[],
+      correction = false,
+    ) => put<HoursDetail>(`/increments/${incrementId}/hours-detail/rows${correction ? '?correction=true' : ''}`, rows),
+    // Ore (es. arrotondate) o reparto di una riga corretti a mano.
+    updateRow: (rowId: number, data: Partial<Pick<HoursDetailRow, 'hours' | 'department'>>, correction = false) =>
+      put<HoursDetail>(`/increments/hours-detail/rows/${rowId}${correction ? '?correction=true' : ''}`, data),
   },
   backlog: {
     list: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog`),

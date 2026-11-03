@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.services.budget import apply_to_snapshot, default_department, ensure_category_lines
 from app.services.metrics import compute_increment_metrics
 
 router = APIRouter(prefix="/api/increments", tags=["increments"])
@@ -81,7 +82,11 @@ def create_increment(payload: schemas.IncrementCreate, db: Session = Depends(get
             )
         )
     for order, name in enumerate(models.DEFAULT_RESOURCE_TYPES, start=1):
-        db.add(models.IncrementResourceType(increment_id=increment.id, name=name, order=order))
+        db.add(
+            models.IncrementResourceType(
+                increment_id=increment.id, name=name, department=default_department(name), order=order
+            )
+        )
     db.commit()
     db.refresh(increment)
     return increment
@@ -279,6 +284,13 @@ def create_snapshot(increment_id: int, payload: schemas.IncrementSnapshotCreate,
                 actual_hours=prev_sub_value.actual_hours,
             )
         )
+    # Il budget non si scrive negli snapshot: viene dal Dettaglio budget ore
+    # e dal Budget materiali (vedi services/budget.py), dove compilati.
+    db.flush()
+    if ensure_category_lines(increment):
+        db.flush()
+    db.refresh(snapshot)
+    apply_to_snapshot(increment, snapshot)
 
     db.commit()
     db.refresh(snapshot)
@@ -306,6 +318,8 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 def update_snapshot_value(value_id: int, payload: schemas.IncrementSnapshotValueUpdate, db: Session = Depends(get_db)):
     value = _get_snapshot_value_or_404(db, value_id)
     data = payload.model_dump(exclude_unset=True)
+    # Il budget non si modifica dallo snapshot (vedi services/budget.py).
+    data.pop("budget_value", None)
     # Con la ripartizione l'Actual e' la somma delle sue voci.
     if value.entries:
         data.pop("actual_value", None)
@@ -466,6 +480,7 @@ def create_team_member(resource_type_id: int, payload: schemas.TeamMemberCreate,
         resource_type_id=resource_type.id,
         name=name,
         hours_per_day=resource_type.hours_per_day if payload.hours_per_day is None else payload.hours_per_day,
+        company=payload.company or resource_type.company,
         order=max((m.order for m in resource_type.members), default=0) + 1,
     )
     db.add(member)
@@ -517,131 +532,3 @@ def delete_member_absence(absence_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Ferie non trovate")
     db.delete(absence)
     db.commit()
-
-
-# ---------- Dettaglio budget ore progetto ----------
-
-def _hours_detail(increment: models.Increment) -> schemas.HoursDetail:
-    return schemas.HoursDetail(
-        rows=[
-            schemas.HoursDetailRow(
-                id=row.id,
-                name=row.name,
-                resource_count=row.resource_count,
-                hours=row.hours,
-                review_hours={value.review_id: value.hours for value in row.review_values},
-            )
-            for row in increment.hours_detail_rows
-        ],
-        reviews=list(increment.hours_reviews),
-    )
-
-
-def _get_hours_review_or_404(db: Session, review_id: int) -> models.IncrementHoursReview:
-    review = db.get(models.IncrementHoursReview, review_id)
-    if review is None:
-        raise HTTPException(status_code=404, detail="Revisione non trovata")
-    return review
-
-
-@router.get("/{increment_id}/hours-detail", response_model=schemas.HoursDetail)
-def get_hours_detail(increment_id: int, db: Session = Depends(get_db)):
-    increment = _get_increment_or_404(db, increment_id)
-    # Prima lettura: le colonne di revisione di partenza.
-    if not increment.hours_reviews:
-        for order, name in enumerate(models.DEFAULT_HOURS_REVIEWS, start=1):
-            increment.hours_reviews.append(models.IncrementHoursReview(name=name, order=order))
-        db.commit()
-        db.refresh(increment)
-    return _hours_detail(increment)
-
-
-@router.put("/{increment_id}/hours-detail/rows", response_model=schemas.HoursDetail)
-def update_hours_detail_rows(
-    increment_id: int, payload: list[schemas.HoursDetailRowInput], db: Session = Depends(get_db)
-):
-    """"Aggiorna ore progetto": le righe diventano le tipologie del
-    calcolatore. Le righe gia' presenti con lo stesso nome vengono
-    aggiornate e tengono le ore delle revisioni; quelle che non ci sono piu'
-    vengono eliminate."""
-    increment = _get_increment_or_404(db, increment_id)
-    existing = {row.name.strip().lower(): row for row in increment.hours_detail_rows}
-    for order, item in enumerate(payload, start=1):
-        row = existing.pop(item.name.strip().lower(), None)
-        if row is None:
-            row = models.IncrementHoursDetailRow(increment_id=increment.id)
-            db.add(row)
-        row.name = item.name.strip()
-        row.resource_count = item.resource_count
-        row.hours = item.hours
-        row.order = order
-    for row in existing.values():
-        db.delete(row)
-    db.commit()
-    db.refresh(increment)
-    return _hours_detail(increment)
-
-
-@router.put("/hours-detail/rows/{row_id}", response_model=schemas.HoursDetail)
-def update_hours_detail_row(row_id: int, payload: schemas.HoursDetailRowUpdate, db: Session = Depends(get_db)):
-    """Ore di una riga corrette a mano (es. arrotondate): restano finche' un
-    nuovo "Aggiorna ore progetto" non le sovrascrive."""
-    row = db.get(models.IncrementHoursDetailRow, row_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Riga del dettaglio ore non trovata")
-    row.hours = payload.hours
-    db.commit()
-    db.refresh(row.increment)
-    return _hours_detail(row.increment)
-
-
-@router.post("/{increment_id}/hours-detail/reviews", response_model=schemas.HoursDetail, status_code=201)
-def create_hours_review(increment_id: int, db: Session = Depends(get_db)):
-    increment = _get_increment_or_404(db, increment_id)
-    order = max((r.order for r in increment.hours_reviews), default=0) + 1
-    increment.hours_reviews.append(
-        models.IncrementHoursReview(name=f"Review {len(increment.hours_reviews) + 1}", order=order)
-    )
-    db.commit()
-    db.refresh(increment)
-    return _hours_detail(increment)
-
-
-@router.put("/hours-detail/reviews/{review_id}", response_model=schemas.HoursDetail)
-def update_hours_review(review_id: int, payload: schemas.HoursReviewUpdate, db: Session = Depends(get_db)):
-    review = _get_hours_review_or_404(db, review_id)
-    review.name = payload.name.strip() or review.name
-    db.commit()
-    db.refresh(review.increment)
-    return _hours_detail(review.increment)
-
-
-@router.delete("/hours-detail/reviews/{review_id}", response_model=schemas.HoursDetail)
-def delete_hours_review(review_id: int, db: Session = Depends(get_db)):
-    review = _get_hours_review_or_404(db, review_id)
-    increment = review.increment
-    db.delete(review)
-    db.commit()
-    db.refresh(increment)
-    return _hours_detail(increment)
-
-
-@router.put("/hours-detail/reviews/{review_id}/rows/{row_id}", response_model=schemas.HoursDetail)
-def set_hours_review_value(
-    review_id: int, row_id: int, payload: schemas.HoursReviewValueUpdate, db: Session = Depends(get_db)
-):
-    review = _get_hours_review_or_404(db, review_id)
-    row = db.get(models.IncrementHoursDetailRow, row_id)
-    if row is None or row.increment_id != review.increment_id:
-        raise HTTPException(status_code=404, detail="Riga del dettaglio ore non trovata")
-    value = next((v for v in review.values if v.row_id == row_id), None)
-    if payload.hours is None:
-        if value is not None:
-            db.delete(value)
-    elif value is None:
-        db.add(models.IncrementHoursReviewValue(review_id=review.id, row_id=row.id, hours=payload.hours))
-    else:
-        value.hours = payload.hours
-    db.commit()
-    db.refresh(review.increment)
-    return _hours_detail(review.increment)

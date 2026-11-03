@@ -15,8 +15,6 @@ const emptyForm = {
   start_date: '',
   end_date: '',
   notes: '',
-  estimated_budget_hours: 0,
-  estimated_budget_material: 0,
 }
 
 export function IncrementFormModal({ increment, onClose }: Props) {
@@ -27,8 +25,6 @@ export function IncrementFormModal({ increment, onClose }: Props) {
           start_date: increment.start_date ?? '',
           end_date: increment.end_date ?? '',
           notes: increment.notes ?? '',
-          estimated_budget_hours: increment.estimated_budget_hours,
-          estimated_budget_material: increment.estimated_budget_material,
         }
       : emptyForm,
   )
@@ -79,28 +75,6 @@ export function IncrementFormModal({ increment, onClose }: Props) {
             <DateInput value={form.end_date} onChange={(value) => set('end_date', value ?? '')} />
           </div>
         </div>
-        {/* Alla creazione non si chiedono: budget ore e materiali si calcolano
-            nel progetto col calcolatore ore (e poi lo Storico). */}
-        {increment && (
-        <div className="grid-2">
-          <div className="form-row">
-            <label>Budget ore stimate</label>
-            <input
-              type="number"
-              value={form.estimated_budget_hours}
-              onChange={(e) => set('estimated_budget_hours', Number(e.target.value))}
-            />
-          </div>
-          <div className="form-row">
-            <label>Budget materiali (€)</label>
-            <input
-              type="number"
-              value={form.estimated_budget_material}
-              onChange={(e) => set('estimated_budget_material', Number(e.target.value))}
-            />
-          </div>
-        </div>
-        )}
 
         {save.isError && <div className="error-banner">{(save.error as Error).message}</div>}
 
