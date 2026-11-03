@@ -15,18 +15,33 @@ def _project_ptih_codes(project: models.Project) -> str | None:
     return ", ".join(p.code for p in project.progetti) or None
 
 
-def sync_release_from_project(release: models.Release, project: models.Project) -> None:
-    """Riporta sulla release i dati dell'increment: Project ID, date e Change
-    Order. Solo quelli valorizzati sull'increment, per non cancellare quanto
-    gia' scritto nella release (es. i dati importati dal foglio)."""
-    values = {
-        "ptih_code": _project_ptih_codes(project),
+# Date della release che stanno nell'increment (Project): per le release di
+# un increment dell'app sono sempre le sue, e in Releases non si modificano.
+PROJECT_DATE_FIELDS = ("start_date", "expected_release_date", "actual_release_date")
+
+
+RELEASE_TO_MARKET = "Release to Market"
+
+
+def _project_dates(project: models.Project) -> dict:
+    """Start Date: l'inizio dell'increment. Expected e Actual Release: la
+    data Aggiornata e quella Effettiva della fase Release to Market (per
+    l'Actual, in mancanza, la data in cui l'increment e' segnato rilasciato)."""
+    rtm = next((phase for phase in project.phases if phase.name == RELEASE_TO_MARKET), None)
+    return {
         "start_date": project.start_date,
-        "expected_release_date": project.planned_finish_date,
-        "actual_release_date": project.release_date,
-        "change_order": project.change_order_label,
+        "expected_release_date": rtm.planned_date if rtm else None,
+        "actual_release_date": (rtm.actual_date if rtm else None) or project.release_date,
     }
-    for field, value in values.items():
+
+
+def sync_release_from_project(release: models.Release, project: models.Project) -> None:
+    """Riporta sulla release i dati dell'increment. Le date sempre; Project ID
+    e Change Order solo se valorizzati sull'increment, per non cancellare
+    quanto gia' scritto nella release (es. i dati importati dal foglio)."""
+    for field, value in _project_dates(project).items():
+        setattr(release, field, value)
+    for field, value in {"ptih_code": _project_ptih_codes(project), "change_order": project.change_order_label}.items():
         if value is not None:
             setattr(release, field, value)
 
@@ -60,10 +75,41 @@ def _fill_missing_ptih_codes(db: Session) -> None:
         db.commit()
 
 
+def _sync_project_dates(db: Session) -> None:
+    """Allinea le date delle release a quelle dei loro increment."""
+    projects = {project.code: project for project in db.query(models.Project)}
+    changed = False
+    for release in db.query(models.Release):
+        project = projects.get(release.increment_code)
+        if project is None:
+            continue
+        for field, value in _project_dates(project).items():
+            if getattr(release, field) != value:
+                setattr(release, field, value)
+                changed = True
+    if changed:
+        db.commit()
+
+
+def _mark_project_releases(db: Session, releases: list[models.Release]) -> list[models.Release]:
+    """Attributi non salvati sulle release di un increment dell'app:
+    project_id (la pagina ne mostra le date in sola lettura) e
+    scope_narrative, lo scopo discorsivo dell'increment che, se c'e', fa da
+    Scopo al posto di quello scritto nella release."""
+    projects = {project.code: project for project in db.query(models.Project)}
+    for release in releases:
+        project = projects.get(release.increment_code)
+        release.project_id = project.id if project else None
+        release.scope_narrative = (project.scope_narrative or None) if project else None
+    return releases
+
+
 def _list(db: Session) -> list[models.Release]:
     _add_missing_project_releases(db)
     _fill_missing_ptih_codes(db)
-    return db.query(models.Release).order_by(models.Release.sort_order, models.Release.id).all()
+    _sync_project_dates(db)
+    releases = db.query(models.Release).order_by(models.Release.sort_order, models.Release.id).all()
+    return _mark_project_releases(db, releases)
 
 
 def _get_release_or_404(db: Session, release_id: int) -> models.Release:
@@ -108,11 +154,14 @@ def create_release(payload: schemas.ReleaseWrite, db: Session = Depends(get_db))
 @router.put("/{release_id}", response_model=schemas.ReleaseRead)
 def update_release(release_id: int, payload: schemas.ReleaseWrite, db: Session = Depends(get_db)):
     release = _get_release_or_404(db, release_id)
+    linked = db.query(models.Project).filter(models.Project.code == release.increment_code).count() > 0
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if linked and field in PROJECT_DATE_FIELDS:
+            continue  # le date di un increment dell'app si cambiano nell'increment
         setattr(release, field, value)
     db.commit()
     db.refresh(release)
-    return release
+    return _mark_project_releases(db, [release])[0]
 
 
 @router.delete("/{release_id}", status_code=204)

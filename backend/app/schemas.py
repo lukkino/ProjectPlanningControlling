@@ -684,6 +684,12 @@ class ReleaseWrite(BaseModel):
 class ReleaseRead(ReleaseWrite):
     id: int
     components: list[ReleaseComponentRead]
+    # Increment dell'app a cui la release appartiene (stesso codice): le sue
+    # date vengono da li' e in Releases sono in sola lettura.
+    project_id: int | None = None
+    # Scopo discorsivo dell'increment (HTML), se c'e': in Releases sostituisce
+    # lo Scopo scritto nella release (objective), in sola lettura.
+    scope_narrative: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

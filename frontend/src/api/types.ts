@@ -389,6 +389,10 @@ export type Release = {
   change_order: string | null
   process: string | null
   components: ReleaseComponent[]
+  // Increment dell'app: le date vengono da li' (sola lettura in Releases).
+  project_id: number | null
+  // Scopo discorsivo dell'increment (HTML): se c'e' fa da Scopo, sola lettura.
+  scope_narrative: string | null
 }
 
 export type IncrementRequirement = {

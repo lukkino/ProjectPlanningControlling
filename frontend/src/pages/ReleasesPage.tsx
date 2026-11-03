@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { CSSProperties, ReactNode } from 'react'
 import { api, saveBlob } from '../api/client'
+import { RichText } from '../components/ScopeCard'
 import type { Release, ReleaseComponent } from '../api/types'
 
 const BLANK_LABEL = '(vuote)'
@@ -31,7 +33,7 @@ const COLUMNS: Column[] = [
   { key: 'fix_version', label: 'Fix version', level: 'component', kind: 'text', minWidth: 80 },
   { key: 'detail', label: 'Dettaglio', level: 'component', kind: 'multiline', minWidth: 240 },
   { key: 'note', label: 'Note', level: 'component', kind: 'multiline', minWidth: 140 },
-  { key: 'objective', label: 'Obbiettivo', level: 'release', kind: 'multiline', minWidth: 240 },
+  { key: 'objective', label: 'Scopo', level: 'release', kind: 'multiline', minWidth: 280 },
   { key: 'start_date', label: 'Start Date', level: 'release', kind: 'date', minWidth: 125 },
   { key: 'expected_release_date', label: 'Expected Release', level: 'release', kind: 'date', minWidth: 125 },
   { key: 'actual_release_date', label: 'Actual Release', level: 'release', kind: 'date', minWidth: 125 },
@@ -255,6 +257,38 @@ export function ReleasesPage() {
     if (column.level === 'component' && release.id === latestReleaseId) {
       style.background = LATEST_RELEASE_BACKGROUND
     }
+    // Scopo discorsivo dell'increment: sostituisce quello della release, qui
+    // solo lettura (si modifica nella Dashboard dell'increment).
+    if (column.key === 'objective' && release.scope_narrative && release.project_id != null) {
+      return (
+        <td key={column.key} rowSpan={covered.length > 1 ? covered.length : undefined} style={style}>
+          <div
+            className="releases-scope"
+            title={`Scopo discorsivo dell'increment ${release.increment_code}: si modifica nella sua Dashboard`}
+          >
+            <RichText text={release.scope_narrative} />
+          </div>
+          <Link to={`/projects/${release.project_id}`} style={{ fontSize: 11 }}>
+            Modifica nell'increment
+          </Link>
+        </td>
+      )
+    }
+    // Date di un increment dell'app: vengono dall'increment, qui solo lettura.
+    if (column.kind === 'date' && release.project_id != null) {
+      const value = rawValue(row, column)
+      return (
+        <td key={column.key} rowSpan={covered.length > 1 ? covered.length : undefined} style={style}>
+          <Link
+            to={`/projects/${release.project_id}`}
+            title={`Data dell'increment ${release.increment_code}: si modifica nell'increment (inizio dell'increment, fase Release to Market)`}
+            style={{ color: 'inherit' }}
+          >
+            {value ? formatDate(value) : <span className="muted">—</span>}
+          </Link>
+        </td>
+      )
+    }
     const save = (value: string | null) => {
       if (column.level === 'release') {
         updateRelease.mutate({ id: release.id, field: column.key, value })
@@ -280,7 +314,7 @@ export function ReleasesPage() {
         <div className="page-header" style={{ marginBottom: 0 }}>
           <div>
             <h3 style={{ margin: 0 }}>Releases</h3>
-            <span className="sub muted">Contenuto componenti PTBSYS-03 (New Architecture NA7). Le modifiche si salvano uscendo dal campo. In giallo l'ultimo rilascio completato.</span>
+            <span className="sub muted">Contenuto componenti PTBSYS-03 (New Architecture NA7). Le modifiche si salvano uscendo dal campo; le date degli increment vengono dall'increment. In giallo l'ultimo rilascio completato.</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={() => exportExcel.mutate()} disabled={exportExcel.isPending}>

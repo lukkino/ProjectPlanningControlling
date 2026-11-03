@@ -903,6 +903,8 @@ tr.phase-current input { background: #e6eefc; }
 .releases-gap td { height: 12px; padding: 0; border: none; background: var(--bg); }
 .releases-gap tr:hover { background: none; }
 .releases-centered { text-align: center; }
+/* Scopo discorsivo di un increment in Releases: lungo, scorre nella cella. */
+.releases-scope { max-height: 180px; overflow-y: auto; font-size: 12px; }
 /* Colonna Increment bloccata a sinistra nello scroll orizzontale: sfondo
    pieno per coprire le celle che le scorrono sotto, bordo destro disegnato
    come ombra perche' con border-collapse il bordo non segue la cella. */

@@ -4,6 +4,8 @@ intestazioni in riga 3, dati dalla riga 4), cosi' le righe si possono
 incollare li'. Il file dei componenti non viene toccato. I componenti
 dell'ultimo rilascio completato sono in giallo, come nel foglio."""
 
+from html import unescape
+from html.parser import HTMLParser
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -25,7 +27,7 @@ COLUMNS = (
     ("Fix version", 11),
     ("Dettaglio", 33),
     ("Note", 27),
-    ("Obbiettivo", 26),
+    ("Scopo", 26),
     ("Start Date", 13),
     ("Expected Release Date", 13),
     ("Actual Release Date", 12),
@@ -41,6 +43,43 @@ def latest_completed_release_id(releases: list[models.Release]) -> int | None:
     """L'ultimo rilascio completato: la release con l'Actual Release piu' recente."""
     completed = [release for release in releases if release.actual_release_date]
     return max(completed, key=lambda release: release.actual_release_date).id if completed else None
+
+
+class _TextParser(HTMLParser):
+    """Testo semplice da un testo formattato: un a capo per blocco, un
+    pallino per voce di elenco."""
+
+    BLOCKS = {"p", "div", "li", "h1", "h2", "h3", "h4", "br", "tr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.BLOCKS:
+            self.parts.append("\n")
+        if tag == "li":
+            self.parts.append("• ")
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def html_to_text(html: str) -> str:
+    parser = _TextParser()
+    parser.feed(html)
+    lines = [line.strip() for line in unescape("".join(parser.parts)).splitlines()]
+    text = "\n".join(lines)
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text.strip()
+
+
+def _scope_text(release: models.Release) -> str | None:
+    """Lo Scopo: quello discorsivo dell'increment se c'e', altrimenti quello
+    scritto nella release."""
+    narrative = getattr(release, "scope_narrative", None)
+    return html_to_text(narrative) if narrative else release.objective
 
 
 def export_releases(releases: list[models.Release]) -> bytes:
@@ -83,7 +122,7 @@ def export_releases(releases: list[models.Release]) -> bytes:
         release_values = (
             release.ptih_code,
             release.increment_code,
-            release.objective,
+            _scope_text(release),
             release.start_date,
             release.expected_release_date,
             release.actual_release_date,
