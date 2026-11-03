@@ -471,8 +471,6 @@ class ProjectBase(BaseModel):
     status: str = "Kick-off"
     scope: str | None = None
     scope_narrative: str | None = None
-    start_date: dt.date | None = None
-    planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
     jira_jql: str | None = None
     change_order_url: str | None = None
@@ -498,8 +496,6 @@ class ProjectUpdate(BaseModel):
     status: str | None = None
     scope: str | None = None
     scope_narrative: str | None = None
-    start_date: dt.date | None = None
-    planned_finish_date: dt.date | None = None
     dev_start_date: dt.date | None = None
     jira_jql: str | None = None
     change_order_url: str | None = None
@@ -513,9 +509,11 @@ class ProjectUpdate(BaseModel):
 class ProjectListItem(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    # Sola lettura: e' la data aggiornata della fase "Code freeze", si
-    # modifica dalle fasi dell'increment.
+    # Sola lettura: date aggiornate delle fasi Kick-off, Code freeze e
+    # Release to Market, si modificano dalle fasi dell'increment.
+    start_date: dt.date | None = None
     code_freeze_date: dt.date | None = None
+    planned_finish_date: dt.date | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
     created_at: dt.datetime

@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Project } from '../api/types'
-import { formatIsoDate } from '../lib/dates'
 
 type Props = {
   project?: Project
@@ -15,8 +14,6 @@ const emptyForm = {
   name: '',
   status: 'Kick-off',
   scope: '',
-  start_date: '',
-  planned_finish_date: '',
   jira_jql: '',
   scenarios_folder: '',
   review_documents_folder: '',
@@ -30,8 +27,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
           name: project.name,
           status: project.status,
           scope: project.scope ?? '',
-          start_date: project.start_date ?? '',
-          planned_finish_date: project.planned_finish_date ?? '',
           jira_jql: project.jira_jql ?? '',
           scenarios_folder: project.scenarios_folder ?? '',
           review_documents_folder: project.review_documents_folder ?? '',
@@ -45,8 +40,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
     mutationFn: () => {
       const payload: Partial<Project> = {
         ...form,
-        start_date: form.start_date || null,
-        planned_finish_date: form.planned_finish_date || null,
         scope: form.scope || null,
         jira_jql: form.jira_jql || null,
         scenarios_folder: form.scenarios_folder.trim() || null,
@@ -97,26 +90,6 @@ export function ProjectFormModal({ project, onClose }: Props) {
             <textarea rows={2} value={form.scope} onChange={(e) => set('scope', e.target.value)} />
           </div>
         )}
-        <div className="grid-3">
-          <div className="form-row">
-            <label>Project start</label>
-            <input type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
-          </div>
-          {/* Il code freeze ufficiale e' la data aggiornata della fase "Code
-              freeze" nelle fasi della Dashboard: qui solo in lettura. */}
-          <div className="form-row" title="Si modifica dalle fasi dell'increment in Dashboard (fase Code freeze, data aggiornata)">
-            <label>Code freeze</label>
-            <input value={formatIsoDate(project?.code_freeze_date) ?? 'dalle fasi in Dashboard'} disabled />
-          </div>
-          <div className="form-row">
-            <label>Planned finish</label>
-            <input
-              type="date"
-              value={form.planned_finish_date}
-              onChange={(e) => set('planned_finish_date', e.target.value)}
-            />
-          </div>
-        </div>
         <div className="form-row">
           <label>JQL Jira (issue del backlog di questo increment)</label>
           <textarea

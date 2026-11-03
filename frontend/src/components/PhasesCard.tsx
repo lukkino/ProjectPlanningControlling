@@ -15,9 +15,14 @@ const COLOR_ACTUAL = '#eb6834'
 // Linea che unisce la data originale a quella che vale ora della stessa fase.
 const COLOR_SLIP = '#d62728'
 
-// La fase "Code freeze" porta il code freeze ufficiale dell'increment: il
-// backend non la lascia rinominare ne' eliminare.
-const isCodeFreezePhase = (p: Phase) => p.name.trim().toLowerCase().replace('-', ' ') === 'code freeze'
+// Fasi che portano le date dell'increment (la loro data aggiornata): il
+// backend non le lascia rinominare ne' eliminare. Il Project start e' la
+// prima fase, che si rinomina ma non si elimina.
+const DATE_PHASES: Record<string, string> = {
+  'code freeze': "Code freeze ufficiale dell'increment: vale per Backlog, Gantt, Monte Carlo e Forecasting",
+  'release to market': "Planned finish dell'increment: vale per i Gantt delle dashboard e per Releases (Expected Release)",
+}
+const datePhaseRole = (p: Phase): string | undefined => DATE_PHASES[p.name.trim().toLowerCase().replace(/-/g, ' ')]
 
 // Data che vale ora per una fase: l'effettiva se c'e', altrimenti la
 // pianificata aggiornata.
@@ -37,8 +42,8 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
   const { data: phases } = useQuery({ queryKey: ['phases', projectId], queryFn: () => api.phases.list(projectId) })
 
-  // La fase "Code freeze" e' anche il code freeze dell'increment (il
-  // backend le tiene allineate): si rinfresca anche l'increment.
+  // Kick-off, Code freeze e Release to Market danno le date dell'increment
+  // (il backend le tiene allineate): si rinfresca anche l'increment.
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['phases', projectId] })
     queryClient.invalidateQueries({ queryKey: ['project', projectId] })
@@ -117,12 +122,8 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <input
                         defaultValue={phase.name}
-                        disabled={isCodeFreezePhase(phase)}
-                        title={
-                          isCodeFreezePhase(phase)
-                            ? "Code freeze ufficiale dell'increment: la sua data aggiornata vale per Backlog, Gantt, Monte Carlo e Forecasting"
-                            : undefined
-                        }
+                        disabled={!!datePhaseRole(phase)}
+                        title={datePhaseRole(phase) && `La data aggiornata è il ${datePhaseRole(phase)}`}
                         onBlur={(e) => e.target.value !== phase.name && update.mutate({ id: phase.id, data: { name: e.target.value } })}
                       />
                       {index === currentPhaseIndex && (
@@ -198,8 +199,12 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   <td>
                     <button
                       className="btn btn-danger"
-                      disabled={isCodeFreezePhase(phase)}
-                      title={isCodeFreezePhase(phase) ? 'Il code freeze ufficiale non si può eliminare' : undefined}
+                      disabled={!!datePhaseRole(phase) || index === 0}
+                      title={
+                        index === 0
+                          ? "La prima fase porta il Project start dell'increment: non si può eliminare"
+                          : datePhaseRole(phase) && "Porta una data dell'increment: non si può eliminare"
+                      }
                       onClick={() => removePhase.mutate(phase.id)}
                     >
                       ✕

@@ -123,14 +123,12 @@ class Project(Base):
     # Lo Scope in forma discorsiva, per Change Order e Release Notice.
     scope_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    # Copia in sola lettura della data aggiornata della fase "Code freeze"
-    # (la data ufficiale, vedi routers/projects.sync_code_freeze): la
-    # mantiene il backend, cosi' chi legge l'increment (Backlog, Gantt,
-    # Monte Carlo, presentazioni...) usa sempre la data delle fasi.
+    # start_date, code_freeze_date e planned_finish_date sono copie in sola
+    # lettura delle date aggiornate delle fasi Kick-off, Code freeze e
+    # Release to Market (vedi routers/projects.sync_phase_dates): le mantiene
+    # il backend, cosi' chi legge l'increment (Backlog, Gantt, Monte Carlo,
+    # presentazioni, Releases...) usa sempre le date delle fasi.
     code_freeze_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    # Data di fine pianificata del progetto (rilascio finale/Release to
-    # Market), distinta dal code freeze: usata anche nella Dashboard
-    # progetti per il Gantt.
     planned_finish_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
     # solo l'avvio formale del progetto): usato in Forecasting per contare

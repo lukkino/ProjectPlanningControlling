@@ -553,6 +553,9 @@ export function BacklogGanttChart({
 
   const chartWidth = (maxDay - minDay + 1) * dayWidth
   const dayToX = (day: number) => (day - minDay) * dayWidth
+  // Le linee verticali (Today, Code Freeze, fasi) cadono a fine giornata,
+  // sul bordo destro del giorno, dove finiscono anche le barre.
+  const lineX = (day: number) => dayToX(day) + dayWidth
 
   // Barre modificabili col mouse: cursore secondo la zona (bordi o centro),
   // trascinamento a giorni interi con anteprima, salvataggio al rilascio.
@@ -663,20 +666,20 @@ export function BacklogGanttChart({
   // fasi vicine.
   const todayLabelWidth = markTextWidth(TODAY_LABEL, 700) + 8
   // Dentro il calendario anche quando oggi e' vicino a un suo bordo.
-  const todayLabelStart = Math.min(Math.max(0, dayToX(todayDay) - todayLabelWidth / 2), chartWidth - todayLabelWidth)
+  const todayLabelStart = Math.min(Math.max(0, lineX(todayDay) - todayLabelWidth / 2), chartWidth - todayLabelWidth)
   const todaySlot = { start: todayLabelStart, width: todayLabelWidth, lane: 0 }
   const marks = markDays.map((day) => {
     const label = `${namesByDay.get(day)!.join(' · ')} ${formatEpochDaysAsDate(day)}`
     const width = markTextWidth(label, 600)
-    const alignRight = dayToX(day) + 6 + width > chartWidth
+    const alignRight = lineX(day) + 6 + width > chartWidth
     return {
       day,
       label,
-      start: alignRight ? dayToX(day) - 3 - width : dayToX(day) + 6,
+      start: alignRight ? lineX(day) - 3 - width : lineX(day) + 6,
       width,
       lane: 0,
       color: day === codeFreezeDay ? 'var(--success)' : COLOR_PHASE,
-      position: alignRight ? { right: chartWidth - dayToX(day) + 3 } : { left: dayToX(day) + 6 },
+      position: alignRight ? { right: chartWidth - lineX(day) + 3 } : { left: lineX(day) + 6 },
     }
   })
   const laneEnds: number[] = []
@@ -1020,7 +1023,7 @@ export function BacklogGanttChart({
               <div
                 style={{
                   position: 'absolute',
-                  left: dayToX(todayDay) - 1,
+                  left: lineX(todayDay) - 1,
                   top: headerHeight + todaySlot.lane * MARK_ROW_HEIGHT + MARK_ROW_HEIGHT - 2,
                   bottom: 0,
                   borderLeft: `2px solid ${COLOR_TODAY}`,
@@ -1167,7 +1170,7 @@ export function BacklogGanttChart({
                       title={mark.label}
                       style={{
                         position: 'absolute',
-                        left: dayToX(mark.day),
+                        left: lineX(mark.day) - 2,
                         top: 0,
                         bottom: 0,
                         borderLeft: `3px dashed ${mark.color}`,
@@ -1335,7 +1338,7 @@ export function BacklogGanttChart({
             <div
               style={{
                 position: 'absolute',
-                left: dayToX(todayDay) - 1,
+                left: lineX(todayDay) - 1,
                 top: 0,
                 bottom: 0,
                 borderLeft: `2px solid ${COLOR_TODAY}`,

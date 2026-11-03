@@ -13,7 +13,7 @@ run_lightweight_migrations()
 # Il code freeze ufficiale e' la fase "Code freeze": ogni increment deve
 # averla e la copia sull'increment deve coincidere.
 with SessionLocal() as _db:
-    projects.ensure_code_freeze_phases(_db)
+    projects.ensure_date_phases(_db)
 
 app = FastAPI(title="Project Planning & Controlling API")
 
