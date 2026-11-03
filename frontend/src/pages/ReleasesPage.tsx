@@ -5,6 +5,7 @@ import type { CSSProperties, DragEvent, ReactNode } from 'react'
 import { api, saveBlob } from '../api/client'
 import { RichText } from '../components/ScopeCard'
 import type { Release, ReleaseComponent } from '../api/types'
+import { DateInput } from '../components/DateInput'
 
 const BLANK_LABEL = '(vuote)'
 // Sfondo dei componenti dell'ultimo rilascio completato (giallo, come nel foglio).
@@ -96,6 +97,9 @@ function EditableField({
   const save = (next: string) => {
     if (next.trim() !== value) onSave(next.trim() || null)
   }
+  if (kind === 'date') {
+    return <DateInput value={value} aria-label={label} onChange={onSave} />
+  }
   if (kind === 'multiline') {
     return (
       <textarea
@@ -111,7 +115,6 @@ function EditableField({
     <input
       key={value}
       aria-label={label}
-      type={kind === 'date' ? 'date' : 'text'}
       defaultValue={value}
       onBlur={(e) => save(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}

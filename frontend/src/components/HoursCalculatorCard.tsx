@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react'
 import { api } from '../api/client'
 import type { AbsenceKind, HoursCalculator, IncrementResourceType, MemberAbsence, TeamMember } from '../api/types'
 import { formatIsoDate, workingDaysBetween } from '../lib/dates'
+import { DateInput } from './DateInput'
 
 type Props = {
   incrementId: number
@@ -95,18 +96,17 @@ function AbsencesCell({
               <option key={k}>{k}</option>
             ))}
           </select>
-          <input
-            type="date"
+          <DateInput
             value={from}
             min={periodStart ?? undefined}
             max={periodEnd ?? undefined}
-            onChange={(e) => {
-              setFrom(e.target.value)
-              if (!to || to < e.target.value) setTo(e.target.value)
+            onChange={(value) => {
+              setFrom(value ?? '')
+              if (value && (!to || to < value)) setTo(value)
             }}
           />
           –
-          <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+          <DateInput value={to} min={from || undefined} onChange={(value) => setTo(value ?? '')} />
           <button
             type="button"
             className="btn"
@@ -315,28 +315,12 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
       <div className="grid-3" key={`${calc.start_date}|${calc.end_date}|${calc.vacation_days}`}>
         <div className="form-row">
           <label>Data di inizio{!calc.start_date && projectStartDate && ' (dal progetto)'}</label>
-          <input
-            type="date"
-            defaultValue={startDate ?? ''}
-            onBlur={(e) => {
-              const value = e.target.value || null
-              if (value !== startDate) updateCalc.mutate({ start_date: value })
-              // Campo svuotato: si torna alla data del progetto.
-              if (!value) e.target.value = projectStartDate ?? ''
-            }}
-          />
+          {/* Campo svuotato: si torna alla data del progetto. */}
+          <DateInput value={startDate} onChange={(value) => updateCalc.mutate({ start_date: value })} />
         </div>
         <div className="form-row">
           <label>Data di fine{!calc.end_date && projectEndDate && ' (dal progetto)'}</label>
-          <input
-            type="date"
-            defaultValue={endDate ?? ''}
-            onBlur={(e) => {
-              const value = e.target.value || null
-              if (value !== endDate) updateCalc.mutate({ end_date: value })
-              if (!value) e.target.value = projectEndDate ?? ''
-            }}
-          />
+          <DateInput value={endDate} onChange={(value) => updateCalc.mutate({ end_date: value })} />
         </div>
         <div className="form-row">
           <label>Festività e chiusure (giorni, per tutti)</label>

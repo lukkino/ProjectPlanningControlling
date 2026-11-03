@@ -950,3 +950,64 @@ tr.phase-current input { background: #e6eefc; }
 .releases-drag-handle:hover {
   color: var(--primary);
 }
+
+/* Campo data gg/mm/aaaa (components/DateInput): testo + calendario nativo nascosto. */
+.date-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+.date-input input:not(.date-input-picker) {
+  width: 11ch;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.date-input-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.date-input-btn:hover:not(:disabled) { opacity: 1; }
+.date-input-btn:disabled { cursor: default; opacity: 0.3; }
+.date-input-picker {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Documenti per la review (sezione Documents, riquadro di ogni review). */
+.review-deliverables {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.review-deliverables summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.review-deliverables summary .muted { font-weight: 400; font-size: 12px; }
+.review-deliverables .table-wrap { margin-top: 10px; }
+
+/* Tooltip dei grafici disegnato a mano (es. Fasi increment). */
+.chart-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}

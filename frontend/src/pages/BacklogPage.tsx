@@ -36,6 +36,7 @@ import {
   type DaysOff,
 } from '../lib/scheduling'
 import { useProjectContext } from './useProjectContext'
+import { DateInput } from '../components/DateInput'
 
 // "2026-09-19T09:11:34.301529" -> "19/09/2026, 09:11". null se manca o non è
 // una data valida (es. un item mai sincronizzato).
@@ -43,7 +44,7 @@ function formatDateTime(value: string | null): string | null {
   if (!value) return null
   const d = parseBackendDateTime(value)
   if (Number.isNaN(d.getTime())) return null
-  return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+  return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 // Ordinamento esplicito (facoltativo) per stato, dall'alto verso il basso:
@@ -516,7 +517,6 @@ export function BacklogPage() {
   }
 
   const num = (v: string) => (v === '' ? null : Number(v))
-  const dateOrNull = (v: string) => v || null
 
   // Progetti a cui si possono attribuire le ore di un item: quelli collegati
   // per intero e quelli di cui e' collegato un sotto-progetto (una volta
@@ -740,20 +740,15 @@ export function BacklogPage() {
       render: (item) => {
         const driving = resolvePredecessors(item, itemsByKey).filter((p) => p.expected_finish)
         return (
-          <input
-            key={item.planned_start ?? ''}
-            type="date"
-            defaultValue={item.planned_start ?? ''}
+          <DateInput
+            value={item.planned_start}
             disabled={driving.length > 0}
             title={
               driving.length > 0
                 ? `Calcolato dai predecessori (${driving.map((p) => p.jira_key).join(', ')}): il giorno lavorativo dopo la loro Fine pian.`
                 : undefined
             }
-            onBlur={(e) => {
-              const planned_start = dateOrNull(e.target.value)
-              if (planned_start !== item.planned_start) reschedule.mutate({ item, planned_start })
-            }}
+            onChange={(planned_start) => reschedule.mutate({ item, planned_start })}
           />
         )
       },
@@ -767,14 +762,9 @@ export function BacklogPage() {
       // altrimenti l'input non rifletterebbe il nuovo valore in cache.
       render: (item) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <input
-            key={item.expected_finish ?? ''}
-            type="date"
-            defaultValue={item.expected_finish ?? ''}
-            onBlur={(e) => {
-              const expected_finish = dateOrNull(e.target.value)
-              if (expected_finish !== item.expected_finish) saveSchedule.mutate(new Map([[item.id, { expected_finish }]]))
-            }}
+          <DateInput
+            value={item.expected_finish}
+            onChange={(expected_finish) => saveSchedule.mutate(new Map([[item.id, { expected_finish }]]))}
           />
           {item.planned_start && !item.planned_duration_days && (
             <span
@@ -796,11 +786,9 @@ export function BacklogPage() {
       // (come Fine pian.): il campo non controllato va rimontato, altrimenti
       // dopo la sync continuerebbe a mostrare il valore digitato.
       render: (item) => (
-        <input
-          key={item.actual_start ?? ''}
-          type="date"
-          defaultValue={item.actual_start ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { actual_start: dateOrNull(e.target.value) } })}
+        <DateInput
+          value={item.actual_start}
+          onChange={(actual_start) => update.mutate({ id: item.id, data: { actual_start } })}
         />
       ),
     },
@@ -809,11 +797,9 @@ export function BacklogPage() {
       label: 'Fine eff.',
       className: 'editable-cell',
       render: (item) => (
-        <input
-          key={item.actual_finish ?? ''}
-          type="date"
-          defaultValue={item.actual_finish ?? ''}
-          onBlur={(e) => update.mutate({ id: item.id, data: { actual_finish: dateOrNull(e.target.value) } })}
+        <DateInput
+          value={item.actual_finish}
+          onChange={(actual_finish) => update.mutate({ id: item.id, data: { actual_finish } })}
         />
       ),
     },

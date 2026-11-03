@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { ProjectFormModal } from '../components/ProjectFormModal'
 import { formatIsoDate } from '../lib/dates'
 import type { ProjectDetail } from '../api/types'
+import { DateInput } from '../components/DateInput'
 
 export function ProjectLayout() {
   const { projectId } = useParams()
@@ -172,7 +173,7 @@ function ReleaseModal({ project, saving, error, onSave, onClose }: ReleaseModalP
         {error && <div className="error-banner">Salvataggio non riuscito: {error.message}</div>}
         <div className="form-row">
           <label>Data di rilascio</label>
-          <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} />
+          <DateInput value={releaseDate} onChange={(value) => setReleaseDate(value ?? '')} />
         </div>
         {!project.release_date && project.is_current && (
           <p className="muted" style={{ fontSize: 12 }}>

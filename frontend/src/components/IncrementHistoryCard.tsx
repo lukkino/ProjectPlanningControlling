@@ -16,6 +16,7 @@ import {
 import { api } from '../api/client'
 import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue, SubProject } from '../api/types'
 import { formatIsoDate } from '../lib/dates'
+import { DateInput } from './DateInput'
 
 // subProjects: i sotto-progetti del progetto, di cui ogni snapshot raccoglie
 // anche l'Actual ore.
@@ -289,14 +290,10 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
               <div key={snap.id} className="table-wrap" style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, minWidth: 0 }}>
-                    <input
-                      type="date"
+                    <DateInput
                       style={{ flex: '0 0 auto' }}
-                      defaultValue={snap.snapshot_date}
-                      onBlur={(e) =>
-                        e.target.value !== snap.snapshot_date &&
-                        updateSnapshot.mutate({ id: snap.id, data: { snapshot_date: e.target.value } })
-                      }
+                      value={snap.snapshot_date}
+                      onChange={(value) => value && updateSnapshot.mutate({ id: snap.id, data: { snapshot_date: value } })}
                     />
                     <textarea
                       defaultValue={snap.note ?? ''}

@@ -758,6 +758,13 @@ class PprDeliverable(BaseModel):
     notes: str = ""
 
 
+class PprReviewDeliverable(BaseModel):
+    # Un documento atteso alla review (Deliverable Check del template).
+    name: str
+    requirement: str | None = None  # es. "Document signed"
+    owner: str | None = None  # dal Task Guideline, None se non trovato
+
+
 class PprDocumentMeta(DocumentRevisionMeta):
     deliverables: list[PprDeliverable]
 

@@ -19,6 +19,7 @@ import { NewSimulationModal } from '../components/NewSimulationModal'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, parseBackendDateTime } from '../lib/dates'
 import { parseMcParams, recalcForDeadline } from '../lib/forecastParams'
 import { useProjectContext } from './useProjectContext'
+import { DateInput } from '../components/DateInput'
 
 // Palette categorica validata del progetto (vedi skill data-viz), ordine
 // fisso dei primi 6 slot: blu, arancio, aqua, giallo, magenta, verde.
@@ -84,10 +85,7 @@ export function ForecastingPage() {
     if (!params?.recalculatedAt) return null
     const when = (value: string | null | undefined, utc: boolean) =>
       value
-        ? (utc ? parseBackendDateTime(value) : new Date(value)).toLocaleString('it-IT', {
-            dateStyle: 'short',
-            timeStyle: 'short',
-          })
+        ? (utc ? parseBackendDateTime(value) : new Date(value)).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'n.d.'
     let text = `Ricalcolata il ${when(params.recalculatedAt, false)} per la nuova deadline.`
     if (params.recalcHistoryFetchedAt !== params.historyFetchedAt)
@@ -101,7 +99,6 @@ export function ForecastingPage() {
   })
 
   const num = (v: string) => (v === '' ? null : Number(v))
-  const dateOrNull = (v: string) => v || null
   const textOrNull = (v: string) => v.trim() || null
 
   const chartData = (simulations ?? []).map((sim) => ({
@@ -131,14 +128,7 @@ export function ForecastingPage() {
         </div>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
           <span className="muted">Inizio sviluppi effettivo</span>
-          <input
-            type="date"
-            defaultValue={project.dev_start_date ?? ''}
-            onBlur={(e) => {
-              const value = e.target.value || null
-              if (value !== project.dev_start_date) updateProject.mutate({ dev_start_date: value })
-            }}
-          />
+          <DateInput value={project.dev_start_date} onChange={(value) => updateProject.mutate({ dev_start_date: value })} />
         </label>
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 12 }}>
@@ -196,10 +186,9 @@ export function ForecastingPage() {
                   />
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={sim.simulation_date ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { simulation_date: dateOrNull(e.target.value) } })}
+                  <DateInput
+                    value={sim.simulation_date}
+                    onChange={(simulation_date) => update.mutate({ id: sim.id, data: { simulation_date } })}
                   />
                 </td>
                 <td className="editable-cell">
@@ -252,11 +241,7 @@ export function ForecastingPage() {
                   />
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={sim.code_freeze_deadline ?? ''}
-                    onBlur={(e) => changeDeadline(sim, dateOrNull(e.target.value))}
-                  />
+                  <DateInput value={sim.code_freeze_deadline} onChange={(value) => changeDeadline(sim, value)} />
                 </td>
                 <td className="editable-cell">
                   <div className="pct-cell">
@@ -279,10 +264,9 @@ export function ForecastingPage() {
                   </div>
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={sim.completion_date_85pct ?? ''}
-                    onBlur={(e) => update.mutate({ id: sim.id, data: { completion_date_85pct: dateOrNull(e.target.value) } })}
+                  <DateInput
+                    value={sim.completion_date_85pct}
+                    onChange={(completion_date_85pct) => update.mutate({ id: sim.id, data: { completion_date_85pct } })}
                   />
                 </td>
                 <td className="editable-cell">
@@ -296,11 +280,10 @@ export function ForecastingPage() {
                   />
                 </td>
                 <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={sim.completion_date_85pct_with_holidays ?? ''}
-                    onBlur={(e) =>
-                      update.mutate({ id: sim.id, data: { completion_date_85pct_with_holidays: dateOrNull(e.target.value) } })
+                  <DateInput
+                    value={sim.completion_date_85pct_with_holidays}
+                    onChange={(completion_date_85pct_with_holidays) =>
+                      update.mutate({ id: sim.id, data: { completion_date_85pct_with_holidays } })
                     }
                   />
                 </td>

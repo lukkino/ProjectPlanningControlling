@@ -8,7 +8,7 @@ function formatDateTime(value: string | null): string | null {
   if (!value) return null
   const d = parseBackendDateTime(value)
   if (Number.isNaN(d.getTime())) return null
-  return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+  return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 // Intestazione comune alle sezioni dell'area Complaints (Elenco, KPI): la

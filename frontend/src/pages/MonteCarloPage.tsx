@@ -22,6 +22,7 @@ import {
 } from '../lib/monteCarlo'
 import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { useProjectContext } from './useProjectContext'
+import { DateInput } from '../components/DateInput'
 
 type Mode = 'when' | 'howMany'
 
@@ -304,7 +305,7 @@ export function MonteCarloPage() {
                   </span>
                   {cycleTime.data.fetched_at && (
                     <span className="muted">
-                      Estratti da Jira il {parseBackendDateTime(cycleTime.data.fetched_at).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                      Estratti da Jira il {parseBackendDateTime(cycleTime.data.fetched_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}
                   {history.p85 != null && (
@@ -342,7 +343,7 @@ export function MonteCarloPage() {
             <h4 style={{ marginTop: 0 }}>Parametri</h4>
             <div className="form-row">
               <label>Data di inizio</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <DateInput value={startDate} onChange={(value) => setStartDate(value ?? '')} />
             </div>
             {mode === 'when' ? (
               <div className="form-row">
@@ -352,7 +353,7 @@ export function MonteCarloPage() {
             ) : (
               <div className="form-row">
                 <label>Data di fine (default: code freeze dell'increment)</label>
-                <input type="date" value={endDate} onChange={(e) => setEndDateInput(e.target.value)} />
+                <DateInput value={endDate} onChange={(value) => setEndDateInput(value ?? '')} />
               </div>
             )}
             <div className="form-row">

@@ -451,6 +451,13 @@ export type PprDocumentMeta = DocumentRevisionMeta & {
 // stesso documento, "previous_phase" = ultimo documento della fase precedente.
 export type PprFileRole = 'previous' | 'previous_phase'
 
+// Documento atteso a una review (Deliverable Check del template MOD-PPR).
+export interface PprReviewDeliverable {
+  name: string
+  requirement: string | null
+  owner: string | null
+}
+
 export type PprInspection = {
   title: string
   last_version: number | null

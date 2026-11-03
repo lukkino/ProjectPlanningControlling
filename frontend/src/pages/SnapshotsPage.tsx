@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import type { Snapshot } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
+import { DateInput } from '../components/DateInput'
 
 export function SnapshotsPage() {
   const { project } = useProjectContext()
@@ -84,10 +85,9 @@ export function SnapshotsPage() {
             {snapshots?.map((s) => (
               <tr key={s.id}>
                 <td className="editable-cell">
-                  <input
-                    type="date"
-                    defaultValue={s.snapshot_date}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { snapshot_date: e.target.value } })}
+                  <DateInput
+                    value={s.snapshot_date}
+                    onChange={(value) => value && update.mutate({ id: s.id, data: { snapshot_date: value } })}
                   />
                 </td>
                 <td className="editable-cell">

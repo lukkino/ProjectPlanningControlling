@@ -22,6 +22,7 @@ import type { McParams } from '../lib/forecastParams'
 import { daysOffSet } from '../lib/scheduling'
 import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { SyncProgressModal } from './SyncProgressModal'
+import { DateInput } from './DateInput'
 
 const ISSUE_TYPES = ['Story', 'Bug', 'Activity', 'Task']
 const HISTORY_WINDOWS = [
@@ -38,7 +39,7 @@ function todayIso(): string {
 
 const epochToIso = (day: number | null) => (day === null ? null : epochDaysToDate(day).toISOString().slice(0, 10))
 const formatDateTime = (value: string) =>
-  parseBackendDateTime(value).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+  parseBackendDateTime(value).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 // Fatto oggi (ora locale)? Serve a proporre l'aggiornamento solo se i dati
 // non sono gia' di oggi.
 const isToday = (value: string | null | undefined) => {
@@ -276,7 +277,7 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
         <div className="sim-params" style={{ marginTop: 0 }}>
           <label>
             Code freeze deadline della simulazione{' '}
-            <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+            <DateInput value={deadline} onChange={(value) => setDeadline(value ?? '')} />
             {deadlineChanged && (
               <button type="button" className="link-btn" onClick={() => setDeadline(project.code_freeze_date ?? '')}>
                 ripristina ({formatIsoDate(project.code_freeze_date) ?? 'nessuna'})

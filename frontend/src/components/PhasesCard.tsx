@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { CartesianGrid, Legend, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import type { Phase } from '../api/types'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate } from '../lib/dates'
+import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
+import { DateInput } from './DateInput'
 
 type Props = { projectId: number; currentStatus: string }
 
@@ -14,6 +15,8 @@ const COLOR_PLANNED = '#2a78d6'
 const COLOR_ACTUAL = '#eb6834'
 // Linea che unisce la data originale a quella che vale ora della stessa fase.
 const COLOR_SLIP = '#d62728'
+// Linea di oggi, rossa come nel Gantt del Backlog.
+const COLOR_TODAY = '#d3402f'
 
 // Fasi che portano le date dell'increment (la loro data aggiornata): il
 // backend non le lascia rinominare ne' eliminare. Il Project start e' la
@@ -36,7 +39,9 @@ function slipDays(p: Phase): number | null {
   return original === null || current === null ? null : current - original
 }
 
-type TimelinePoint = { x: number; y: string }
+// kind: la serie (Originale/Aggiornata/Effettiva), mostrata nel tooltip;
+// i punti delle frecce di scostamento non ce l'hanno e non hanno tooltip.
+type TimelinePoint = { x: number; y: string; kind: string }
 
 export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
@@ -79,10 +84,10 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
   const currentPhaseIndex = (phases ?? []).findIndex((p) => p.name === currentStatus)
 
   const phaseNames = (phases ?? []).map((p) => p.name)
-  const isPoint = (p: TimelinePoint | { x: number | null; y: string }): p is TimelinePoint => p.x !== null
-  const originalPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.original_date), y: p.name })).filter(isPoint)
-  const plannedPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.planned_date), y: p.name })).filter(isPoint)
-  const actualPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.actual_date), y: p.name })).filter(isPoint)
+  const isPoint = (p: { x: number | null; y: string; kind: string }): p is TimelinePoint => p.x !== null
+  const originalPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.original_date), y: p.name, kind: 'Originale' })).filter(isPoint)
+  const plannedPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.planned_date), y: p.name, kind: 'Aggiornata' })).filter(isPoint)
+  const actualPoints = (phases ?? []).map((p) => ({ x: dateStrToEpochDays(p.actual_date), y: p.name, kind: 'Effettiva' })).filter(isPoint)
   // Segmento originale -> data che vale ora (effettiva, se no aggiornata),
   // per le fasi che si sono spostate.
   const slipSegments = (phases ?? [])
@@ -91,8 +96,10 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     .map((s) => ({ id: s.id, points: [{ x: s.from as number, y: s.y }, { x: s.to as number, y: s.y }] }))
   const arrowId = `phase-slip-arrow-${projectId}`
   const allEpochs = [...originalPoints, ...plannedPoints, ...actualPoints].map((p) => p.x)
+  // Oggi entra sempre nel range, cosi' la sua linea resta visibile.
+  const todayEpoch = toEpochDays(new Date())
   const dateDomain: [number, number] =
-    allEpochs.length > 0 ? [Math.min(...allEpochs) - 3, Math.max(...allEpochs) + 3] : [0, 1]
+    allEpochs.length > 0 ? [Math.min(...allEpochs, todayEpoch) - 3, Math.max(...allEpochs, todayEpoch) + 3] : [0, 1]
 
   return (
     <div className="card">
@@ -134,25 +141,15 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                     </div>
                   </td>
                   <td className="editable-cell">
-                    <input
-                      key={phase.original_date ?? ''}
-                      type="date"
-                      defaultValue={phase.original_date ?? ''}
-                      onBlur={(e) => {
-                        const value = e.target.value || null
-                        if (value !== phase.original_date) update.mutate({ id: phase.id, data: { original_date: value } })
-                      }}
+                    <DateInput
+                      value={phase.original_date}
+                      onChange={(value) => update.mutate({ id: phase.id, data: { original_date: value } })}
                     />
                   </td>
                   <td className="editable-cell">
-                    <input
-                      key={phase.planned_date ?? ''}
-                      type="date"
-                      defaultValue={phase.planned_date ?? ''}
-                      onBlur={(e) => {
-                        const value = e.target.value || null
-                        if (value !== phase.planned_date) update.mutate({ id: phase.id, data: { planned_date: value } })
-                      }}
+                    <DateInput
+                      value={phase.planned_date}
+                      onChange={(value) => update.mutate({ id: phase.id, data: { planned_date: value } })}
                     />
                     {phase.changes.length > 0 && (
                       <div className="phase-history">
@@ -174,14 +171,9 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                     )}
                   </td>
                   <td className="editable-cell">
-                    <input
-                      key={phase.actual_date ?? ''}
-                      type="date"
-                      defaultValue={phase.actual_date ?? ''}
-                      onBlur={(e) => {
-                        const value = e.target.value || null
-                        if (value !== phase.actual_date) update.mutate({ id: phase.id, data: { actual_date: value } })
-                      }}
+                    <DateInput
+                      value={phase.actual_date}
+                      onChange={(value) => update.mutate({ id: phase.id, data: { actual_date: value } })}
                     />
                   </td>
                   <td className="text-right" style={{ whiteSpace: 'nowrap' }}>
@@ -243,11 +235,30 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   tick={{ fontSize: 12 }}
                   allowDuplicatedCategory={false}
                 />
+                {/* Tooltip su misura: quello standard formatta come data anche
+                    la fase (asse Y), che diventava "NaN". */}
                 <Tooltip
-                  formatter={(value) => formatEpochDaysAsDate(Number(value))}
                   cursor={{ strokeDasharray: '3 3' }}
+                  content={({ active, payload }) => {
+                    const point = active ? (payload?.[0]?.payload as TimelinePoint | undefined) : undefined
+                    if (!point?.kind) return null
+                    return (
+                      <div className="chart-tooltip">
+                        <strong>{point.y}</strong>
+                        <div>
+                          {point.kind}: {formatEpochDaysAsDate(point.x)}
+                        </div>
+                      </div>
+                    )
+                  }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
+                <ReferenceLine
+                  x={todayEpoch}
+                  stroke={COLOR_TODAY}
+                  strokeWidth={2}
+                  label={{ value: 'Today', position: 'insideTopRight', fill: COLOR_TODAY, fontSize: 11, fontWeight: 700 }}
+                />
                 {/* Punta della freccia verso la data effettiva, arretrata di
                     qualche pixel per non finire sotto il pallino. */}
                 <defs>

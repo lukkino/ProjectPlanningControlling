@@ -33,6 +33,7 @@ import type {
   PprDocumentMeta,
   PprFileRole,
   PprInspection,
+  PprReviewDeliverable,
   Project,
   ProjectDetail,
   ScenariosStatus,
@@ -457,6 +458,8 @@ export const api = {
     // (previous) o da fase precedente (previous_phase), gia' controllati.
     pprCandidates: (projectId: number, docType: string, role: PprFileRole) =>
       request<PprCandidate[]>(`/projects/${projectId}/documents/ppr/${docType}/candidates?role=${role}`),
+    // Documenti attesi alla review, dal template (uguali per tutti gli increment).
+    pprReviewDeliverables: (docType: string) => request<PprReviewDeliverable[]>(`/documents/ppr/${docType}/deliverables`),
     // Elenco dei documenti attesi alla review con gli owner (.txt), non per il Planning.
     pprDeliverablesTxt: (projectId: number, docType: string) =>
       downloadFile(`/projects/${projectId}/documents/ppr/${docType}/deliverables-txt`),

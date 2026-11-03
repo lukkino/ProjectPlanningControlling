@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Increment } from '../api/types'
+import { DateInput } from './DateInput'
 
 type Props = {
   increment?: Increment
@@ -71,11 +72,11 @@ export function IncrementFormModal({ increment, onClose }: Props) {
         <div className="grid-2">
           <div className="form-row">
             <label>Data inizio</label>
-            <input type="date" value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
+            <DateInput value={form.start_date} onChange={(value) => set('start_date', value ?? '')} />
           </div>
           <div className="form-row">
             <label>Data fine</label>
-            <input type="date" value={form.end_date} onChange={(e) => set('end_date', e.target.value)} />
+            <DateInput value={form.end_date} onChange={(value) => set('end_date', value ?? '')} />
           </div>
         </div>
         <div className="grid-2">

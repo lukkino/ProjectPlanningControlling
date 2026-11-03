@@ -33,6 +33,7 @@ from app.services.ppr_document import (
     PPR_DOCUMENT_TYPES,
     PprError,
     generate_ppr_deliverables_txt,
+    review_deliverables,
     generate_ppr_document,
     get_ppr_defaults,
     inspect_ppr_file,
@@ -234,6 +235,14 @@ def download_ppr_document(
     except PprError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _xlsx_response(content, filename_stem)
+
+
+@router.get("/api/documents/ppr/{doc_type}/deliverables", response_model=list[schemas.PprReviewDeliverable])
+def list_ppr_deliverables(doc_type: str):
+    """Documenti attesi alla review, dal template MOD-PPR: li mostra la
+    sezione Documents nel riquadro di ogni review."""
+    _get_ppr_type_or_404(doc_type)
+    return review_deliverables(doc_type)
 
 
 @router.get("/api/projects/{project_id}/documents/ppr/{doc_type}/deliverables-txt")

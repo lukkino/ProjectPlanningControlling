@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import type { AppSettings } from '../api/types'
 import { formatIsoDate } from '../lib/dates'
+import { DateInput } from '../components/DateInput'
 
 const MS_PER_DAY = 86_400_000
 
@@ -147,7 +148,7 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>Scadenza token (facoltativa)</span>
-          <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} style={{ maxWidth: 200 }} />
+          <DateInput value={expiresAt} onChange={(value) => setExpiresAt(value ?? '')} style={{ maxWidth: 200 }} />
           <span className="muted" style={{ fontSize: 12 }}>
             Jira non la comunica via API: riportala qui da quella scelta al momento della creazione su
             id.atlassian.com, solo per ricevere un avviso quando si avvicina.

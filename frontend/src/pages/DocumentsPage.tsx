@@ -9,6 +9,7 @@ import type {
   PprCandidate,
   PprDeliverable,
   PprInspection,
+  PprReviewDeliverable,
   Project,
   RequirementCheckItem,
   RequirementsCheck,
@@ -34,6 +35,51 @@ const PPR_TYPES: { docType: string; label: string }[] = [
   { docType: 'deployment', label: 'Deployment Review' },
   { docType: 'release-to-market', label: 'Release to Market Review' },
 ]
+
+// Documenti attesi alla review (sezione "Deliverable Check" del suo foglio
+// nel template MOD-PPR), con requisito e owner dal Task Guideline. Chiuso di
+// default; il template non cambia, quindi si legge una volta sola.
+function ReviewDeliverablesSection({ docType }: { docType: string }) {
+  const { data, error, isLoading } = useQuery({
+    queryKey: ['ppr-review-deliverables', docType],
+    queryFn: () => api.documents.pprReviewDeliverables(docType),
+    staleTime: Infinity,
+  })
+  return (
+    <details className="review-deliverables">
+      <summary>
+        Documenti per la review{data ? ` (${data.length})` : ''}
+        <span className="muted"> · dal Deliverable Check del template MOD-PPR</span>
+      </summary>
+      {isLoading && <p className="muted">Caricamento...</p>}
+      {error && <div className="error-banner">{(error as Error).message}</div>}
+      {data && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Documento</th>
+                <th>Requisito</th>
+                <th>Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((item: PprReviewDeliverable) => (
+                <tr key={item.name}>
+                  <td style={{ whiteSpace: 'normal' }}>{item.name}</td>
+                  <td className="muted" style={{ whiteSpace: 'normal' }}>
+                    {item.requirement ?? '—'}
+                  </td>
+                  <td style={{ whiteSpace: 'normal' }}>{item.owner ?? <span className="muted">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </details>
+  )
+}
 
 // "Execution Review" -> "Execution" e il nome del suo file
 // ("TIH-EXECUTION-PTBSYS.xlsx"), per dire chiaramente cosa caricare.
@@ -1521,6 +1567,7 @@ export function DocumentsPage() {
               </>
             )}
           </div>
+          <ReviewDeliverablesSection docType={docType} />
         </div>
       ))}
 

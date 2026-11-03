@@ -289,6 +289,24 @@ def inspect_ppr_file(doc_type: str, role: str, content: bytes) -> dict:
 # delle attivita' (colonna F): a cercare il nome nel testo, documenti come
 # "Final Test Report" compaiono in piu' attivita' e altri in nessuna.
 DELIVERABLE_TASKS: dict[str, tuple[int, ...]] = {
+    # Planning Review ("change order draft" prima di "change order", che
+    # altrimenti lo catturerebbe)
+    "user needs": (2,),
+    "product qualification and classification": (21,),
+    "product description": (35,),
+    "change order draft": (31,),
+    "change impact assessment": (36,),
+    "performance evaluation plan": (23,),
+    "essential requirement checklist": (29,),
+    "design input": (30,),
+    "risk management plan": (34,),
+    "safety fmea": (34,),
+    "safety risk analysis": (34,),
+    "security risk analysis": (34,),
+    "product lifecycle risk analysis": (34,),
+    "production process risk analysis": (34,),
+    "criticality matrix": (33,),
+    "design fmea": (33,),
     # Execution Review
     "input/output mapping": (56,),
     "detailed hardware specification": (61,),
@@ -348,7 +366,10 @@ def _review_deliverables(ws) -> list[tuple[str, str]]:
         text = _norm(a)
         if text == "deliverable check":
             in_section = True
-        elif in_section and (text.startswith("deliverable check") or text.startswith("acceptance criteria")):
+        elif in_section and (
+            text.startswith(("deliverable check", "acceptance criteria")) or text in ("timeline", "budget")
+        ):
+            # Fine della sezione: la successiva (nel Planning e' Timeline).
             break
         elif in_section and text not in ("", "name") and not text.startswith("any other additional deliverable"):
             name, _, requirement = str(a).partition("\n")
@@ -367,13 +388,30 @@ def _task_owners(ws) -> dict[int, str]:
     return owners
 
 
-def generate_ppr_deliverables_txt(project: models.Project, doc_type: str) -> tuple[bytes, str]:
-    """Elenco dei documenti attesi alla review (Deliverable Check del suo
-    foglio nel template), ognuno con l'owner dell'attivita' del Task
-    Guideline che lo produce. Si genera insieme al documento PPR."""
+def review_deliverables(doc_type: str) -> list[dict]:
+    """Documenti attesi alla review (Deliverable Check del suo foglio nel
+    template): nome, requisito ("Document signed"...) e owner dell'attivita'
+    del Task Guideline che lo produce (None se non trovato)."""
     config = PPR_DOCUMENT_TYPES[doc_type]
     wb = openpyxl.load_workbook(TEMPLATES_DIR / PPR_TEMPLATE_FILENAME, data_only=True)
     owners = _task_owners(wb[TASK_GUIDELINE])
+    items = []
+    for name, requirement in _review_deliverables(wb[config.sheet]):
+        key = _norm(name)
+        task_ids = next((ids for prefix, ids in DELIVERABLE_TASKS.items() if key.startswith(prefix)), ())
+        found = list(dict.fromkeys(owners[t] for t in task_ids if t in owners))
+        items.append({
+            "name": name,
+            "requirement": requirement.strip("[] ") or None,
+            "owner": " / ".join(found) if found else None,
+        })
+    return items
+
+
+def generate_ppr_deliverables_txt(project: models.Project, doc_type: str) -> tuple[bytes, str]:
+    """Elenco dei documenti attesi alla review, ognuno con il suo owner
+    (vedi review_deliverables). Si genera insieme al documento PPR."""
+    config = PPR_DOCUMENT_TYPES[doc_type]
     # Una riga per documento, "* documento --> owner": incollata in Jira
     # diventa un elenco puntato. Senza il requisito tra parentesi quadre
     # ("[Document signed]"...).
@@ -382,11 +420,8 @@ def generate_ppr_deliverables_txt(project: models.Project, doc_type: str) -> tup
         f"{SYSTEM_NAME} - Increment {_increment_code(project)}",
         "",
     ]
-    for name, _requirement in _review_deliverables(wb[config.sheet]):
-        key = _norm(name)
-        task_ids = next((ids for prefix, ids in DELIVERABLE_TASKS.items() if key.startswith(prefix)), ())
-        found = list(dict.fromkeys(owners[t] for t in task_ids if t in owners))
-        lines.append(f"* {name} --> {' / '.join(found) if found else OWNER_NOT_FOUND}")
+    for item in review_deliverables(doc_type):
+        lines.append(f"* {item['name']} --> {item['owner'] or OWNER_NOT_FOUND}")
     lines.append("")
     filename = f"{config.sheet.replace(' Review', '').replace(' ', '-')}-review-documents.txt"
     return "\r\n".join(lines).encode("utf-8-sig"), filename

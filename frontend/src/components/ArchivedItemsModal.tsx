@@ -61,7 +61,7 @@ export function ArchivedItemsModal({ projectId, items, onClose }: Props) {
                         <span className="muted">-</span>
                       )}
                     </td>
-                    <td>{item.archived_at && parseBackendDateTime(item.archived_at).toLocaleDateString('it-IT')}</td>
+                    <td>{item.archived_at && parseBackendDateTime(item.archived_at).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button className="btn" disabled={restore.isPending} onClick={() => restore.mutate(item.id)}>
                         Ripristina
