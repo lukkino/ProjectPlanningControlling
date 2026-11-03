@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, DragEvent, ReactNode } from 'react'
 import { api, saveBlob } from '../api/client'
 import { RichText } from '../components/ScopeCard'
 import type { Release, ReleaseComponent } from '../api/types'
@@ -26,8 +26,7 @@ type Column = {
 }
 
 const COLUMNS: Column[] = [
-  { key: 'ptih_code', label: 'Project ID', level: 'release', kind: 'text', minWidth: 100, centered: true },
-  { key: 'increment_code', label: 'Increment', level: 'release', kind: 'text', minWidth: 130, centered: true, sticky: true },
+  { key: 'increment_code', label: 'Increment', level: 'release', kind: 'text', minWidth: 170, centered: true, sticky: true },
   { key: 'pn', label: 'PN', level: 'component', kind: 'text', minWidth: 120, centered: true },
   { key: 'component', label: 'Componente', level: 'component', kind: 'text', minWidth: 210 },
   { key: 'fix_version', label: 'Fix version', level: 'component', kind: 'text', minWidth: 80 },
@@ -39,6 +38,7 @@ const COLUMNS: Column[] = [
   { key: 'actual_release_date', label: 'Actual Release', level: 'release', kind: 'date', minWidth: 125 },
   { key: 'change_order', label: 'Change Order', level: 'release', kind: 'text', minWidth: 110 },
   { key: 'process', label: 'Process', level: 'release', kind: 'multiline', minWidth: 170 },
+  { key: 'ptih_code', label: 'Project ID', level: 'release', kind: 'text', minWidth: 100, centered: true },
 ]
 
 const formatDate = (value: string) => value.split('-').reverse().join('/')
@@ -197,7 +197,54 @@ export function ReleasesPage() {
       api.releases.updateComponent(id, { [field]: value }),
     ...mutationOptions,
   })
-  const createRelease = useMutation({ mutationFn: () => api.releases.create(), ...mutationOptions })
+  // Ordine delle release: e' anche quello in cui si susseguono i PN (il PN
+  // proposto nella tab Components & PN segue quelli delle release sopra).
+  const reorder = useMutation({
+    mutationFn: (releaseIds: number[]) => api.releases.reorder(releaseIds),
+    onSuccess: () => {
+      setActionError(null)
+      queryClient.invalidateQueries({ queryKey: ['component-catalog'] })
+      return queryClient.invalidateQueries({ queryKey: ['releases'] })
+    },
+    onError: (e: Error) => setActionError(e.message),
+  })
+  // Trascinamento come nel Gantt del Backlog: si afferra la maniglia nella
+  // cella Increment e si rilascia su un'altra release; la linea blu indica
+  // dove finira' (sotto se si scende, sopra se si sale).
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [dropId, setDropId] = useState<number | null>(null)
+  const releaseIds = (releases ?? []).map((r) => r.id)
+  const endDrag = () => {
+    setDragId(null)
+    setDropId(null)
+  }
+  const moveRelease = (movedId: number, targetId: number) => {
+    const ids = [...releaseIds]
+    const from = ids.indexOf(movedId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0 || from === to) return
+    ids.splice(from, 1)
+    ids.splice(to, 0, movedId)
+    reorder.mutate(ids)
+  }
+  const dropHandlers = (releaseId: number) => ({
+    onDragOver: (e: DragEvent<HTMLTableSectionElement>) => {
+      if (dragId === null) return
+      e.preventDefault()
+      if (dropId !== releaseId) setDropId(releaseId)
+    },
+    onDrop: (e: DragEvent<HTMLTableSectionElement>) => {
+      e.preventDefault()
+      if (dragId !== null) moveRelease(dragId, releaseId)
+      endDrag()
+    },
+  })
+  // Lato della release su cui disegnare la linea blu, se e' quella sotto il
+  // mouse durante il trascinamento.
+  const dropSide = (releaseId: number): 'top' | 'bottom' | null => {
+    if (dragId === null || dropId !== releaseId || dragId === releaseId) return null
+    return releaseIds.indexOf(dragId) < releaseIds.indexOf(releaseId) ? 'bottom' : 'top'
+  }
   const exportExcel = useMutation({
     mutationFn: api.releases.exportExcel,
     onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
@@ -237,7 +284,7 @@ export function ReleasesPage() {
 
   // covered: le righe che la cella copre (piu' di una se unita); la modifica
   // di una cella di componente unita vale per tutti i componenti coperti.
-  const renderCell = (covered: Row[], column: Column): ReactNode => {
+  const renderCell = (covered: Row[], column: Column, group: Row[]): ReactNode => {
     const row = covered[0]
     const style: CSSProperties = {
       whiteSpace: 'normal',
@@ -246,6 +293,11 @@ export function ReleasesPage() {
       minWidth: column.minWidth,
     }
     const { release, component } = row
+    const side = dropSide(release.id)
+    if (side === 'top' && covered[0] === group[0]) style.boxShadow = 'inset 0 3px 0 var(--primary)'
+    if (side === 'bottom' && covered[covered.length - 1] === group[group.length - 1]) {
+      style.boxShadow = 'inset 0 -3px 0 var(--primary)'
+    }
     if (column.level === 'component' && !component) {
       return (
         <td key={column.key} className="muted" style={style}>
@@ -303,7 +355,29 @@ export function ReleasesPage() {
         rowSpan={covered.length > 1 ? covered.length : undefined}
         style={style}
       >
-        <EditableField value={rawValue(row, column)} kind={column.kind} label={column.label} onSave={save} />
+        {column.key === 'increment_code' ? (
+          // Maniglia a sinistra del codice, per trascinare la release.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div
+              className="releases-drag-handle"
+              draggable={!reorder.isPending}
+              title="Trascina per spostare la release: l'ordine è anche quello in cui si susseguono i PN"
+              onDragStart={(e) => {
+                setDragId(release.id)
+                e.dataTransfer.setData('text/plain', String(release.id))
+                e.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragEnd={endDrag}
+            >
+              ⠿
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <EditableField value={rawValue(row, column)} kind={column.kind} label={column.label} onSave={save} />
+            </div>
+          </div>
+        ) : (
+          <EditableField value={rawValue(row, column)} kind={column.kind} label={column.label} onSave={save} />
+        )}
       </td>
     )
   }
@@ -314,14 +388,11 @@ export function ReleasesPage() {
         <div className="page-header" style={{ marginBottom: 0 }}>
           <div>
             <h3 style={{ margin: 0 }}>Releases</h3>
-            <span className="sub muted">Contenuto componenti PTBSYS-03 (New Architecture NA7). Le modifiche si salvano uscendo dal campo; le date degli increment vengono dall'increment. In giallo l'ultimo rilascio completato.</span>
+            <span className="sub muted">Contenuto componenti PTBSYS-03 (New Architecture NA7). Le modifiche si salvano uscendo dal campo; le date degli increment vengono dall'increment. In giallo l'ultimo rilascio completato. Trascinando ⠿ si cambia l'ordine degli increment, che è anche quello in cui si susseguono i PN.</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={() => exportExcel.mutate()} disabled={exportExcel.isPending}>
               {exportExcel.isPending ? 'Esportazione...' : '⬇ Esporta Excel'}
-            </button>
-            <button className="btn btn-primary" onClick={() => createRelease.mutate()} disabled={createRelease.isPending}>
-              + Release
             </button>
           </div>
         </div>
@@ -389,17 +460,21 @@ export function ReleasesPage() {
                     </tr>
                   </tbody>
                 )}
-                <tbody className="releases-group">
+                <tbody
+                  className="releases-group"
+                  style={dragId === group[0].release.id ? { opacity: 0.4 } : undefined}
+                  {...dropHandlers(group[0].release.id)}
+                >
                 {group.map((row, index) => {
                   const first = index === 0
                   const { release, component } = row
                   return (
                     <tr key={`${release.id}-${component?.id ?? 'none'}`}>
                       {COLUMNS.map((column) => {
-                        if (column.level === 'release') return first ? renderCell(group, column) : null
-                        if (column.key !== 'pn') return renderCell([row], column)
+                        if (column.level === 'release') return first ? renderCell(group, column, group) : null
+                        if (column.key !== 'pn') return renderCell([row], column, group)
                         const pnRows = pnSpan(group, index)
-                        return pnRows > 0 ? renderCell(group.slice(index, index + pnRows), column) : null
+                        return pnRows > 0 ? renderCell(group.slice(index, index + pnRows), column, group) : null
                       })}
                     </tr>
                   )

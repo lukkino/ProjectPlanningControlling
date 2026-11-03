@@ -1032,6 +1032,11 @@ class ComplaintsSettings(BaseModel):
     base_jql: str
 
 
+class ReleaseOrder(BaseModel):
+    # Id delle release nell'ordine voluto, dall'alto verso il basso.
+    release_ids: list[int]
+
+
 class ComponentCatalogWrite(BaseModel):
     name: str
     pn_family: str | None = None

@@ -937,3 +937,16 @@ tr.phase-current input { background: #e6eefc; }
 .releases-filter-list { max-height: 260px; overflow-y: auto; margin-top: 6px; }
 .releases-filter-list label { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .releases-filter-list span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Maniglia per trascinare una release nella sezione Releases. */
+.releases-drag-handle {
+  padding: 0 2px;
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+}
+.releases-drag-handle:hover {
+  color: var(--primary);
+}

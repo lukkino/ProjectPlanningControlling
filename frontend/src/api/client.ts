@@ -476,9 +476,9 @@ export const api = {
   },
   releases: {
     list: () => request<Release[]>('/releases'),
-    create: () => post<Release>('/releases', {}),
     update: (id: number, data: Partial<Omit<Release, 'id' | 'components'>>) => put<Release>(`/releases/${id}`, data),
     remove: (id: number) => del(`/releases/${id}`),
+    reorder: (releaseIds: number[]) => post<void>('/releases/reorder', { release_ids: releaseIds }),
     createComponent: (releaseId: number) => post<ReleaseComponent>(`/releases/${releaseId}/components`, {}),
     updateComponent: (id: number, data: Partial<Omit<ReleaseComponent, 'id'>>) =>
       put<ReleaseComponent>(`/releases/components/${id}`, data),
@@ -486,7 +486,8 @@ export const api = {
     exportExcel: () => downloadFile('/releases/export'),
   },
   incrementComponents: {
-    catalog: () => request<ComponentCatalogItem[]>('/component-catalog'),
+    catalog: (projectId?: number) =>
+      request<ComponentCatalogItem[]>(`/component-catalog${projectId != null ? `?project_id=${projectId}` : ''}`),
     createCatalogEntry: (data: { name: string; pn_family: string | null }) =>
       post<ComponentCatalogItem>('/component-catalog', data),
     list: (projectId: number) => request<IncrementComponent[]>(`/projects/${projectId}/components`),

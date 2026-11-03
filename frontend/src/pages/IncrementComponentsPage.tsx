@@ -50,7 +50,8 @@ function CellInput({
 // Part Number. Sono i componenti della sua riga nella sezione Releases, che
 // si aggiungono solo da qui. Il menu dei componenti viene dalla sezione Releases (solo i
 // nomi) piu' quelli creati qui; aggiungendone uno si propone il PN successivo
-// al piu' alto della sua famiglia (PTB-SRV, PTB-CLN, ...) tra le release chiuse.
+// al piu' alto della sua famiglia (PTB-SRV, PTB-CLN, ...) tra le release che
+// nella sezione Releases vengono prima di questo increment.
 export function IncrementComponentsPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
@@ -64,7 +65,10 @@ export function IncrementComponentsPage() {
     queryKey: componentsKey,
     queryFn: () => api.incrementComponents.list(project.id),
   })
-  const { data: catalog } = useQuery({ queryKey: ['component-catalog'], queryFn: api.incrementComponents.catalog })
+  const { data: catalog } = useQuery({
+    queryKey: ['component-catalog', project.id],
+    queryFn: () => api.incrementComponents.catalog(project.id),
+  })
   const releaseKey = ['increment-release', project.id]
   const { data: release } = useQuery({ queryKey: releaseKey, queryFn: () => api.incrementComponents.release(project.id) })
 
@@ -121,8 +125,8 @@ export function IncrementComponentsPage() {
       <h3 style={{ marginTop: 0 }}>Components &amp; PN</h3>
       <p className="muted" style={{ marginTop: 0 }}>
         I componenti impattati da questo increment e i loro Part Number. Aggiungendo un componente il PN proposto è il
-        successivo a quello della sua famiglia (PTB-SRV, PTB-CLN, PTB-LCS...) nell'ultimo rilascio chiuso della sezione
-        Releases; si può correggere a mano. Sono gli stessi componenti che la sezione Releases mostra per questo
+        successivo al più alto della sua famiglia (PTB-SRV, PTB-CLN, PTB-LCS...) tra gli increment che nella sezione
+        Releases vengono prima di questo (l'ordine si cambia lì con le frecce); si può correggere a mano. Sono gli stessi componenti che la sezione Releases mostra per questo
         increment. Le modifiche si salvano uscendo dal campo.
       </p>
       {(error || actionError) && <div className="error-banner">{actionError ?? (error as Error).message}</div>}
@@ -185,8 +189,8 @@ export function IncrementComponentsPage() {
       </div>
       {pickedEntry && !pickedEntry.next_pn && (
         <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
-          Nessun PN da proporre per {pickedEntry.name}: la famiglia non è nota o non ha release chiuse. Il PN si compila a
-          mano.
+          Nessun PN da proporre per {pickedEntry.name}: la famiglia non è nota o non compare negli increment precedenti.
+          Il PN si compila a mano.
         </p>
       )}
 

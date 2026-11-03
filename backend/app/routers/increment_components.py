@@ -5,7 +5,8 @@ mostra.
 
 Il PN ha la forma <famiglia>.<numero> (es. PTB-SRV.020). Aggiungendo un
 componente si propone il numero successivo al piu' alto della sua famiglia
-tra le release chiuse della sezione Releases (Actual Release valorizzata).
+tra le release che nella sezione Releases vengono prima di quella
+dell'increment (l'ordine si cambia dalla sezione Releases).
 
 Il menu dei componenti unisce i nomi presenti nella sezione Releases (la
 famiglia e' quella del PN piu' recente del componente) e quelli creati a mano
@@ -60,14 +61,23 @@ def _catalog(db: Session) -> dict[str, str | None]:
     return catalog
 
 
-def _next_pn(db: Session, family: str | None) -> str | None:
-    """Il PN successivo al piu' alto della famiglia tra le release chiuse."""
+def _order_key(release: models.Release) -> tuple[int, int]:
+    return (release.sort_order or 0, release.id or 0)
+
+
+def _next_pn(db: Session, family: str | None, before: models.Release | None = None) -> str | None:
+    """Il PN successivo al piu' alto della famiglia tra le release che
+    vengono prima di `before` nell'ordine della sezione Releases (tutte, se
+    None)."""
     if not family:
         return None
+    limit = _order_key(before) if before is not None else None
     best: tuple[int, int] | None = None
     for release, component in _release_rows(db):
+        if limit is not None and _order_key(release) >= limit:
+            continue
         parts = _split_pn(component.pn)
-        if release.actual_release_date and parts and parts[0] == family:
+        if parts and parts[0] == family:
             if best is None or parts[1] > best[0]:
                 best = (parts[1], parts[2])
     if best is None:
@@ -122,10 +132,13 @@ def _get_component_or_404(db: Session, component_id: int) -> models.ReleaseCompo
 
 
 @router.get("/component-catalog", response_model=list[schemas.ComponentCatalogItem])
-def list_catalog(db: Session = Depends(get_db)):
+def list_catalog(project_id: int | None = None, db: Session = Depends(get_db)):
+    """Il menu dei componenti; con project_id il PN proposto e' quello per
+    l'increment (successivo alle release che lo precedono)."""
     catalog = _catalog(db)
+    before = _project_release(db, _get_project_or_404(db, project_id)) if project_id is not None else None
     return [
-        schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, family))
+        schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, family, before))
         for name, family in sorted(catalog.items(), key=lambda item: item[0].lower())
     ]
 
@@ -170,7 +183,7 @@ def create_component(project_id: int, payload: schemas.IncrementComponentCreate,
     # Compilando i componenti si aggiornano anche i dati della release.
     sync_release_from_project(release, project)
     family = _catalog(db).get(name)
-    pn = _next_pn(db, family)
+    pn = _next_pn(db, family, release)
     # Subito dopo l'ultimo componente della stessa famiglia, cosi' nella
     # sezione Releases i PN uguali restano vicini (e si uniscono); se la
     # famiglia non c'e' ancora, in fondo.

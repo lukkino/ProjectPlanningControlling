@@ -141,6 +141,17 @@ def export_to_excel(db: Session = Depends(get_db)):
     )
 
 
+@router.post("/reorder", status_code=204)
+def reorder_releases(payload: schemas.ReleaseOrder, db: Session = Depends(get_db)):
+    """Ordine delle release (dall'alto verso il basso): e' anche l'ordine in
+    cui i PN si susseguono (vedi increment_components._next_pn)."""
+    for position, release_id in enumerate(payload.release_ids, start=1):
+        release = db.get(models.Release, release_id)
+        if release is not None:
+            release.sort_order = position
+    db.commit()
+
+
 @router.post("", response_model=schemas.ReleaseRead, status_code=201)
 def create_release(payload: schemas.ReleaseWrite, db: Session = Depends(get_db)):
     last = db.query(func.max(models.Release.sort_order)).scalar() or 0
