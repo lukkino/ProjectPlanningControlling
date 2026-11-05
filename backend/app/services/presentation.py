@@ -456,7 +456,7 @@ def _add_table(
     bold_row: int | None = None,
     link_col: int | None = None,
     font_size: float = 11,
-) -> None:
+):
     """Tabella con lo stile di default (intestazione nel colore del tema).
     link_col: colonna con chiavi Jira, rese link alla issue."""
     row_height = Inches(0.36)
@@ -473,6 +473,7 @@ def _add_table(
             run = _run(cell.text_frame.paragraphs[0], value, size=font_size, bold=True if r == 0 or r - 1 == bold_row else None)
             if r > 0 and c == link_col and value:
                 run.hyperlink.address = f"{JIRA_BROWSE_URL}{value}"
+    return table
 
 
 def _style_chart(chart, legend: bool = True, value_axis_title: str | None = None) -> None:
@@ -628,6 +629,28 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
         _text(slide, _Box(box.left, details_top, box.width, Inches(0.4)), "   ·   ".join(details), size=14, color=COLOR_MUTED)
 
 
+def _planning_label(item: models.BacklogItem) -> str:
+    """Colonna Planned, stessa regola del Forecasting: label "oos" -> OOS
+    (vince su "planned"), label "planned" -> Yes, nessuna delle due -> "-"."""
+    labels = {label.strip().lower() for label in (item.labels or "").split(";")}
+    if "oos" in labels:
+        return "OOS"
+    if "planned" in labels:
+        return "Yes"
+    return "-"
+
+
+def _issue_row(item: models.BacklogItem, last: str) -> list[str]:
+    return [
+        item.jira_key,
+        item.issue_type or "-",
+        item.summary or "-",
+        _planning_label(item),
+        "Yes" if item.included_in_codefreeze else "No",
+        last,
+    ]
+
+
 def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> None:
     cutoff = dt.date.today() - dt.timedelta(days=days)
     closed = sorted(
@@ -651,25 +674,41 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
         (i for i in project.backlog_items if i.is_in_plan and i.status == "To Do"),
         key=lambda i: i.priority_order,
     )
+    # Tutto il resto ancora aperto (in scope, fuori dal piano, non Rejected),
+    # come la sezione "Da fare generale" della Dashboard.
+    to_do_general = sorted(
+        (
+            i
+            for i in project.backlog_items
+            if i.in_scope and i.status != "Done" and i.jira_status != "Rejected" and not i.is_in_plan
+        ),
+        key=lambda i: i.priority_order,
+    )
     # (titolo della sezione, intestazione dell'ultima colonna, righe, testo se vuota)
     sections = [
         (
             f"Chiuse {_period_title(days)} ({len(closed)})",
             "Chiusa il",
-            [[i.jira_key, i.issue_type or "-", i.summary or "-", _date(i.actual_finish)] for i in closed],
+            [_issue_row(i, _date(i.actual_finish)) for i in closed],
             f"Nessuna issue in scope chiusa negli ultimi {days} giorni.",
         ),
         (
             f"In progress ({len(in_progress)})",
             "Iniziata il",
-            [[i.jira_key, i.issue_type or "-", i.summary or "-", _date(i.actual_start)] for i in in_progress],
+            [_issue_row(i, _date(i.actual_start)) for i in in_progress],
             "Nessuna issue in scope in progress.",
         ),
         (
             f"Da fare ({len(to_do)})",
             "Stato Jira",
-            [[i.jira_key, i.issue_type or "-", i.summary or "-", i.jira_status or "To Do"] for i in to_do],
+            [_issue_row(i, i.jira_status or "To Do") for i in to_do],
             "Nessuna issue in scope ancora da iniziare.",
+        ),
+        (
+            f"Da fare generale ({len(to_do_general)})",
+            "Stato Jira",
+            [_issue_row(i, i.jira_status or i.status) for i in to_do_general],
+            "Nessun altro PBI in scope ancora aperto.",
         ),
     ]
 
@@ -679,7 +718,7 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
 
     def row_height(row: list[str]) -> int:
         # Le Summary lunghe vanno a capo e alzano la riga.
-        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 95), 4)
+        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 75), 4)
 
     slide, box = deck.add_slide(title)
     slides = [slide]
@@ -718,9 +757,9 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
             _add_table(
                 slide,
                 _Box(box.left, top, box.width, 0),
-                ["ID", "Tipo", "Summary", date_header],
+                ["ID", "Tipo", "Summary", "Planned", "Incluso in code freeze", date_header],
                 rows[:fitting],
-                col_ratios=[1.5, 1.1, 7.4, 1.3],
+                col_ratios=[1.5, 1.1, 5.9, 0.9, 1.4, 1.3],
                 link_col=0,
             )
             top += header_height + used + Inches(0.3)
@@ -743,23 +782,52 @@ def _phases_slide(deck: _Deck, project: models.Project) -> None:
         _text(slide, box, "Nessuna fase definita.", color=COLOR_MUTED)
         return
     current = next((n for n, p in enumerate(phases) if p.name == project.status), None)
-    _add_table(
+    # Stesse colonne della tabella nella Dashboard (PhasesCard): Originale =
+    # baseline, Aggiornata = pianificata che vale ora (con quante volte e'
+    # cambiata), Scost. = giorni di calendario dall'originale alla data che
+    # vale ora (effettiva, se no aggiornata), rosso se in ritardo.
+    def slip(p: models.Phase) -> int | None:
+        now = p.actual_date or p.planned_date
+        return None if p.original_date is None or now is None else (now - p.original_date).days
+
+    def updated(p: models.Phase) -> str:
+        if not p.planned_date:
+            return ""
+        n = len(p.changes)
+        return _date(p.planned_date) + (f"  ({n} {'modifica' if n == 1 else 'modifiche'})" if n else "")
+
+    def slip_text(days: int | None) -> str:
+        if days is None:
+            return "—"
+        return f"+{days} gg" if days > 0 else (f"{days} gg" if days < 0 else "0")
+
+    table = _add_table(
         slide,
         box,
-        ["Fase", "Pianificata", "Effettiva", "Note"],
+        ["Fase", "Originale", "Aggiornata", "Effettiva", "Scost.", "Note"],
         [
             [
-                p.name + ("  (fase corrente)" if n == current else ""),
-                _date(p.planned_date) if p.planned_date else "",
+                p.name + ("  (ora)" if n == current else ""),
+                _date(p.original_date) if p.original_date else "",
+                updated(p),
                 _date(p.actual_date) if p.actual_date else "",
+                slip_text(slip(p)),
                 p.notes or "",
             ]
             for n, p in enumerate(phases)
         ],
-        col_ratios=[3.2, 1.6, 1.6, 5],
+        col_ratios=[2.6, 1.4, 2.2, 1.4, 1.0, 3.6],
         bold_row=current,
         font_size=12,
     )
+    for n, p in enumerate(phases):
+        days = slip(p)
+        if days:
+            cell = table.cell(n + 1, 4)
+            cell.text_frame.paragraphs[0].alignment = PP_ALIGN.RIGHT
+            for run in cell.text_frame.paragraphs[0].runs:
+                run.font.bold = True
+                run.font.color.rgb = COLOR_DANGER if days > 0 else COLOR_SUCCESS
 
 
 def _month_start(day: dt.date, months: int = 0) -> dt.date:
@@ -1469,9 +1537,9 @@ def generate_dashboard_presentation(project: models.Project, closed_days: int = 
         ["Dashboard increment", f"Stato: {project.status}", _date(today)],
     )
     _scope_slides(deck, project)
+    _phases_slide(deck, project)
     _kpi_slide(deck, project)
     _recently_closed_slides(deck, project, closed_days)
-    _phases_slide(deck, project)
     _timeline_slide(deck, project)
     _backlog_gantt_slides(deck, project)
     _hours_slide(deck, project)

@@ -17,8 +17,9 @@ import {
 import { api, saveBlob } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
+import { SyncProgressModal } from '../components/SyncProgressModal'
 import type { BacklogItem } from '../api/types'
-import { isInPlan } from '../lib/backlogStats'
+import { isInPlan, planningLabel } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
@@ -398,6 +399,10 @@ function IssueTable({
             <th style={{ width: 120 }}>ID</th>
             <th style={{ width: 120 }}>Tipo</th>
             <th>Summary</th>
+            <th style={{ width: 90 }} title='Label Jira "planned" (Yes) o "oos" (OOS, vince su planned), come nel Forecasting'>
+              Planned
+            </th>
+            <th style={{ width: 110 }}>Incluso in code freeze</th>
             <th style={{ width: 150 }}>{lastHeader}</th>
           </tr>
         </thead>
@@ -411,6 +416,8 @@ function IssueTable({
               </td>
               <td>{item.issue_type ?? <span className="muted">-</span>}</td>
               <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
+              <td>{planningLabel(item) ?? <span className="muted">-</span>}</td>
+              <td>{item.included_in_codefreeze ? 'Yes' : 'No'}</td>
               <td>{lastValue(item) ?? <span className="muted">-</span>}</td>
             </tr>
           ))}
@@ -432,6 +439,16 @@ export function DashboardPage() {
   // Periodo della card delle issue chiuse: tenuto qui (non nella card)
   // perche' la presentazione generata usa lo stesso periodo.
   const [closedPeriod, setClosedPeriod] = useState(RECENTLY_CLOSED_PERIODS[0])
+
+  // Stessa sync Jira del Backlog: aggiorna backlog e metriche della dashboard.
+  const sync = useMutation({
+    mutationFn: () => api.backlog.sync(project.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['backlog-archived', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
+    },
+  })
 
   const presentation = useMutation({
     mutationFn: () => api.dashboard.presentation(project.id, closedPeriod.days),
@@ -525,6 +542,14 @@ export function DashboardPage() {
               ))}
             </select>
             <button
+              className="btn"
+              title={project.jira_jql ? `Sincronizza il backlog da Jira (JQL: ${project.jira_jql})` : 'Nessuna JQL configurata nella scheda increment'}
+              disabled={!project.jira_jql || sync.isPending}
+              onClick={() => sync.mutate()}
+            >
+              {sync.isPending ? 'Sincronizzazione...' : '⟳ Sincronizza da Jira'}
+            </button>
+            <button
               className="btn btn-primary"
               title="Scarica una presentazione PowerPoint coi dati di questa dashboard"
               disabled={presentation.isPending}
@@ -534,6 +559,28 @@ export function DashboardPage() {
             </button>
           </div>
         </div>
+        {sync.isPending && (
+          <SyncProgressModal
+            queryKey={['backlog-sync-progress', project.id]}
+            fetchProgress={() => api.backlog.syncProgress(project.id)}
+          />
+        )}
+        {sync.isError && (
+          <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
+            Sync Jira non riuscita: {(sync.error as Error).message}
+          </div>
+        )}
+        {sync.isSuccess && (
+          <div
+            className="error-banner"
+            style={{ marginTop: 10, marginBottom: 0, background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}
+          >
+            Sync completata: {sync.data.created} nuove issue, {sync.data.updated} aggiornate
+            {sync.data.restored > 0 && ` (${sync.data.restored} ripristinate dall'archivio)`}
+            {sync.data.removed > 0 && `, ${sync.data.removed} archiviate (non più nella JQL, dati conservati)`} (totale
+            trovate: {sync.data.total_matched}).
+          </div>
+        )}
         {presentation.isError && (
           <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
             Generazione della presentazione non riuscita: {(presentation.error as Error).message}

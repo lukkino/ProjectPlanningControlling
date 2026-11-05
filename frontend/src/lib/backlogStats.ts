@@ -60,6 +60,14 @@ function hasLabel(labels: string | null, label: string): boolean {
     .includes(label)
 }
 
+// Label di pianificazione di un item, con la stessa regola del Forecasting:
+// "oos" vince su "planned"; null se non ha nessuna delle due.
+export function planningLabel(item: BacklogItem): 'OOS' | 'Yes' | null {
+  if (hasLabel(item.labels, 'oos')) return 'OOS'
+  if (hasLabel(item.labels, 'planned')) return 'Yes'
+  return null
+}
+
 // Per una nuova simulazione di Forecasting: PBI Done IN SCOPE dalla data di
 // inizio sviluppi effettivo in poi, divisi per label (stesso filtro in_scope
 // di countBacklogStats, cosi' i due conteggi restano coerenti). Se un item
