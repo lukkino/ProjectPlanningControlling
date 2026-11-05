@@ -75,14 +75,22 @@ class JiraIssue:
         # Report generato.
         self.problem_cause = problem_cause
         self.components = components
-        # Campo custom Jira "Developer Effort" (customfield_10146, solo
-        # sulle Story): colonna "Ore stimate" del Backlog.
+        # Ore stimate (colonna "Ore stimate" del Backlog): somma dei campi
+        # custom Jira "Developer Effort" (customfield_10146, sulle Story) e
+        # "System Test Effort" (customfield_10148, es. sull'activity di
+        # System Test di ogni increment); None se mancano entrambi.
         self.dev_effort_hours = dev_effort_hours
         # Campo custom Jira "Impacts On" (customfield_10115, multiselect):
         # valori uniti da virgola, colonna "Impacts on" del Backlog.
         self.impacts_on = impacts_on
         # Nome visualizzato dell'assegnatario; None se l'issue non e' assegnata.
         self.assignee = assignee
+
+
+def _sum_hours(*values) -> float | None:
+    """Somma dei campi numerici valorizzati; None se nessuno lo e'."""
+    numbers = [float(v) for v in values if isinstance(v, (int, float))]
+    return sum(numbers) if numbers else None
 
 
 def _parse_jira_datetime(value: str) -> dt.datetime:
@@ -474,6 +482,10 @@ def search_issues(
     # customfield_10146 = "Developer Effort" (solo Story), colonna "Ore
     # stimate" del Backlog.
     DEV_EFFORT_FIELD = "customfield_10146"
+    # customfield_10148 = "System Test Effort": si somma al Developer Effort
+    # nelle "Ore stimate" (l'activity di System Test dell'increment ha solo
+    # questo).
+    SYSTEM_TEST_EFFORT_FIELD = "customfield_10148"
     # customfield_10115 = "Impacts On" (multiselect), colonna "Impacts on"
     # del Backlog.
     IMPACTS_ON_FIELD = "customfield_10115"
@@ -491,6 +503,7 @@ def search_issues(
         CHANGE_DESCRIPTION_FIELD,
         PROBLEM_CAUSE_FIELD,
         DEV_EFFORT_FIELD,
+        SYSTEM_TEST_EFFORT_FIELD,
         IMPACTS_ON_FIELD,
     ]
 
@@ -559,7 +572,7 @@ def search_issues(
                         change_description=_extract_description(f.get(CHANGE_DESCRIPTION_FIELD)),
                         problem_cause=_extract_description(f.get(PROBLEM_CAUSE_FIELD)),
                         components=components,
-                        dev_effort_hours=f.get(DEV_EFFORT_FIELD),
+                        dev_effort_hours=_sum_hours(f.get(DEV_EFFORT_FIELD), f.get(SYSTEM_TEST_EFFORT_FIELD)),
                         impacts_on=impacts_on,
                         assignee=(f.get("assignee") or {}).get("displayName"),
                     )

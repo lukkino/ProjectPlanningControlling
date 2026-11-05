@@ -820,7 +820,7 @@ export function BacklogPage() {
       key: 'dev_effort_hours',
       label: 'Ore stimate',
       className: 'text-right',
-      // Sincronizzato da Jira (campo "Developer Effort", solo sulle Story):
+      // Sincronizzato da Jira: "Developer Effort" + "System Test Effort":
       // non editabile qui, verrebbe comunque sovrascritto al prossimo sync.
       render: (item) => item.dev_effort_hours ?? <span className="muted">—</span>,
     },
