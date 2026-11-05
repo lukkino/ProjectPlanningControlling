@@ -303,6 +303,9 @@ function RecentlyClosedCard({
   const byBacklogOrder = (a: BacklogItem, b: BacklogItem) => a.priority_order - b.priority_order
   const inProgress = (items ?? []).filter((i) => isInPlan(i) && i.status === 'In Progress').sort(byBacklogOrder)
   const toDo = (items ?? []).filter((i) => isInPlan(i) && i.status === 'To Do').sort(byBacklogOrder)
+  // Tutto il resto ancora da chiudere (in scope, non Done) che le due liste
+  // sopra non mostrano: story fuori dal code freeze, senza sviluppi (le Rejected no).
+  const toDoGeneral = (items ?? []).filter((i) => i.in_scope && i.status !== 'Done' && i.jira_status !== 'Rejected' && !isInPlan(i)).sort(byBacklogOrder)
   return (
     <div className="card">
       <div
@@ -351,6 +354,16 @@ function RecentlyClosedCard({
         lastHeader="Stato Jira"
         lastValue={(item) => item.jira_status ?? 'To Do'}
         emptyMessage="Nessuna issue in scope ancora da iniziare."
+      />
+      <h4 style={{ margin: '20px 0 4px' }}>Da fare generale ({toDoGeneral.length})</h4>
+      <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
+        Gli altri PBI in scope ancora aperti, non inclusi nel code freeze né attività di servizio.
+      </p>
+      <IssueTable
+        items={toDoGeneral}
+        lastHeader="Stato Jira"
+        lastValue={(item) => item.jira_status ?? item.status}
+        emptyMessage="Nessun altro PBI in scope ancora aperto."
       />
     </div>
   )
