@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -68,6 +69,19 @@ def _hours_calculator(increment: models.Increment) -> schemas.HoursCalculator:
 @router.get("", response_model=list[schemas.Increment])
 def list_increments(db: Session = Depends(get_db)):
     return db.query(models.Increment).order_by(models.Increment.code).all()
+
+
+@router.put("/{increment_id}/pinned", status_code=204)
+def set_increment_pinned(increment_id: int, payload: schemas.SidebarPin, db: Session = Depends(get_db)):
+    """Fissa/sgancia il progetto nella sidebar, senza toccare updated_at."""
+    if db.get(models.Increment, increment_id) is None:
+        raise HTTPException(status_code=404, detail="Progetto non trovato")
+    db.execute(
+        update(models.Increment)
+        .where(models.Increment.id == increment_id)
+        .values(sidebar_pinned=payload.pinned, updated_at=models.Increment.updated_at)
+    )
+    db.commit()
 
 
 @router.post("", response_model=schemas.Increment, status_code=201)

@@ -1,5 +1,7 @@
 import type {
   AppSettings,
+  ShippingAddress,
+  ShippingContact,
   AppSettingsUpdate,
   BacklogItem,
   BugsOpenedMetrics,
@@ -235,6 +237,7 @@ export const api = {
     update: (id: number, data: Partial<Project>) => put<ProjectDetail>(`/projects/${id}`, data),
     remove: (id: number) => del(`/projects/${id}`),
     setGanttOrder: (projectIds: number[]) => put<void>('/projects/gantt-order', { project_ids: projectIds }),
+    setPinned: (id: number, pinned: boolean) => put<void>(`/projects/${id}/pinned`, { pinned }),
   },
   increments: {
     list: () => request<Increment[]>('/increments'),
@@ -242,6 +245,7 @@ export const api = {
     create: (data: Partial<Increment>) => post<Increment>('/increments', data),
     update: (id: number, data: Partial<Increment>) => put<Increment>(`/increments/${id}`, data),
     remove: (id: number) => del(`/increments/${id}`),
+    setPinned: (id: number, pinned: boolean) => put<void>(`/increments/${id}/pinned`, { pinned }),
   },
   subProjects: {
     create: (incrementId: number, data: Pick<SubProject, 'name' | 'budget_hours' | 'order'>) =>
@@ -517,6 +521,27 @@ export const api = {
     // Apre la cartella in Esplora risorse, o un suo file, sulla macchina del backend.
     open: (projectId: number, filename?: string) =>
       post<void>(`/projects/${projectId}/review-folder/open${filename ? `?${new URLSearchParams({ filename })}` : ''}`),
+  },
+  // Tools: utility indipendenti dai progetti.
+  tools: {
+    shipping: {
+      addresses: () => request<ShippingAddress[]>('/tools/shipping/addresses'),
+      createAddress: (data: Omit<ShippingAddress, 'id'>) => post<ShippingAddress>('/tools/shipping/addresses', data),
+      updateAddress: (id: number, data: Omit<ShippingAddress, 'id'>) =>
+        put<ShippingAddress>(`/tools/shipping/addresses/${id}`, data),
+      removeAddress: (id: number) => del(`/tools/shipping/addresses/${id}`),
+      contacts: () => request<ShippingContact[]>('/tools/shipping/contacts'),
+      createContact: (data: Omit<ShippingContact, 'id'>) => post<ShippingContact>('/tools/shipping/contacts', data),
+      updateContact: (id: number, data: Omit<ShippingContact, 'id'>) =>
+        put<ShippingContact>(`/tools/shipping/contacts/${id}`, data),
+      removeContact: (id: number) => del(`/tools/shipping/contacts/${id}`),
+      exportFile: (blocks: { text: string; style: string }[][]) =>
+        downloadFile('/tools/shipping/export', undefined, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blocks }),
+        }),
+    },
   },
   releases: {
     list: () => request<Release[]>('/releases'),

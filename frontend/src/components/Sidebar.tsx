@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useMatch } from 'react-router-dom'
 import { api } from '../api/client'
+import { sidebarItems } from '../lib/sidebarPins'
 import { IncrementFormModal } from './IncrementFormModal'
 import { ProjectFormModal } from './ProjectFormModal'
 
@@ -10,6 +11,19 @@ export function Sidebar() {
   const [showNewIncrement, setShowNewIncrement] = useState(false)
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
   const { data: progetti } = useQuery({ queryKey: ['increments'], queryFn: api.increments.list })
+  // Nella sidebar solo quelli fissati (📌 dalle pagine elenco) o, se
+  // nessuno, i piu' recenti; l'elenco completo e' nelle pagine Progetti
+  // e Increment.
+  const progettoMatch = useMatch('/increments/:incrementId')
+  const incrementMatch = useMatch('/projects/:projectId/*')
+  const shownProgetti = sidebarItems(progetti, Number(progettoMatch?.params.incrementId) || null)
+  const shownIncrements = sidebarItems(projects, Number(incrementMatch?.params.projectId) || null)
+  const listFooter = (to: string, total: number | undefined, pinnedMode: boolean, shown: number) =>
+    !!total && (
+      <Link to={to} className="sidebar-all-link" title="Elenco completo: con 📌 scegli quali mostrare qui">
+        {pinnedMode ? '📌 fissati' : 'recenti'} · {total > shown ? `tutti (${total}) →` : 'elenco →'}
+      </Link>
+    )
 
   return (
     <aside className="sidebar">
@@ -31,6 +45,10 @@ export function Sidebar() {
         📦 Releases
       </NavLink>
 
+      <NavLink to="/tools" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
+        🧰 Tools
+      </NavLink>
+
       <div className="sidebar-section">
         <Link to="/increments" className="sidebar-section-title">
           Progetti
@@ -40,17 +58,18 @@ export function Sidebar() {
         </button>
         <nav className="project-list progetti">
           {progetti?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun progetto ancora.</p>}
-          {progetti?.map((p) => (
+          {shownProgetti.shown.map((p) => (
             <NavLink key={p.id} to={`/increments/${p.id}`} className={({ isActive }) => (isActive ? 'active' : '')}>
               <span className="code">{p.code}</span>
               {p.notes && <span className="name">{p.notes}</span>}
             </NavLink>
           ))}
         </nav>
+        {listFooter('/increments', progetti?.length, shownProgetti.pinnedMode, shownProgetti.shown.length)}
       </div>
 
       <div className="sidebar-section">
-        <Link to="/projects-dashboard" className="sidebar-section-title">
+        <Link to="/projects" className="sidebar-section-title">
           Increment
         </Link>
         <button className="btn btn-primary" onClick={() => setShowNewIncrement(true)}>
@@ -58,7 +77,7 @@ export function Sidebar() {
         </button>
         <nav className="project-list">
           {projects?.length === 0 && <p className="muted" style={{ fontSize: 13 }}>Nessun increment ancora.</p>}
-          {projects?.map((p) => (
+          {shownIncrements.shown.map((p) => (
             <NavLink key={p.id} to={`/projects/${p.id}`} className={({ isActive }) => (isActive ? 'active' : '')}>
               <span className="code">
                 {p.code}
@@ -77,6 +96,7 @@ export function Sidebar() {
             </NavLink>
           ))}
         </nav>
+        {listFooter('/projects', projects?.length, shownIncrements.pinnedMode, shownIncrements.shown.length)}
       </div>
 
       <NavLink

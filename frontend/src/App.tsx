@@ -16,11 +16,14 @@ import { OverviewDashboardPage } from './pages/OverviewDashboardPage'
 import { ProjectIncrementLinkPage } from './pages/ProjectIncrementLinkPage'
 import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
+import { ProjectsListPage } from './pages/ProjectsListPage'
 import { ReleasesPage } from './pages/ReleasesPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
+import { ToolsPage } from './pages/ToolsPage'
+import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases', '/tools/spedizioni']
 
 export default function App() {
   const location = useLocation()
@@ -49,6 +52,9 @@ export default function App() {
           <Route path="/settings" element={<ConfigurationPage />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/increments" element={<IncrementsPage />} />
+          <Route path="/projects" element={<ProjectsListPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
+          <Route path="/tools/spedizioni" element={<ShippingToolPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />

@@ -135,6 +135,20 @@ def set_gantt_order(payload: schemas.ProjectGanttOrder, db: Session = Depends(ge
     db.commit()
 
 
+@router.put("/{project_id}/pinned", status_code=204)
+def set_project_pinned(project_id: int, payload: schemas.SidebarPin, db: Session = Depends(get_db)):
+    """Fissa/sgancia l'increment nella sidebar. Non e' una modifica
+    dell'increment: updated_at resta com'era."""
+    if db.get(models.Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Increment non trovato")
+    db.execute(
+        update(models.Project)
+        .where(models.Project.id == project_id)
+        .values(sidebar_pinned=payload.pinned, updated_at=models.Project.updated_at)
+    )
+    db.commit()
+
+
 @router.post("", response_model=schemas.ProjectDetail, status_code=201)
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
     project = models.Project(**payload.model_dump())

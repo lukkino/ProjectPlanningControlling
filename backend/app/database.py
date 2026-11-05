@@ -357,7 +357,12 @@ def run_budget_migrations() -> None:
 
     inspector = inspect(engine)
     added = {
-        "increments": [("budget_frozen_at", "DATETIME"), ("budget_corrected_at", "DATETIME")],
+        "increments": [
+            ("budget_frozen_at", "DATETIME"),
+            ("budget_corrected_at", "DATETIME"),
+            ("sidebar_pinned", "BOOLEAN DEFAULT 0"),
+        ],
+        "projects": [("sidebar_pinned", "BOOLEAN DEFAULT 0")],
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
         "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'")],
         "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],

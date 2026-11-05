@@ -590,6 +590,10 @@ class ProjectGanttOrder(BaseModel):
     project_ids: list[int]
 
 
+class SidebarPin(BaseModel):
+    pinned: bool
+
+
 class ProjectUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
@@ -616,6 +620,8 @@ class ProjectListItem(ProjectBase):
     planned_finish_date: dt.date | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
+    # Sola lettura qui: si modifica con PUT /api/projects/{id}/pinned.
+    sidebar_pinned: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -707,6 +713,8 @@ class Increment(IncrementBase):
     # Budget congelato il (None = non ancora congelato).
     budget_frozen_at: dt.datetime | None = None
     budget_corrected_at: dt.datetime | None = None
+    # Sola lettura qui: si modifica con PUT /api/increments/{id}/pinned.
+    sidebar_pinned: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
     sub_projects: list[SubProject] = []

@@ -46,6 +46,8 @@ class Increment(Base):
     # Ultima correzione del budget iniziale fatta dopo il congelamento
     # (errori, risorsa dimenticata), senza passare da una review.
     budget_corrected_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Fissato nella sidebar (scelto dalla pagina elenco).
+    sidebar_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -176,6 +178,8 @@ class Project(Base):
     # l'ordinamento e' "Manuale" (0 = in alto). None per gli increment mai
     # riordinati a mano: finiscono in fondo, per data di inizio.
     gantt_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Fissato nella sidebar (scelto dalla pagina elenco).
+    sidebar_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -999,3 +1003,31 @@ class ComponentCatalogEntry(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True)
     pn_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+
+# ---------- Tools ----------
+
+
+class ShippingAddress(Base):
+    """Tool Modulo Spedizioni: rubrica indirizzi (mittenti e destinatari)."""
+
+    __tablename__ = "tool_shipping_addresses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    label: Mapped[str] = mapped_column(String(255))
+    company: Mapped[str] = mapped_column(String(255), default="")
+    address: Mapped[str] = mapped_column(Text, default="")
+    contact: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+
+
+class ShippingContact(Base):
+    """Tool Modulo Spedizioni: rubrica persone di riferimento."""
+
+    __tablename__ = "tool_shipping_contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    company: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")

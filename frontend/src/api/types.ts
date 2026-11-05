@@ -325,6 +325,8 @@ export type Project = {
   // Posizione nel Gantt della Dashboard generale in ordinamento Manuale
   // (null = mai riordinato a mano).
   gantt_order: number | null
+  // Fissato nella sidebar (📌 dalla pagina elenco).
+  sidebar_pinned: boolean
   created_at: string
   updated_at: string
 }
@@ -360,6 +362,8 @@ export type Increment = {
   // Budget congelato il (null = non ancora congelato).
   budget_frozen_at: string | null
   budget_corrected_at: string | null
+  // Fissato nella sidebar (📌 dalla pagina elenco).
+  sidebar_pinned: boolean
   created_at: string
   updated_at: string
   sub_projects: SubProject[]
@@ -691,4 +695,23 @@ export type Complaint = {
 
 export type ComplaintsSettings = {
   base_jql: string
+}
+
+// Tool Modulo Spedizioni: rubriche.
+export type ShippingAddress = {
+  id: number
+  label: string
+  company: string
+  address: string
+  contact: string
+  email: string
+  phone: string
+}
+
+export type ShippingContact = {
+  id: number
+  name: string
+  company: string
+  email: string
+  phone: string
 }

@@ -222,6 +222,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         project_id=increment.project_id,
         budget_frozen_at=increment.budget_frozen_at,
         budget_corrected_at=increment.budget_corrected_at,
+        sidebar_pinned=bool(increment.sidebar_pinned),
         created_at=increment.created_at,
         updated_at=increment.updated_at,
         sub_projects=list(increment.sub_projects),
