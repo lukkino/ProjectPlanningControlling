@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, NavLink, useMatch } from 'react-router-dom'
 import { api } from '../api/client'
 import { sidebarItems } from '../lib/sidebarPins'
+import { APP_VERSION } from '../lib/version'
 import { IncrementFormModal } from './IncrementFormModal'
 import { ProjectFormModal } from './ProjectFormModal'
 
@@ -30,7 +31,12 @@ export function Sidebar() {
       <img className="sidebar-logo" src="/logo_Inpeco.png" alt="Inpeco" />
       <div className="sidebar-brand">
         <img src="/favicon.svg" alt="" width={28} height={28} />
-        <h1>Project Controlling</h1>
+        <div>
+          <h1>Project Controlling</h1>
+          <Link to="/changelog" className="sidebar-version" title="Storia delle modifiche">
+            v{APP_VERSION}
+          </Link>
+        </div>
       </div>
 
       <NavLink to="/dashboard" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>

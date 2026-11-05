@@ -56,6 +56,8 @@ body {
 .sidebar-logo { width: 130px; height: auto; align-self: flex-start; margin: 0 4px; }
 .sidebar-brand { display: flex; align-items: center; gap: 8px; margin: 0 4px; }
 .sidebar-brand img { border-radius: 6px; flex-shrink: 0; }
+.sidebar-version { display: inline-block; font-size: 11px; color: var(--text-muted); text-decoration: none; margin-top: 2px; }
+.sidebar-version:hover { color: var(--primary); text-decoration: underline; }
 
 .sidebar h1 {
   font-size: 16px;
@@ -1071,3 +1073,16 @@ tr.phase-current input { background: #e6eefc; }
 .book-editor-list nav button:hover { background: var(--bg); }
 .book-editor-list nav button.active { background: var(--primary); color: white; }
 .book-editor-form input, .book-editor-form textarea { width: 100%; box-sizing: border-box; }
+
+/* ---------- Changelog ---------- */
+.changelog-day h3 { font-size: 14px; text-transform: capitalize; margin: 20px 0 8px; color: var(--text-muted); }
+.changelog-day .card + .card { margin-top: 8px; }
+.changelog-entry { padding: 12px 16px; }
+.changelog-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
+.changelog-meta { font-size: 12px; white-space: nowrap; }
+.changelog-version { margin-right: 8px; }
+.changelog-add { color: var(--success); }
+.changelog-del { color: var(--danger); }
+.changelog-body { margin: 8px 0 0; font-size: 13px; color: var(--text); }
+ul.changelog-body { padding-left: 20px; }
+.changelog-body p { margin: 2px 0; }

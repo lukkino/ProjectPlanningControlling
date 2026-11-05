@@ -715,3 +715,18 @@ export type ShippingContact = {
   email: string
   phone: string
 }
+
+// Storia delle modifiche dell'app (commit git).
+export type ChangelogEntry = {
+  hash: string
+  short_hash: string
+  // Versione dell'app introdotta dal commit (tag git), se c'e'.
+  version: string | null
+  date: string
+  author: string
+  subject: string
+  body: string[]
+  files_changed: number
+  insertions: number
+  deletions: number
+}

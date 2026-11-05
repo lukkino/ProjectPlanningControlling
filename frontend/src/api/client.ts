@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  ChangelogEntry,
   ShippingAddress,
   ShippingContact,
   AppSettingsUpdate,
@@ -521,6 +522,9 @@ export const api = {
     // Apre la cartella in Esplora risorse, o un suo file, sulla macchina del backend.
     open: (projectId: number, filename?: string) =>
       post<void>(`/projects/${projectId}/review-folder/open${filename ? `?${new URLSearchParams({ filename })}` : ''}`),
+  },
+  app: {
+    changelog: () => request<ChangelogEntry[]>('/app/changelog'),
   },
   // Tools: utility indipendenti dai progetti.
   tools: {

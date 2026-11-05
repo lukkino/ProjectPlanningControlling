@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type RefObject } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type RefObject } from 'react'
 import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
-import { parsePredecessors, type BacklogPatch } from '../lib/scheduling'
+import { computeCriticalPath } from '../lib/criticalPath'
+import { daysOffSet, parsePredecessors, type BacklogPatch } from '../lib/scheduling'
 
 // Stessa coppia di colori usata per Budget/Actual in IncrementHistoryCard:
 // blu = valore pianificato, arancio = valore effettivo.
@@ -40,6 +41,9 @@ const BAR_HEIGHT = 14
 const PLANNED_BAR_TOP = 22
 // Frecce predecessore -> successore.
 const COLOR_LINK = '#5b6472'
+// Percorso critico: barre e legami evidenziati, il resto attenuato.
+const COLOR_CRITICAL = '#d3402f'
+const DIMMED_OPACITY = 0.3
 const LINK_STUB = 8
 // Fascia verde sotto l'ultimo item della finestra di forecast, come la riga
 // "Forecasting - Code Freeze" nella tabella del Backlog.
@@ -364,6 +368,15 @@ export function BacklogGanttChart({
   // Esporta PNG: per catturare tutto il Gantt e non solo la parte visibile,
   // durante l'export il componente si allarga all'intero calendario (niente
   // scroll orizzontale ne' intestazione agganciata), poi torna com'era.
+  // Percorso critico (vedi lib/criticalPath): calcolato sulle date salvate,
+  // non sull'anteprima del trascinamento.
+  const [showCritical, setShowCritical] = useState(false)
+  const [criticalByAssignee, setCriticalByAssignee] = useState(true)
+  const criticalPath = useMemo(
+    () => (showCritical ? computeCriticalPath(items, criticalByAssignee, daysOffSet(nonWorkingDays)) : null),
+    [showCritical, criticalByAssignee, items, nonWorkingDays],
+  )
+  const isDimmed = (item: BacklogItem) => !!criticalPath && !criticalPath.critical.has(item.id)
   const rootRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -698,16 +711,15 @@ export function BacklogGanttChart({
   const cutoffRow = forecastCutoffId == null ? -1 : items.findIndex((item) => item.id === forecastCutoffId)
   const rowTop = (row: number) => row * ROW_HEIGHT + (cutoffRow >= 0 && row > cutoffRow ? CUTOFF_BAND_HEIGHT : 0)
   const barCenterY = (row: number) => rowTop(row) + PLANNED_BAR_TOP + BAR_HEIGHT / 2
-  const links = shownItems.flatMap((successor, successorRow) => {
+  const linkPath = (predecessorRow: number, successorRow: number) => {
+    const predecessor = shownItems[predecessorRow]
+    const successor = shownItems[successorRow]
     const sStart = dateStrToEpochDays(successor.planned_start)
-    if (sStart === null || dateStrToEpochDays(successor.expected_finish) === null) return []
-    return parsePredecessors(successor.predecessors).flatMap((key) => {
-      const predecessorRow = rowByKey.get(key)
-      if (predecessorRow === undefined || predecessorRow === successorRow) return []
-      const predecessor = shownItems[predecessorRow]
+    if (sStart === null || dateStrToEpochDays(successor.expected_finish) === null) return null
+    {
       const pStart = dateStrToEpochDays(predecessor.planned_start)
       const pEnd = dateStrToEpochDays(predecessor.expected_finish)
-      if (pStart === null || pEnd === null) return []
+      if (pStart === null || pEnd === null) return null
       const x1 = dayToX(Math.max(pStart, pEnd)) + dayWidth
       const y1 = barCenterY(predecessorRow)
       const x2 = dayToX(sStart)
@@ -718,13 +730,37 @@ export function BacklogGanttChart({
       // barra da sinistra.
       const below = successorRow > predecessorRow
       const yGap = below ? y2 - BAR_HEIGHT / 2 - 3 : rowTop(successorRow) + ROW_HEIGHT
-      const path =
-        x2 >= x1 + 2 * LINK_STUB
-          ? `M${x1},${y1} H${x1 + LINK_STUB} V${y2} H${x2}`
-          : `M${x1},${y1} H${x1 + LINK_STUB} V${yGap} H${x2 - LINK_STUB} V${y2} H${x2}`
-      return [{ id: `${predecessor.id}-${successor.id}`, path, title: `${predecessor.jira_key} → ${successor.jira_key}` }]
-    })
+      return x2 >= x1 + 2 * LINK_STUB
+        ? `M${x1},${y1} H${x1 + LINK_STUB} V${y2} H${x2}`
+        : `M${x1},${y1} H${x1 + LINK_STUB} V${yGap} H${x2 - LINK_STUB} V${y2} H${x2}`
+    }
+  }
+  const criticalLinkIds = new Set(criticalPath?.links.map((l) => `${l.from}-${l.to}`))
+  const links = shownItems.flatMap((successor, successorRow) =>
+    parsePredecessors(successor.predecessors).flatMap((key) => {
+      const predecessorRow = rowByKey.get(key)
+      if (predecessorRow === undefined || predecessorRow === successorRow) return []
+      const path = linkPath(predecessorRow, successorRow)
+      if (path === null) return []
+      const predecessor = shownItems[predecessorRow]
+      const id = `${predecessor.id}-${successor.id}`
+      return [{ id, path, title: `${predecessor.jira_key} → ${successor.jira_key}`, critical: criticalLinkIds.has(id), implicit: false }]
+    }),
+  )
+  // Legami impliciti del percorso critico (stesso assegnatario, uno dopo
+  // l'altro): disegnati solo con il percorso critico attivo, tratteggiati.
+  const rowById = new Map(items.map((item, row) => [item.id, row]))
+  const implicitLinks = (criticalPath?.links ?? []).flatMap((l) => {
+    if (!l.implicit) return []
+    const from = rowById.get(l.from)
+    const to = rowById.get(l.to)
+    if (from === undefined || to === undefined) return []
+    const path = linkPath(from, to)
+    if (path === null) return []
+    const title = `${shownItems[from].jira_key} → ${shownItems[to].jira_key} (stesso assegnatario: ${shownItems[to].assignee})`
+    return [{ id: `i${l.from}-${l.to}`, path, title, critical: true, implicit: true }]
   })
+  const allLinks = [...links, ...implicitLinks]
 
   return (
     <div
@@ -837,7 +873,42 @@ export function BacklogGanttChart({
             Fine della finestra di forecast
           </span>
         )}
+        {criticalPath && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 3,
+                border: `2px solid ${COLOR_CRITICAL}`,
+                boxSizing: 'border-box',
+                display: 'inline-block',
+              }}
+            />
+            {criticalPath.considered === 0 || !criticalPath.projectFinish
+              ? 'Percorso critico: nessun item da finire con date pianificate'
+              : `Percorso critico: ${criticalPath.critical.size} item su ${criticalPath.considered} senza margine, fine ${formatIsoDate(criticalPath.projectFinish)}`}
+          </span>
+        )}
         <span className="gantt-no-export" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            className={showCritical ? 'btn btn-primary' : 'btn'}
+            onClick={() => setShowCritical((v) => !v)}
+            title="Evidenzia gli item che, se slittano, spostano la fine del progetto (item da finire, con Start e Fine pian.; attività di servizio escluse)"
+            aria-pressed={showCritical}
+          >
+            Percorso critico
+          </button>
+          {showCritical && (
+            <label
+              className="muted"
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              title="Oltre ai Predecessori, considera che ogni assegnatario fa un item dopo l'altro"
+            >
+              <input type="checkbox" checked={criticalByAssignee} onChange={(e) => setCriticalByAssignee(e.target.checked)} />
+              sequenza per assegnatario
+            </label>
+          )}
           <span
             className="muted"
             style={{ display: 'flex', alignItems: 'center', gap: 4 }}
@@ -1215,6 +1286,11 @@ export function BacklogGanttChart({
                         barDrag
                           ? undefined
                           : `Pian.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}` +
+                            (criticalPath?.float.has(item.id)
+                              ? criticalPath.critical.has(item.id)
+                                ? '\nCritico: nessun margine, uno slittamento sposta la fine del progetto'
+                                : `\nMargine: ${criticalPath.float.get(item.id)} gg lavorativi`
+                              : '') +
                             (editable
                               ? isStartLocked?.(item)
                                 ? '\nInizio calcolato dai predecessori: trascina il bordo destro per cambiare la fine'
@@ -1235,8 +1311,13 @@ export function BacklogGanttChart({
                         // Sopra la linea di oggi, per poterla afferrare anche li'.
                         zIndex: editable ? 2 : undefined,
                         // Item spostati dal trascinamento: contorno tratteggiato.
-                        outline: previewById.has(item.id) ? `2px dashed ${color}` : undefined,
+                        outline: previewById.has(item.id)
+                          ? `2px dashed ${color}`
+                          : criticalPath?.critical.has(item.id)
+                            ? `2px solid ${COLOR_CRITICAL}`
+                            : undefined,
                         outlineOffset: 1,
+                        opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
                     />
                   )}
@@ -1278,6 +1359,7 @@ export function BacklogGanttChart({
                         height: BAR_HEIGHT,
                         background: item.is_activity ? activityFill(COLOR_ACTUAL) : color,
                         borderRadius: 3,
+                        opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
                     />
                   )}
@@ -1319,6 +1401,7 @@ export function BacklogGanttChart({
                         height: BAR_HEIGHT,
                         background: inProgressFill(item.is_activity ? COLOR_IN_PROGRESS : color),
                         borderRadius: 3,
+                        opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
                     />
                   )}
@@ -1348,7 +1431,7 @@ export function BacklogGanttChart({
             />
             {/* Sopra le righe ma trasparente al mouse: tooltip delle barre e
                 trascinamento continuano a funzionare. */}
-            {links.length > 0 && (
+            {allLinks.length > 0 && (
               <svg
                 width={chartWidth}
                 height={rowTop(items.length)}
@@ -1358,16 +1441,21 @@ export function BacklogGanttChart({
                   <marker id="gantt-link-arrow" markerWidth="7" markerHeight="8" refX="7" refY="4" orient="auto">
                     <path d="M0,0 L7,4 L0,8 Z" fill={COLOR_LINK} />
                   </marker>
+                  <marker id="gantt-link-arrow-critical" markerWidth="7" markerHeight="8" refX="7" refY="4" orient="auto">
+                    <path d="M0,0 L7,4 L0,8 Z" fill={COLOR_CRITICAL} />
+                  </marker>
                 </defs>
-                {links.map((link) => (
+                {allLinks.map((link) => (
                   <path
                     key={link.id}
                     d={link.path}
                     fill="none"
-                    stroke={COLOR_LINK}
-                    strokeWidth={1.5}
+                    stroke={link.critical ? COLOR_CRITICAL : COLOR_LINK}
+                    strokeWidth={link.critical ? 2.5 : 1.5}
+                    strokeDasharray={link.implicit ? '5 3' : undefined}
                     strokeLinejoin="round"
-                    markerEnd="url(#gantt-link-arrow)"
+                    opacity={criticalPath && !link.critical ? DIMMED_OPACITY : undefined}
+                    markerEnd={link.critical ? 'url(#gantt-link-arrow-critical)' : 'url(#gantt-link-arrow)'}
                   >
                     <title>{link.title}</title>
                   </path>

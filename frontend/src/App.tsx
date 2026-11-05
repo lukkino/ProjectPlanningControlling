@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BacklogPage } from './pages/BacklogPage'
+import { ChangelogPage } from './pages/ChangelogPage'
 import { ComplaintsKpiPage } from './pages/ComplaintsKpiPage'
 import { ComplaintsLayout } from './pages/ComplaintsLayout'
 import { ComplaintsPage } from './pages/ComplaintsPage'
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/increments" element={<IncrementsPage />} />
           <Route path="/projects" element={<ProjectsListPage />} />
           <Route path="/tools" element={<ToolsPage />} />
+          <Route path="/changelog" element={<ChangelogPage />} />
           <Route path="/tools/spedizioni" element={<ShippingToolPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
