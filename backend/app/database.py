@@ -157,6 +157,11 @@ def run_lightweight_migrations() -> None:
         if "is_activity" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN is_activity BOOLEAN DEFAULT 0"))
+        if "activity_phase" not in backlog_columns:
+            # Le attivita' di servizio esistenti diventano attivita' di Execution.
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN activity_phase VARCHAR(32)"))
+                conn.execute(text("UPDATE backlog_items SET activity_phase = 'execution' WHERE is_activity = 1"))
         if "scenarios_link" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN scenarios_link TEXT"))

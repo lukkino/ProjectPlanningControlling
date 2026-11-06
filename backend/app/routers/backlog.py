@@ -69,21 +69,33 @@ def restore_backlog_item(item_id: int, db: Session = Depends(get_db)):
 @router.post("/api/projects/{project_id}/backlog", response_model=schemas.BacklogItem, status_code=201)
 def create_backlog_item(project_id: int, payload: schemas.BacklogItemCreate, db: Session = Depends(get_db)):
     _get_project_or_404(db, project_id)
-    item = models.BacklogItem(project_id=project_id, **payload.model_dump())
+    data = payload.model_dump(exclude_unset=True)
+    _normalize_activity(data)
+    item = models.BacklogItem(project_id=project_id, **data)
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
 
 
-def _apply_update(item: models.BacklogItem, data: dict) -> None:
+def _normalize_activity(data: dict) -> None:
     """Un'attivita' di servizio e' sempre fuori dal code freeze: segnarla
-    toglie il codefreeze, rimettere il codefreeze la fa tornare un item
-    normale."""
+    (con la sua fase) toglie il codefreeze, rimettere il codefreeze la fa
+    tornare un item normale. is_activity e activity_phase restano allineati:
+    is_activity=True senza fase vale Execution."""
+    if "activity_phase" in data:
+        data["is_activity"] = data["activity_phase"] is not None
+    elif "is_activity" in data:
+        data["activity_phase"] = "execution" if data["is_activity"] else None
     if data.get("is_activity"):
         data["included_in_codefreeze"] = False
     elif data.get("included_in_codefreeze"):
         data["is_activity"] = False
+        data["activity_phase"] = None
+
+
+def _apply_update(item: models.BacklogItem, data: dict) -> None:
+    _normalize_activity(data)
     for field, value in data.items():
         setattr(item, field, value)
 

@@ -715,6 +715,11 @@ class BacklogItem(Base):
     # Resta fuori dalla pianificazione a cascata degli sviluppi.
     # Implica included_in_codefreeze=False (vedi routers/backlog.py).
     is_activity: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Fase a cui serve l'attivita' di servizio, e entro cui va fatta:
+    # "execution", "deployment" o "release" (Release to Market); None per
+    # un item normale. is_activity e' True se e solo se e' valorizzata
+    # (allineati da routers/backlog.py::_apply_update).
+    activity_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Presentazione degli scenari collegata a mano (Story gia' fatte prima
     # della cartella Scenarios, o file altrove): percorso di un file o URL
     # (es. SharePoint). Se manca vale il pptx trovato nella cartella

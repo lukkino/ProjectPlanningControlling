@@ -2,12 +2,13 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type C
 import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
+import { ACTIVITY_PHASES, activityPhaseInfo } from '../lib/activityPhases'
 import { computeCriticalPath } from '../lib/criticalPath'
 import { daysOffSet, parsePredecessors, type BacklogPatch } from '../lib/scheduling'
 
-// Stessa coppia di colori usata per Budget/Actual in IncrementHistoryCard:
-// blu = valore pianificato, arancio = valore effettivo.
-const COLOR_PLANNED = '#2f6fed'
+// Barre effettive delle attivita' di servizio: arancio come l'Actual in
+// IncrementHistoryCard (il pianificato ha il colore della fase, vedi
+// lib/activityPhases).
 const COLOR_ACTUAL = '#eb6834'
 // Stesso rosso di --danger: item "In Progress" con Start eff. ma senza
 // ancora una Fine eff. - l'inizio e' certo, la fine no (vedi barra
@@ -850,15 +851,21 @@ export function BacklogGanttChart({
             Giorni non lavorativi
           </span>
         )}
+        {/* Attivita' di servizio: una voce per fase presente, a strisce col
+            colore della fase (pianificato); l'effettivo e' arancio a strisce
+            per tutte. */}
+        {ACTIVITY_PHASES.filter((phase) => items.some((item) => activityPhaseInfo(item)?.value === phase.value)).map((phase) => (
+          <span key={phase.value} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(phase.color), display: 'inline-block' }} />
+            {phase.label} activities
+          </span>
+        ))}
         {items.some((item) => item.is_activity) && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span
-              style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_PLANNED), display: 'inline-block' }}
-            />
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span
               style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_ACTUAL), display: 'inline-block' }}
             />
-            Attività di servizio (fuori code freeze): pianificato / effettivo
+            Attività (fuori code freeze): effettivo
           </span>
         )}
         {links.length > 0 && (
@@ -1160,8 +1167,11 @@ export function BacklogGanttChart({
                   item.jira_key
                 )}
                 {item.is_activity && (
-                  <span className="muted" style={{ fontSize: 10, display: 'block' }} title="Attività di servizio: fuori dal code freeze">
-                    Attività
+                  <span
+                    style={{ fontSize: 10, display: 'block', color: activityPhaseInfo(item)?.color }}
+                    title={`${activityPhaseInfo(item)?.label} activity: fuori dal code freeze, da fare entro la fase ${activityPhaseInfo(item)?.label}`}
+                  >
+                    {activityPhaseInfo(item)?.label}
                   </span>
                 )}
               </div>
@@ -1304,7 +1314,7 @@ export function BacklogGanttChart({
                         width: Math.max(MIN_BAR_WIDTH, dayToX(pEnd) - dayToX(pStart) + dayWidth),
                         top: PLANNED_BAR_TOP,
                         height: BAR_HEIGHT,
-                        background: item.is_activity ? activityFill(COLOR_PLANNED) : plannedFill(color),
+                        background: item.is_activity ? activityFill(activityPhaseInfo(item)!.color) : plannedFill(color),
                         border: item.is_activity ? undefined : `1px solid ${color}`,
                         boxSizing: 'border-box',
                         borderRadius: 3,

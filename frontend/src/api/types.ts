@@ -180,6 +180,8 @@ export type ImplementedByTask = {
   fix_version: string | null
 }
 
+export type ActivityPhase = 'execution' | 'deployment' | 'release'
+
 export type BacklogItem = {
   id: number
   project_id: number
@@ -205,6 +207,9 @@ export type BacklogItem = {
   // Attivita' di servizio: fuori dal code freeze ma visibile in tabella e
   // nel Gantt, fuori dalla cascata. Implica included_in_codefreeze=false.
   is_activity: boolean
+  // Fase a cui serve l'attivita' di servizio (entro cui va fatta); null per
+  // un item normale. Valorizzata se e solo se is_activity.
+  activity_phase: ActivityPhase | null
   // Presentazione degli scenari collegata a mano (percorso di un file o
   // URL); se manca vale quella trovata nella cartella Scenarios.
   scenarios_link: string | null

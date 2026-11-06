@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -18,9 +18,10 @@ import { api, saveBlob } from '../api/client'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import { SyncProgressModal } from '../components/SyncProgressModal'
-import type { BacklogItem } from '../api/types'
-import { isInPlan, planningLabel } from '../lib/backlogStats'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, workingDaysBetween } from '../lib/dates'
+import type { BacklogItem, Phase } from '../api/types'
+import { ACTIVITY_PHASES, activityPhaseInfo, normalizePhaseName } from '../lib/activityPhases'
+import { planningLabel } from '../lib/backlogStats'
+import { dateStrToEpochDays, formatDateTime, formatEpochDaysAsDate, formatIsoDate, latestSyncedAt, workingDaysBetween } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 // Palette categorica validata del progetto (skill data-viz): blu e arancio
@@ -289,24 +290,51 @@ type RecentlyClosedPeriod = (typeof RECENTLY_CLOSED_PERIODS)[number]
 
 function RecentlyClosedCard({
   items,
+  phases,
   period,
   setPeriod,
 }: {
   items: BacklogItem[] | undefined
+  phases: Phase[] | undefined
   period: RecentlyClosedPeriod
   setPeriod: (period: RecentlyClosedPeriod) => void
 }) {
   const closed = recentlyClosedItems(items, period.days)
-  // Sotto le chiuse, come nella presentazione: le issue in lavorazione ora e
-  // quelle ancora da iniziare, nell'ordine del Backlog, con la regola del
-  // piano (code freeze e attivita' di servizio); le chiuse invece tutte
-  // quelle in scope.
+  // Sotto le chiuse, come nella presentazione, nell'ordine del Backlog (tutte
+  // in scope, Rejected escluse): quelle in lavorazione ora, poi quelle ancora
+  // da iniziare divise per la fase entro cui vanno fatte - "Incluso in
+  // codefreeze" = code freeze, attivita' di servizio = la loro fase, tutto il
+  // resto = Release to Market (l'ultima). Ogni sezione mostra la data
+  // aggiornata della fase (tabella Fasi increment).
   const byBacklogOrder = (a: BacklogItem, b: BacklogItem) => a.priority_order - b.priority_order
-  const inProgress = (items ?? []).filter((i) => isInPlan(i) && i.status === 'In Progress').sort(byBacklogOrder)
-  const toDo = (items ?? []).filter((i) => isInPlan(i) && i.status === 'To Do').sort(byBacklogOrder)
-  // Tutto il resto ancora da chiudere (in scope, non Done) che le due liste
-  // sopra non mostrano: story fuori dal code freeze, senza sviluppi (le Rejected no).
-  const toDoGeneral = (items ?? []).filter((i) => i.in_scope && i.status !== 'Done' && i.jira_status !== 'Rejected' && !isInPlan(i)).sort(byBacklogOrder)
+  const open = (items ?? []).filter((i) => i.in_scope && i.jira_status !== 'Rejected').sort(byBacklogOrder)
+  const inProgress = open.filter((i) => i.status === 'In Progress')
+  const toDo = open.filter((i) => i.status === 'To Do')
+  const phaseDate = (name: string) =>
+    formatIsoDate((phases ?? []).find((p) => normalizePhaseName(p.name) === name)?.planned_date ?? null)
+  const toDoSections = [
+    {
+      key: 'code-freeze',
+      title: 'Da fare entro code freeze',
+      date: phaseDate('code freeze'),
+      help: 'PBI ancora da iniziare con "Incluso in codefreeze".',
+      items: toDo.filter((i) => i.included_in_codefreeze),
+    },
+    ...ACTIVITY_PHASES.map((phase) => ({
+      key: phase.value,
+      title: `Da fare entro ${phase.label}`,
+      date: phaseDate(phase.phaseName),
+      help:
+        phase.value === 'release'
+          ? 'Release to Market activities e tutti gli altri PBI in scope ancora da iniziare, non inclusi nel code freeze.'
+          : `${phase.label} activities ancora da iniziare.`,
+      items: toDo.filter((i) => {
+        const activity = activityPhaseInfo(i)
+        if (activity) return activity.value === phase.value
+        return phase.value === 'release' && !i.included_in_codefreeze
+      }),
+    })),
+  ]
   return (
     <div className="card">
       <div
@@ -349,23 +377,23 @@ function RecentlyClosedCard({
         lastValue={(item) => formatIsoDate(item.actual_start)}
         emptyMessage="Nessuna issue in scope in progress."
       />
-      <h4 style={{ margin: '20px 0 12px' }}>Da fare ({toDo.length})</h4>
-      <IssueTable
-        items={toDo}
-        lastHeader="Stato Jira"
-        lastValue={(item) => item.jira_status ?? 'To Do'}
-        emptyMessage="Nessuna issue in scope ancora da iniziare."
-      />
-      <h4 style={{ margin: '20px 0 4px' }}>Da fare generale ({toDoGeneral.length})</h4>
-      <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
-        Gli altri PBI in scope ancora aperti, non inclusi nel code freeze né attività di servizio.
-      </p>
-      <IssueTable
-        items={toDoGeneral}
-        lastHeader="Stato Jira"
-        lastValue={(item) => item.jira_status ?? item.status}
-        emptyMessage="Nessun altro PBI in scope ancora aperto."
-      />
+      {toDoSections.map((section) => (
+        <Fragment key={section.key}>
+          <h4 style={{ margin: '20px 0 4px' }}>
+            {section.title}
+            {section.date && <span className="muted" style={{ fontWeight: 400 }}> · {section.date}</span>} ({section.items.length})
+          </h4>
+          <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
+            {section.help}
+          </p>
+          <IssueTable
+            items={section.items}
+            lastHeader="Stato Jira"
+            lastValue={(item) => item.jira_status ?? 'To Do'}
+            emptyMessage="Niente ancora da iniziare."
+          />
+        </Fragment>
+      ))}
     </div>
   )
 }
@@ -399,6 +427,7 @@ function IssueTable({
             <th style={{ width: 120 }}>ID</th>
             <th style={{ width: 120 }}>Tipo</th>
             <th>Summary</th>
+            <th style={{ width: 150 }}>Assignee</th>
             <th style={{ width: 90 }} title='Label Jira "planned" (Yes) o "oos" (OOS, vince su planned), come nel Forecasting'>
               Planned
             </th>
@@ -416,6 +445,7 @@ function IssueTable({
               </td>
               <td>{item.issue_type ?? <span className="muted">-</span>}</td>
               <td style={{ whiteSpace: 'normal' }}>{item.summary ?? <span className="muted">-</span>}</td>
+              <td>{item.assignee ?? <span className="muted">-</span>}</td>
               <td>{planningLabel(item) ?? <span className="muted">-</span>}</td>
               <td>{item.included_in_codefreeze ? 'Yes' : 'No'}</td>
               <td>{lastValue(item) ?? <span className="muted">-</span>}</td>
@@ -530,7 +560,13 @@ export function DashboardPage() {
     <div>
       <div className="card">
         <div className="page-header" style={{ marginBottom: 0 }}>
-          <h3 style={{ margin: 0 }}>Stato increment</h3>
+          <div>
+            <h3 style={{ margin: 0 }}>Stato increment</h3>
+            <span className="muted" style={{ fontSize: 13 }}>
+              Ultima sync Jira:{' '}
+              {backlogItems ? (formatDateTime(latestSyncedAt(backlogItems)) ?? 'mai sincronizzato') : '…'}
+            </span>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <select
               value={project.status}
@@ -665,7 +701,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <RecentlyClosedCard items={backlogItems} period={closedPeriod} setPeriod={setClosedPeriod} />
+      <RecentlyClosedCard items={backlogItems} phases={phases} period={closedPeriod} setPeriod={setClosedPeriod} />
 
       <div className="card">
         <h3>Ore usate nel tempo</h3>

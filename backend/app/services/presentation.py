@@ -75,8 +75,27 @@ GANTT_TYPE_COLORS = {
     "Activity": RGBColor(0x2F, 0x6F, 0xED),
 }
 COLOR_GANTT_OTHER = RGBColor(0x5B, 0x64, 0x72)
-COLOR_GANTT_SERVICE_PLANNED = RGBColor(0x2F, 0x6F, 0xED)
 COLOR_GANTT_SERVICE_ACTUAL = RGBColor(0xEB, 0x68, 0x34)
+# Attivita' di servizio per fase (models.BacklogItem.activity_phase): valore,
+# etichetta, nome della fase dell'increment (normalizzato) e colore delle
+# barre pianificate a strisce - stessi di frontend/src/lib/activityPhases.ts.
+ACTIVITY_PHASES = [
+    ("execution", "Execution", "execution", RGBColor(0x2F, 0x6F, 0xED)),
+    ("deployment", "Deployment", "deployment", RGBColor(0x7C, 0x4D, 0xBD)),
+    ("release", "Release to Market", "release to market", RGBColor(0x0F, 0x9D, 0x8A)),
+]
+
+
+def _activity_phase(item: models.BacklogItem) -> tuple[str, str, str, RGBColor] | None:
+    """La fase dell'attivita' di servizio (Execution se manca); None per un
+    item normale."""
+    if not item.is_activity:
+        return None
+    return next((p for p in ACTIVITY_PHASES if p[0] == item.activity_phase), ACTIVITY_PHASES[0])
+
+
+def _normalize_phase_name(name: str) -> str:
+    return name.strip().lower().replace("-", " ")
 COLOR_GANTT_PHASE = RGBColor(0x7C, 0x4D, 0xBD)
 MONTH_NAMES = ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
 # Evidenziatore (giallo chiaro) delle voci dello Scope in lavorazione.
@@ -645,6 +664,7 @@ def _issue_row(item: models.BacklogItem, last: str) -> list[str]:
         item.jira_key,
         item.issue_type or "-",
         item.summary or "-",
+        item.assignee or "-",
         _planning_label(item),
         "Yes" if item.included_in_codefreeze else "No",
         last,
@@ -661,29 +681,35 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
         ),
         key=lambda i: (-i.actual_finish.toordinal(), i.priority_order),
     )
-    # Sotto le chiuse, quelle in lavorazione ora (stato In Progress, vedi
-    # BacklogItem.status) e quelle ancora da iniziare, nell'ordine del
-    # Backlog, con la regola del piano: lavoro del code freeze e attivita' di
-    # servizio, come il Gantt del Backlog. Le chiuse invece sono tutte quelle
-    # in scope, come nella card della Dashboard.
-    in_progress = sorted(
-        (i for i in project.backlog_items if i.is_in_plan and i.status == "In Progress"),
+    # Sotto le chiuse, come nella card della Dashboard, nell'ordine del
+    # Backlog (tutte in scope, Rejected escluse): quelle in lavorazione ora
+    # (stato In Progress, vedi BacklogItem.status), poi quelle ancora da
+    # iniziare divise per la fase entro cui vanno fatte - "Incluso in
+    # codefreeze" = code freeze, attivita' di servizio = la loro fase, tutto
+    # il resto = Release to Market. Nel titolo la data aggiornata della fase.
+    open_items = sorted(
+        (i for i in project.backlog_items if i.in_scope and i.jira_status != "Rejected"),
         key=lambda i: i.priority_order,
     )
-    to_do = sorted(
-        (i for i in project.backlog_items if i.is_in_plan and i.status == "To Do"),
-        key=lambda i: i.priority_order,
-    )
-    # Tutto il resto ancora aperto (in scope, fuori dal piano, non Rejected),
-    # come la sezione "Da fare generale" della Dashboard.
-    to_do_general = sorted(
-        (
-            i
-            for i in project.backlog_items
-            if i.in_scope and i.status != "Done" and i.jira_status != "Rejected" and not i.is_in_plan
-        ),
-        key=lambda i: i.priority_order,
-    )
+    in_progress = [i for i in open_items if i.status == "In Progress"]
+    to_do = [i for i in open_items if i.status == "To Do"]
+    phase_dates = {_normalize_phase_name(p.name): p.planned_date for p in project.phases}
+
+    def to_do_title(label: str, phase_name: str, count: int) -> str:
+        date = phase_dates.get(phase_name)
+        return f"Da fare entro {label}" + (f" · {_date(date)}" if date else "") + f" ({count})"
+
+    def in_phase(item: models.BacklogItem, value: str) -> bool:
+        activity = _activity_phase(item)
+        if activity:
+            return activity[0] == value
+        return value == "release" and not item.included_in_codefreeze
+
+    code_freeze_items = [i for i in to_do if i.included_in_codefreeze]
+    to_do_sections = [(to_do_title("code freeze", "code freeze", len(code_freeze_items)), code_freeze_items)]
+    for value, label, phase_name, _ in ACTIVITY_PHASES:
+        phase_items = [i for i in to_do if in_phase(i, value)]
+        to_do_sections.append((to_do_title(label, phase_name, len(phase_items)), phase_items))
     # (titolo della sezione, intestazione dell'ultima colonna, righe, testo se vuota)
     sections = [
         (
@@ -698,17 +724,9 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
             [_issue_row(i, _date(i.actual_start)) for i in in_progress],
             "Nessuna issue in scope in progress.",
         ),
-        (
-            f"Da fare ({len(to_do)})",
-            "Stato Jira",
-            [_issue_row(i, i.jira_status or "To Do") for i in to_do],
-            "Nessuna issue in scope ancora da iniziare.",
-        ),
-        (
-            f"Da fare generale ({len(to_do_general)})",
-            "Stato Jira",
-            [_issue_row(i, i.jira_status or i.status) for i in to_do_general],
-            "Nessun altro PBI in scope ancora aperto.",
+        *(
+            (heading, "Stato Jira", [_issue_row(i, i.jira_status or "To Do") for i in phase_items], "Niente ancora da iniziare.")
+            for heading, phase_items in to_do_sections
         ),
     ]
 
@@ -718,7 +736,7 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
 
     def row_height(row: list[str]) -> int:
         # Le Summary lunghe vanno a capo e alzano la riga.
-        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 75), 4)
+        return Inches(0.36) * min(math.ceil(max(len(row[2]), 1) / 62), 4)
 
     slide, box = deck.add_slide(title)
     slides = [slide]
@@ -757,9 +775,9 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
             _add_table(
                 slide,
                 _Box(box.left, top, box.width, 0),
-                ["ID", "Tipo", "Summary", "Planned", "Incluso in code freeze", date_header],
+                ["ID", "Tipo", "Summary", "Assignee", "Planned", "Incluso in code freeze", date_header],
                 rows[:fitting],
-                col_ratios=[1.5, 1.1, 5.9, 0.9, 1.4, 1.3],
+                col_ratios=[1.4, 1.0, 5.0, 1.6, 0.9, 1.3, 1.2],
                 link_col=0,
             )
             top += header_height + used + Inches(0.3)
@@ -1161,7 +1179,7 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         if item.planned_start and item.expected_finish and item.expected_finish >= item.planned_start:
             shape = bar(item.planned_start, item.expected_finish, top + int(row_height * 0.14))
             if item.is_activity:
-                _striped(shape, COLOR_GANTT_SERVICE_PLANNED)
+                _striped(shape, _activity_phase(item)[3])
             else:
                 shape.fill.solid()
                 shape.fill.fore_color.rgb = _tint(color, 0.3)
@@ -1235,12 +1253,14 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
     legend_entry("Pianificato", outlined, Inches(0.85))
     legend_entry("Effettivo", solid(COLOR_GANTT_OTHER), Inches(0.75))
     legend_entry("In corso (fino a oggi)", lambda s: (_fading(s, COLOR_GANTT_OTHER), s.line.fill.background()), Inches(1.5))
-    if any(i.is_activity for i in items):
-        legend_entry(
-            "Attività di servizio",
-            lambda s: (_striped(s, COLOR_GANTT_SERVICE_PLANNED), s.line.fill.background()),
-            Inches(1.35),
-        )
+    used_phases = {_activity_phase(i)[0] for i in items if i.is_activity}
+    for value, label, _, phase_color in ACTIVITY_PHASES:
+        if value in used_phases:
+            legend_entry(
+                f"{label} activities",
+                lambda s, c=phase_color: (_striped(s, c), s.line.fill.background()),
+                Inches(0.75) + Inches(0.075) * len(label),
+            )
     line(x, legend_top + Inches(0.15), x + Inches(0.25), legend_top + Inches(0.15), COLOR_DANGER, width=1.5)
     cell(x + Inches(0.3), legend_top, Inches(1.3), Inches(0.3), f"Oggi {_date(today)}", size=9, color=COLOR_MUTED)
 

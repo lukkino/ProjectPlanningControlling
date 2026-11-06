@@ -10,7 +10,8 @@ import {
   type RefObject,
 } from 'react'
 import { api } from '../api/client'
-import type { BacklogItem, NonWorkingDay } from '../api/types'
+import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
+import { ACTIVITY_PHASES } from '../lib/activityPhases'
 import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
 import { BacklogGanttChart, type GanttBarChange } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
@@ -19,7 +20,7 @@ import { ScenarioLinkModal } from '../components/ScenarioLinkModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
-import { formatIsoDate, parseBackendDateTime, workingDaysBetween } from '../lib/dates'
+import { formatDateTime, formatIsoDate, latestSyncedAt, workingDaysBetween } from '../lib/dates'
 import {
   addWorkingDays,
   countWorkingDays,
@@ -37,15 +38,6 @@ import {
 } from '../lib/scheduling'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
-
-// "2026-09-19T09:11:34.301529" -> "19/09/2026, 09:11". null se manca o non è
-// una data valida (es. un item mai sincronizzato).
-function formatDateTime(value: string | null): string | null {
-  if (!value) return null
-  const d = parseBackendDateTime(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
 
 // Ordinamento esplicito (facoltativo) per stato, dall'alto verso il basso:
 // Done, In Progress, To Do. Alternativo al drag&drop manuale (che si basa
@@ -97,7 +89,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   issue_type: 70,
   in_scope: 60,
   included_in_codefreeze: 80,
-  is_activity: 80,
+  is_activity: 120,
   status: 70,
   refinement_date: 130,
   ta_date: 130,
@@ -595,13 +587,22 @@ export function BacklogPage() {
       // Il backend toglie il codefreeze quando si segna.
       key: 'is_activity',
       label: 'Attività di servizio',
+      className: 'editable-cell',
       render: (item) => (
-        <input
-          type="checkbox"
-          checked={item.is_activity}
-          title="Attività di servizio: fuori dal code freeze, ma resta visibile in tabella e nel Gantt e fuori dalla pianificazione a cascata"
-          onChange={(e) => update.mutate({ id: item.id, data: { is_activity: e.target.checked } })}
-        />
+        <select
+          value={item.is_activity ? (item.activity_phase ?? 'execution') : ''}
+          title="Attività di servizio, per la fase entro cui va fatta: fuori dal code freeze, ma resta visibile in tabella e nel Gantt (a strisce, col colore della fase) e fuori dalla pianificazione a cascata"
+          onChange={(e) =>
+            update.mutate({ id: item.id, data: { activity_phase: (e.target.value || null) as ActivityPhase | null } })
+          }
+        >
+          <option value="">—</option>
+          {ACTIVITY_PHASES.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
       ),
     },
     { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} jiraStatus={item.jira_status} /> },
@@ -1094,13 +1095,8 @@ export function BacklogPage() {
   const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
   const avgDuration = trimmedMeanDuration(items ?? [])
 
-  // Ultima sync Jira di QUESTO progetto: il piu' recente last_synced_at tra
-  // tutti i suoi item (la sync valorizza lo stesso timestamp su ognuno,
-  // creato o aggiornato, vedi routers/backlog.py::sync_backlog_from_jira).
-  const lastSyncedAt = (items ?? []).reduce<string | null>((latest, item) => {
-    if (!item.last_synced_at) return latest
-    return !latest || item.last_synced_at > latest ? item.last_synced_at : latest
-  }, null)
+  // Ultima sync Jira di QUESTO progetto (vedi latestSyncedAt).
+  const lastSyncedAt = latestSyncedAt(items ?? [])
 
   // PBI che rientrano nell'ultima previsione di Forecasting: i primi N item
   // non-Done (In Progress/To Do), in scope e inclusi nel codefreeze,
@@ -1700,10 +1696,16 @@ export function BacklogPage() {
                   </div>
                   <div className="bulk-menu-row">
                     <span>Attività di servizio</span>
-                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, is_activity: true })))}>
-                      Sì
-                    </button>
-                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, is_activity: false })))}>
+                    {ACTIVITY_PHASES.map((p) => (
+                      <button
+                        key={p.value}
+                        className="btn"
+                        onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, activity_phase: p.value })))}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <button className="btn" onClick={() => runBulk(selectedItems.map((i) => ({ id: i.id, activity_phase: null })))}>
                       No
                     </button>
                   </div>

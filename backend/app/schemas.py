@@ -385,6 +385,10 @@ class BudgetReview(BaseModel):
 
 # ---------- BacklogItem ----------
 
+# Fase a cui serve un'attivita' di servizio (vedi models.BacklogItem.activity_phase).
+ActivityPhase = Literal["execution", "deployment", "release"]
+
+
 class BacklogItemBase(BaseModel):
     jira_key: str
     priority_order: float = 0
@@ -392,6 +396,7 @@ class BacklogItemBase(BaseModel):
     in_scope: bool = True
     included_in_codefreeze: bool = True
     is_activity: bool = False
+    activity_phase: ActivityPhase | None = None
     scenarios_link: str | None = None
     planned: bool = False
     planned_duration_days: float | None = None
@@ -420,6 +425,7 @@ class BacklogItemUpdate(BaseModel):
     in_scope: bool | None = None
     included_in_codefreeze: bool | None = None
     is_activity: bool | None = None
+    activity_phase: ActivityPhase | None = None
     scenarios_link: str | None = None
     planned: bool | None = None
     planned_duration_days: float | None = None

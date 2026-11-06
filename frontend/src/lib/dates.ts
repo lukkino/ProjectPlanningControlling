@@ -34,6 +34,25 @@ export function parseBackendDateTime(value: string): Date {
   return new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
 }
 
+// "2026-09-19T09:11:34.301529" -> "19/09/2026, 09:11". null se manca o non è
+// una data valida (es. un item mai sincronizzato).
+export function formatDateTime(value: string | null): string | null {
+  if (!value) return null
+  const d = parseBackendDateTime(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// Ultima sync Jira di un increment: il piu' recente last_synced_at tra i suoi
+// item (la sync valorizza lo stesso timestamp su ognuno, creato o
+// aggiornato, vedi routers/backlog.py::sync_backlog_from_jira).
+export function latestSyncedAt(items: { last_synced_at: string | null }[]): string | null {
+  return items.reduce<string | null>((latest, item) => {
+    if (!item.last_synced_at) return latest
+    return !latest || item.last_synced_at > latest ? item.last_synced_at : latest
+  }, null)
+}
+
 export function formatEpochDaysAsDate(days: number): string {
   const d = epochDaysToDate(days)
   const dd = String(d.getUTCDate()).padStart(2, '0')
