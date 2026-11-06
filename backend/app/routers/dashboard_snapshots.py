@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import SessionLocal, get_db
+from app.ownership import scope_user_id
 from app.services.metrics import (
     TEAM_LABELS,
     compute_bugs_opened_metrics,
@@ -67,6 +69,7 @@ def _get_or_404(db: Session, snapshot_id: int) -> models.DashboardSnapshot:
 def list_dashboard_snapshots(db: Session = Depends(get_db)):
     snapshots = (
         db.query(models.DashboardSnapshot)
+        .filter(models.DashboardSnapshot.owner_id == scope_user_id())
         .order_by(models.DashboardSnapshot.snapshot_date.desc(), models.DashboardSnapshot.id.desc())
         .all()
     )
@@ -87,10 +90,15 @@ def create_dashboard_snapshot(payload: schemas.DashboardSnapshotCreate, db: Sess
     oggi: le finestre dei grafici ("ultimi 365 giorni") sono relative al
     momento della raccolta, quindi non si puo' fotografare una data
     passata."""
+    # Un contesto per thread, copiato da qui: porta lo scope dell'utente (le
+    # sue JQL, vedi ownership.scope_user_id) nei thread della raccolta.
+    contexts = [contextvars.copy_context() for _ in TEAM_LABELS]
     with ThreadPoolExecutor(max_workers=len(TEAM_LABELS)) as pool:
-        teams = dict(zip(TEAM_LABELS, pool.map(_collect_team_data, TEAM_LABELS)))
+        collected = pool.map(lambda ctx, team: ctx.run(_collect_team_data, team), contexts, TEAM_LABELS)
+        teams = dict(zip(TEAM_LABELS, collected))
 
     snapshot = models.DashboardSnapshot(
+        owner_id=scope_user_id(),
         snapshot_date=dt.date.today(),
         note=(payload.note or "").strip() or None,
         data_json=json.dumps({team: data.model_dump(mode="json") for team, data in teams.items()}),

@@ -1086,3 +1086,128 @@ tr.phase-current input { background: #e6eefc; }
 .changelog-body { margin: 8px 0 0; font-size: 13px; color: var(--text); }
 ul.changelog-body { padding-left: 20px; }
 .changelog-body p { margin: 2px 0; }
+
+/* Login e utente collegato (components/AuthGate.tsx, UserMenu.tsx) */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--bg);
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.auth-card .btn { margin-top: 6px; }
+.readonly-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: #eef3fd;
+  color: var(--primary-dark);
+  font-size: 13px;
+}
+
+/* Barra in alto a destra (components/TopBar.tsx). Non sticky: Backlog, Gantt,
+   Forecasting e Complaints hanno intestazioni agganciate a top:0 della
+   finestra, che una barra fissa coprirebbe. */
+.main-column { min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 52px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-dropdown { position: relative; }
+.topbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+.topbar-button:hover, .topbar-button.active { background: var(--bg); }
+.topbar-icon { font-size: 18px; line-height: 1; }
+.topbar-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.topbar-avatar--large { width: 40px; height: 40px; font-size: 15px; }
+.topbar-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 240px;
+  padding: 6px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
+}
+.topbar-menu-title { padding: 6px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.topbar-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+.topbar-menu-item:hover { background: var(--bg); }
+.topbar-menu-user { display: flex; align-items: center; gap: 10px; padding: 8px 14px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.topbar-menu-scope { display: flex; align-items: center; gap: 8px; padding: 6px 14px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; font-size: 13px; color: var(--text-muted); }
+.topbar-menu-scope select { flex: 1; min-width: 0; font-size: 13px; }
+.topbar-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: #fff4e0;
+  color: #8a5300;
+  font-size: 13px;
+}
+.topbar-scope-badge button { border: none; background: none; cursor: pointer; color: inherit; font-size: 13px; padding: 0 4px; }
+
+/* Suggerimenti per i campi vuoti e card "Da completare" (components/Suggestion.tsx, MissingInfoCard.tsx) */
+.suggestion { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.suggestion-value { padding: 1px 6px; border-radius: 4px; background: #f3f5f9; color: var(--text); word-break: break-all; }
+.missing-info { border-color: #f1d8a8; background: #fffaf0; }
+.missing-info-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; font: inherit; font-weight: 600; font-size: 15px; color: var(--text); cursor: pointer; text-align: left; }
+.missing-info-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: #c97a12; color: #fff; font-size: 12px; text-align: center; }
+.missing-info-list { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }

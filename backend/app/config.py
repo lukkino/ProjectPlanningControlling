@@ -17,6 +17,12 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./data/app.db"
 
+    # Cookie di sessione solo su HTTPS: da attivare (COOKIE_SECURE=true nel
+    # .env) quando il server e' raggiungibile in https.
+    cookie_secure: bool = False
+    # Durata di una sessione di login senza attivita' (giorni).
+    session_days: int = 7
+
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""

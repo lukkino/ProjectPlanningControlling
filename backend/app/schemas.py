@@ -1246,3 +1246,71 @@ class ReleaseNoticeHtml(BaseModel):
 
 
 ReleaseNoticeMeta.model_rebuild()
+
+
+# ---------- Utenti e login ----------
+
+Role = Literal["viewer", "editor", "admin"]
+
+
+class AuthStatus(BaseModel):
+    setup_required: bool
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class SetupRequest(BaseModel):
+    username: str
+    display_name: str = ""
+    email: str | None = None
+    password: str
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    email: str | None
+    role: Role
+    is_active: bool
+    auth_provider: str
+    created_at: dt.datetime
+    last_login_at: dt.datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserCreate(BaseModel):
+    username: str
+    display_name: str = ""
+    email: str | None = None
+    role: Role = "viewer"
+    password: str
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    email: str | None = None
+    role: Role | None = None
+    is_active: bool | None = None
+    # Valorizzata = nuova password impostata dall'admin.
+    password: str | None = None
+
+
+class Suggestions(BaseModel):
+    """Valori di esempio per i campi vuoti (vedi routers/suggestions.py)."""
+
+    source: str | None = None
+    team_sw_base_jql: str | None = None
+    team_embedded_base_jql: str | None = None
+    complaints_base_jql: str | None = None
+    # Con "{code}" al posto del codice dell'increment.
+    increment_jql_template: str | None = None

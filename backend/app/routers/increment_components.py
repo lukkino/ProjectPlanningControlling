@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id
 from app.routers.releases import _add_missing_project_releases, sync_release_from_project
 
 router = APIRouter(prefix="/api", tags=["increment-components"])
@@ -36,27 +37,29 @@ def _split_pn(pn: str | None) -> tuple[str, int, int] | None:
     return match["family"], int(match["number"]), len(match["number"])
 
 
-def _release_rows(db: Session) -> list[tuple[models.Release, models.ReleaseComponent]]:
+def _release_rows(db: Session, owner_id: int | None) -> list[tuple[models.Release, models.ReleaseComponent]]:
+    """Componenti delle release di un utente (ognuno ha le sue release)."""
     return (
         db.query(models.Release, models.ReleaseComponent)
         .join(models.ReleaseComponent, models.ReleaseComponent.release_id == models.Release.id)
+        .filter(models.Release.owner_id == owner_id)
         .order_by(models.Release.sort_order, models.Release.id, models.ReleaseComponent.sort_order)
         .all()
     )
 
 
-def _catalog(db: Session) -> dict[str, str | None]:
+def _catalog(db: Session, owner_id: int | None) -> dict[str, str | None]:
     """Nome componente -> famiglia del PN (None se sconosciuta)."""
     catalog: dict[str, str | None] = {}
     # Le release sono in ordine cronologico: vince il PN piu' recente.
-    for _release, component in _release_rows(db):
+    for _release, component in _release_rows(db, owner_id):
         name = (component.component or "").strip()
         if not name:
             continue
         parts = _split_pn(component.pn)
         if parts or name not in catalog:
             catalog[name] = parts[0] if parts else catalog.get(name)
-    for entry in db.query(models.ComponentCatalogEntry):
+    for entry in db.query(models.ComponentCatalogEntry).filter(models.ComponentCatalogEntry.owner_id == owner_id):
         catalog[entry.name] = entry.pn_family
     return catalog
 
@@ -65,7 +68,7 @@ def _order_key(release: models.Release) -> tuple[int, int]:
     return (release.sort_order or 0, release.id or 0)
 
 
-def _next_pn(db: Session, family: str | None, before: models.Release | None = None) -> str | None:
+def _next_pn(db: Session, owner_id: int | None, family: str | None, before: models.Release | None = None) -> str | None:
     """Il PN successivo al piu' alto della famiglia tra le release che
     vengono prima di `before` nell'ordine della sezione Releases (tutte, se
     None)."""
@@ -73,7 +76,7 @@ def _next_pn(db: Session, family: str | None, before: models.Release | None = No
         return None
     limit = _order_key(before) if before is not None else None
     best: tuple[int, int] | None = None
-    for release, component in _release_rows(db):
+    for release, component in _release_rows(db, owner_id):
         if limit is not None and _order_key(release) >= limit:
             continue
         parts = _split_pn(component.pn)
@@ -89,7 +92,7 @@ def _next_pn(db: Session, family: str | None, before: models.Release | None = No
 def _pn_usages(db: Session, project: models.Project) -> dict[str, set[str]]:
     """PN -> altri increment della sezione Releases che lo usano gia'."""
     usages: dict[str, set[str]] = {}
-    for release, component in _release_rows(db):
+    for release, component in _release_rows(db, project.owner_id):
         if component.pn and release.increment_code != project.code:
             usages.setdefault(component.pn.strip(), set()).add(release.increment_code or "release senza codice")
     return usages
@@ -124,7 +127,7 @@ def _project_release(db: Session, project: models.Project) -> models.Release | N
     _add_missing_project_releases(db)
     return (
         db.query(models.Release)
-        .filter(models.Release.increment_code == project.code)
+        .filter(models.Release.increment_code == project.code, models.Release.owner_id == project.owner_id)
         .order_by(models.Release.sort_order, models.Release.id)
         .first()
     )
@@ -148,10 +151,12 @@ def _get_component_or_404(db: Session, component_id: int) -> models.ReleaseCompo
 def list_catalog(project_id: int | None = None, db: Session = Depends(get_db)):
     """Il menu dei componenti; con project_id il PN proposto e' quello per
     l'increment (successivo alle release che lo precedono)."""
-    catalog = _catalog(db)
-    before = _project_release(db, _get_project_or_404(db, project_id)) if project_id is not None else None
+    project = _get_project_or_404(db, project_id) if project_id is not None else None
+    owner_id = project.owner_id if project is not None else scope_user_id()
+    catalog = _catalog(db, owner_id)
+    before = _project_release(db, project) if project is not None else None
     return [
-        schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, family, before))
+        schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, owner_id, family, before))
         for name, family in sorted(catalog.items(), key=lambda item: item[0].lower())
     ]
 
@@ -161,12 +166,13 @@ def create_catalog_entry(payload: schemas.ComponentCatalogWrite, db: Session = D
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Il nome del componente e' obbligatorio")
-    if any(existing.lower() == name.lower() for existing in _catalog(db)):
+    owner_id = scope_user_id()
+    if any(existing.lower() == name.lower() for existing in _catalog(db, owner_id)):
         raise HTTPException(status_code=409, detail=f"Il componente {name} esiste gia'")
     family = (payload.pn_family or "").strip() or None
-    db.add(models.ComponentCatalogEntry(name=name, pn_family=family))
+    db.add(models.ComponentCatalogEntry(name=name, pn_family=family, owner_id=owner_id))
     db.commit()
-    return schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, family))
+    return schemas.ComponentCatalogItem(name=name, pn_family=family, next_pn=_next_pn(db, owner_id, family))
 
 
 @router.get("/projects/{project_id}/components", response_model=list[schemas.IncrementComponentRead])
@@ -190,13 +196,13 @@ def create_component(project_id: int, payload: schemas.IncrementComponentCreate,
         # Non dovrebbe capitare (la si crea per ogni increment), ma per
         # sicurezza: release nuova col codice dell'increment.
         last = db.query(func.max(models.Release.sort_order)).scalar() or 0
-        release = models.Release(increment_code=project.code, sort_order=last + 1)
+        release = models.Release(increment_code=project.code, owner_id=project.owner_id, sort_order=last + 1)
         db.add(release)
         db.flush()
     # Compilando i componenti si aggiornano anche i dati della release.
     sync_release_from_project(release, project)
-    family = _catalog(db).get(name)
-    pn = _next_pn(db, family, release)
+    family = _catalog(db, project.owner_id).get(name)
+    pn = _next_pn(db, project.owner_id, family, release)
     # Subito dopo l'ultimo componente della stessa famiglia, cosi' nella
     # sezione Releases i PN uguali restano vicini (e si uniscono); se la
     # famiglia non c'e' ancora, in fondo.
@@ -222,8 +228,12 @@ def update_component(component_id: int, payload: schemas.IncrementComponentUpdat
         setattr(component, field, (value.strip() or None) if isinstance(value, str) else value)
     db.commit()
     db.refresh(component)
-    code = db.get(models.Release, component.release_id).increment_code
-    project = db.query(models.Project).filter(models.Project.code == code).first()
+    release = db.get(models.Release, component.release_id)
+    project = (
+        db.query(models.Project)
+        .filter(models.Project.code == release.increment_code, models.Project.owner_id == release.owner_id)
+        .first()
+    )
     usages = _pn_usages(db, project) if project else {}
     return _read(component, usages)
 

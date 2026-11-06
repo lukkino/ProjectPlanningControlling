@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.services.budget import has_hours_budget, has_material_budget, hours_budget, material_budget_by_category
 from app.routers.settings import SETTINGS_ROW_ID
+from app.ownership import user_settings
 from app.services.jira_client import (
     CVE_BUG_REPORTER_EMAIL,
     JiraClientError,
@@ -47,7 +48,8 @@ OVERVIEW_PERIOD_JQL = {
 }
 
 
-def _team_base_jql(settings: models.AppSettings | None, team: str) -> str:
+def _team_base_jql(settings: models.UserSettings | None, team: str) -> str:
+    """JQL base del team dalle impostazioni personali dell'utente."""
     if team == "embedded":
         return (settings.team_embedded_base_jql if settings else None) or ""
     return (settings.team_sw_base_jql if settings else None) or ""
@@ -256,7 +258,7 @@ def compute_overview_metrics(db: Session, team: str = "sw", period: str = "curre
     stato attuale. Con period="previous" la finestra diventa l'anno prima
     ancora (da -730 a -365 giorni), per il confronto affiancato."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
-    base_jql = _team_base_jql(settings, team)
+    base_jql = _team_base_jql(user_settings(db), team)
     window = OVERVIEW_PERIOD_JQL[period]
     if not base_jql.strip():
         return schemas.OverviewMetrics(
@@ -320,7 +322,7 @@ def compute_cycle_time_metrics(
     changelog Jira), con le linee di percentile 50/85/95 (calcolate senza i
     Bug CVE)."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
-    base_jql = _team_base_jql(settings, team)
+    base_jql = _team_base_jql(user_settings(db), team)
     if not base_jql.strip():
         return schemas.CycleTimeMetrics(
             points=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
@@ -374,7 +376,7 @@ def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOp
     [Dropdown] e' gia' quella verificata per la ciambella Metriche, mentre
     l'id del custom field non e' noto."""
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
-    base_jql = _team_base_jql(settings, team)
+    base_jql = _team_base_jql(user_settings(db), team)
     if not base_jql.strip():
         return schemas.BugsOpenedMetrics(
             months=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."

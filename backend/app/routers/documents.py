@@ -283,7 +283,9 @@ def _complaint_numbers(db: Session, project: models.Project) -> dict[str, str]:
     bug_keys = [i.jira_key for i in project.backlog_items if i.issue_type == "Bug"]
     return {
         c.jira_key: c.salesforce_case_number or ""
-        for c in db.query(models.Complaint).filter(models.Complaint.jira_key.in_(bug_keys))
+        for c in db.query(models.Complaint).filter(
+            models.Complaint.jira_key.in_(bug_keys), models.Complaint.owner_id == project.owner_id
+        )
     }
 
 
@@ -646,7 +648,9 @@ def _release_notice_template_info(tokens: list[str] | None = None) -> schemas.Re
     found = tokens if tokens is not None else release_notice.template_tokens()
     return schemas.ReleaseNoticeTemplateInfo(
         custom=custom,
-        updated_at=dt.datetime.fromtimestamp(release_notice.template_path().stat().st_mtime) if custom else None,
+        updated_at=(
+            dt.datetime.fromtimestamp(release_notice.template_path().stat().st_mtime, tz=dt.timezone.utc) if custom else None
+        ),
         unknown_placeholders=release_notice.unknown_tokens(found),
         placeholders=[schemas.ReleaseNoticePlaceholder(token=t, description=d) for t, d in release_notice.PLACEHOLDERS],
     )

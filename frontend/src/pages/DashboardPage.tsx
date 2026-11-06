@@ -15,6 +15,7 @@ import {
   YAxis,
 } from 'recharts'
 import { api, saveBlob } from '../api/client'
+import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import { SyncProgressModal } from '../components/SyncProgressModal'
@@ -623,6 +624,8 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+
+      <MissingInfoCard project={project} phases={phases} backlogItems={backlogItems} />
 
       <PhasesCard projectId={project.id} currentStatus={project.status} />
 

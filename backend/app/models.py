@@ -1,7 +1,7 @@
 import datetime as dt
 import re
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,8 @@ class Increment(Base):
     __tablename__ = "increments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
@@ -133,6 +135,8 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(64), default="Kick-off")
@@ -896,6 +900,8 @@ class DashboardSnapshot(Base):
     __tablename__ = "dashboard_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     snapshot_date: Mapped[dt.date] = mapped_column(Date)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -919,9 +925,13 @@ class Complaint(Base):
     lo tocca."""
 
     __tablename__ = "complaints"
+    # Lo stesso complaint Jira puo' essere sincronizzato da piu' utenti.
+    __table_args__ = (UniqueConstraint("owner_id", "jira_key", name="uq_complaints_owner_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    jira_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    jira_key: Mapped[str] = mapped_column(String(64), index=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Campo Jira "Fix versions": nomi delle versioni, piu' d'una separate da
@@ -965,6 +975,8 @@ class Release(Base):
     __tablename__ = "releases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     ptih_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     increment_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     objective: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1006,9 +1018,12 @@ class ComponentCatalogEntry(Base):
     PTB-SRV), da cui si calcola il PN proposto."""
 
     __tablename__ = "component_catalog"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_component_catalog_owner_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
+    # Utente proprietario (vedi app/ownership.py): ogni PJM vede solo i suoi.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
     pn_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
@@ -1039,3 +1054,52 @@ class ShippingContact(Base):
     company: Mapped[str] = mapped_column(String(255), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
     phone: Mapped[str] = mapped_column(String(64), default="")
+
+
+# ---------- Utenti ----------
+
+
+class User(Base):
+    """Utente dell'app. Ruoli: "admin" (utenti, configurazione, template),
+    "editor" (modifica tutto il resto), "viewer" (sola lettura, puo' generare
+    documenti). auth_provider "local" = password nell'app; in futuro
+    "microsoft" per l'accesso con l'account aziendale (password_hash vuota)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    auth_provider: Mapped[str] = mapped_column(String(32), default="local")
+    role: Mapped[str] = mapped_column(String(16), default="viewer")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class UserSession(Base):
+    """Sessione di login: nel cookie c'e' il token, qui solo il suo hash."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class UserSettings(Base):
+    """Impostazioni personali di un utente (le JQL dei suoi dati): vuote per
+    un utente nuovo, da compilare in Configurazione / Complaints."""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    team_sw_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    team_embedded_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    complaints_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+

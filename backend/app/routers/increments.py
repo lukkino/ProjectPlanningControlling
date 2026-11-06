@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id
 from app.services.budget import apply_to_snapshot, default_department, ensure_category_lines
 from app.services.metrics import compute_increment_metrics
 
@@ -68,7 +69,12 @@ def _hours_calculator(increment: models.Increment) -> schemas.HoursCalculator:
 
 @router.get("", response_model=list[schemas.Increment])
 def list_increments(db: Session = Depends(get_db)):
-    return db.query(models.Increment).order_by(models.Increment.code).all()
+    return (
+        db.query(models.Increment)
+        .filter(models.Increment.owner_id == scope_user_id())
+        .order_by(models.Increment.code)
+        .all()
+    )
 
 
 @router.put("/{increment_id}/pinned", status_code=204)
@@ -86,7 +92,7 @@ def set_increment_pinned(increment_id: int, payload: schemas.SidebarPin, db: Ses
 
 @router.post("", response_model=schemas.Increment, status_code=201)
 def create_increment(payload: schemas.IncrementCreate, db: Session = Depends(get_db)):
-    increment = models.Increment(**payload.model_dump())
+    increment = models.Increment(**payload.model_dump(), owner_id=scope_user_id())
     db.add(increment)
     db.flush()  # assegna increment.id, serve per le voci di budget sotto
     for order, (category_name, is_hours) in enumerate(DEFAULT_BUDGET_CATEGORIES, start=1):

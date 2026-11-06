@@ -68,6 +68,65 @@ npm run dev
 Apri `http://localhost:5174`. In sviluppo, Vite fa da proxy delle chiamate
 `/api/*` verso il backend su `:8000` (vedi `frontend/vite.config.ts`).
 
+### 3. Utenti e login
+
+L'app richiede il login. Al **primo avvio** (database senza utenti) la pagina
+di accesso chiede di creare l'utente **amministratore**; gli altri utenti si
+creano poi dalla pagina **Utenti** (in basso nella barra laterale, solo Admin).
+
+| Ruolo  | Cosa può fare |
+|--------|---------------|
+| Viewer | Consulta tutto; genera documenti e presentazioni; non modifica i dati |
+| Editor | Modifica increment, backlog, documenti, releases e il resto dei dati |
+| Admin  | Come Editor, più Utenti, Configurazione (token Jira condiviso) e template della Release Notice |
+
+I permessi sono controllati dal backend su ogni chiamata `/api` (vedi
+`backend/app/auth.py`, `required_role`). Le password sono salvate cifrate
+(scrypt); la sessione è un cookie HttpOnly che dura 7 giorni dall'ultimo uso.
+
+## Installazione su server/VM (multi-utente)
+
+Sul server serve un solo processo: il backend serve anche il frontend
+compilato, sulla stessa porta.
+
+```powershell
+# 1. codice + dipendenze (come nel Setup sopra)
+git clone https://github.com/lukkino/ProjectPlanningControlling.git
+cd ProjectPlanningControlling
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+
+# 2. frontend compilato in frontend\dist (servito dal backend)
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 3. avvio, raggiungibile dalla rete (porta da aprire nel firewall)
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Gli utenti aprono `http://<nome-server>:8000`. Note:
+
+- **Database**: `backend\data\app.db` (SQLite, va bene per pochi utenti in
+  contemporanea). Per spostare i dati attuali basta copiarlo sul server con
+  il backend fermo. Fare backup regolari della cartella `backend\data`.
+- **Servizio Windows**: per farlo partire con il server, registrare il comando
+  del punto 3 come servizio (es. con NSSM) invece di lasciarlo in una console.
+- **HTTPS**: se il server è dietro HTTPS (es. reverse proxy IIS), mettere
+  `COOKIE_SECURE=true` in `backend\.env`, così il cookie di sessione viaggia
+  solo cifrato.
+- **Jira**: il token è unico e condiviso, lo imposta l'Admin in Configurazione.
+- **Cartelle** (scenari, documenti di review): i percorsi sono letti **dal
+  server**, quindi vanno indicati come cartelle di rete (`\\server\share\...`)
+  accessibili all'utente con cui gira il servizio; i pulsanti "Apri cartella"
+  aprono Esplora risorse sul server, non sul PC di chi clicca.
+- **Documenti PPR**: la generazione usa Excel, che deve essere installato sul
+  server.
+- **Aggiornamenti**: `git pull`, `pip install -r backend\requirements.txt`,
+  `npm run build` in `frontend`, poi riavvio del servizio.
+
 ## Come funziona
 
 1. **Progetti**: crea un progetto dalla barra laterale (codice, nome, date,

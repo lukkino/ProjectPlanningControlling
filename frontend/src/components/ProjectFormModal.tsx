@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useSuggestions } from '../lib/useSuggestions'
+import { Suggestion } from './Suggestion'
 import type { Project } from '../api/types'
 
 type Props = {
@@ -20,6 +22,7 @@ const emptyForm = {
 }
 
 export function ProjectFormModal({ project, onClose }: Props) {
+  const suggestions = useSuggestions()
   const [form, setForm] = useState(() =>
     project
       ? {
@@ -98,6 +101,13 @@ export function ProjectFormModal({ project, onClose }: Props) {
             onChange={(e) => set('jira_jql', e.target.value)}
             placeholder='project = PTBSYS AND fixVersion = "03-003 - October"'
           />
+          {!form.jira_jql.trim() && form.code.trim() && (
+            <Suggestion
+              value={suggestions?.increment_jql_template?.split('{code}').join(form.code.trim())}
+              source={suggestions?.source}
+              onUse={(value) => set('jira_jql', value)}
+            />
+          )}
         </div>
 
         {/* Cartelle gia' create a mano su file system: qui solo il percorso. */}

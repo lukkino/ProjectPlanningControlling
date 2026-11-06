@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -116,7 +117,12 @@ def _get_project_or_404(db: Session, project_id: int) -> models.Project:
 
 @router.get("", response_model=list[schemas.ProjectListItem])
 def list_projects(db: Session = Depends(get_db)):
-    return db.query(models.Project).order_by(models.Project.updated_at.desc()).all()
+    return (
+        db.query(models.Project)
+        .filter(models.Project.owner_id == scope_user_id())
+        .order_by(models.Project.updated_at.desc())
+        .all()
+    )
 
 
 @router.put("/gantt-order", status_code=204)
@@ -129,7 +135,7 @@ def set_gantt_order(payload: schemas.ProjectGanttOrder, db: Session = Depends(ge
     for position, project_id in enumerate(payload.project_ids):
         db.execute(
             update(models.Project)
-            .where(models.Project.id == project_id)
+            .where(models.Project.id == project_id, models.Project.owner_id == scope_user_id())
             .values(gantt_order=position, updated_at=models.Project.updated_at)
         )
     db.commit()
@@ -151,7 +157,7 @@ def set_project_pinned(project_id: int, payload: schemas.SidebarPin, db: Session
 
 @router.post("", response_model=schemas.ProjectDetail, status_code=201)
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
-    project = models.Project(**payload.model_dump())
+    project = models.Project(**payload.model_dump(), owner_id=scope_user_id())
     db.add(project)
     db.flush()  # assegna project.id, serve per le fasi sotto
     for order, name in enumerate(STANDARD_PHASE_NAMES, start=1):

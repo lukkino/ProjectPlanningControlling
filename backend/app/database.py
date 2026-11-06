@@ -304,6 +304,41 @@ def run_lightweight_migrations() -> None:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE projects DROP COLUMN {orphan_column}"))
 
+    # Multi-utente: ogni increment/progetto/release/complaint/snapshot della
+    # dashboard/componente del catalogo ha un proprietario (users.id). I dati
+    # esistenti vengono assegnati al primo Admin (ownership.claim_orphans).
+    for owned in ("projects", "increments", "releases", "complaints", "dashboard_snapshots", "component_catalog"):
+        if owned in table_names and "owner_id" not in {c["name"] for c in inspector.get_columns(owned)}:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {owned} ADD COLUMN owner_id INTEGER REFERENCES users(id)"))
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{owned}_owner_id ON {owned} (owner_id)"))
+    if "complaints" in table_names:
+        # jira_key era unico: ora unico per proprietario.
+        indexes = {i["name"]: i for i in inspect(engine).get_indexes("complaints")}
+        if indexes.get("ix_complaints_jira_key", {}).get("unique"):
+            with engine.begin() as conn:
+                conn.execute(text("DROP INDEX ix_complaints_jira_key"))
+                conn.execute(text("CREATE INDEX ix_complaints_jira_key ON complaints (jira_key)"))
+                conn.execute(text("CREATE UNIQUE INDEX uq_complaints_owner_key ON complaints (owner_id, jira_key)"))
+    if "component_catalog" in table_names:
+        # UNIQUE(name) e' nella definizione della tabella: la si ricrea con
+        # UNIQUE(owner_id, name).
+        sql = inspect(engine).get_unique_constraints("component_catalog")
+        if any(c["column_names"] == ["name"] for c in sql):
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE component_catalog RENAME TO component_catalog_old"))
+                conn.execute(text(
+                    "CREATE TABLE component_catalog (id INTEGER NOT NULL, owner_id INTEGER REFERENCES users(id), "
+                    "name VARCHAR(255) NOT NULL, pn_family VARCHAR(64), PRIMARY KEY (id), "
+                    "CONSTRAINT uq_component_catalog_owner_name UNIQUE (owner_id, name))"
+                ))
+                conn.execute(text(
+                    "INSERT INTO component_catalog (id, owner_id, name, pn_family) "
+                    "SELECT id, owner_id, name, pn_family FROM component_catalog_old"
+                ))
+                conn.execute(text("DROP TABLE component_catalog_old"))
+                conn.execute(text("CREATE INDEX ix_component_catalog_owner_id ON component_catalog (owner_id)"))
+
     if "release_components" in table_names:
         component_columns = {col["name"] for col in inspector.get_columns("release_components")}
         if "abbreviation" not in component_columns:

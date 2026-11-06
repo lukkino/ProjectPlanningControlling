@@ -1,4 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '../components/authContext'
+import { Suggestion } from '../components/Suggestion'
+import { useSuggestions } from '../lib/useSuggestions'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { AppSettings } from '../api/types'
@@ -34,6 +37,9 @@ export function ConfigurationPage() {
 
 function ConfigurationForm({ settings }: { settings: AppSettings }) {
   const queryClient = useQueryClient()
+  // Connessione Jira (condivisa): solo Admin. Le JQL dei team sono personali.
+  const isAdmin = useAuth().can('admin')
+  const suggestions = useSuggestions()
   const [baseUrl, setBaseUrl] = useState(settings.jira_base_url ?? '')
   const [email, setEmail] = useState(settings.jira_email ?? '')
   // Il token non viene mai pre-compilato (e' un segreto, il backend non lo
@@ -46,10 +52,14 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
   const save = useMutation({
     mutationFn: () =>
       api.settings.update({
-        jira_base_url: baseUrl,
-        jira_email: email,
-        jira_api_token: token || undefined,
-        jira_api_token_expires_at: expiresAt || null,
+        ...(isAdmin
+          ? {
+              jira_base_url: baseUrl,
+              jira_email: email,
+              jira_api_token: token || undefined,
+              jira_api_token_expires_at: expiresAt || null,
+            }
+          : {}),
         team_sw_base_jql: swJql || null,
         team_embedded_base_jql: embeddedJql || null,
       }),
@@ -70,8 +80,11 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
   return (
     <div className="card" style={{ maxWidth: 560 }}>
       <h3 style={{ marginTop: 0 }}>Configurazione</h3>
+      {isAdmin && (
+        <>
+      <h4 style={{ margin: '0 0 4px' }}>Connessione Jira (condivisa da tutti gli utenti)</h4>
       <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
-        Credenziali usate per sincronizzare il Backlog da Jira. Modificarle qui aggiorna subito il database: non serve
+        Credenziali usate da tutti per sincronizzare da Jira. Modificarle qui aggiorna subito il database: non serve
         toccare <code>backend/.env</code> né riavviare il server, utile quando l'API token scade.
       </p>
 
@@ -121,12 +134,33 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Scadenza token (facoltativa)</span>
+          <DateInput value={expiresAt} onChange={(value) => setExpiresAt(value ?? '')} style={{ maxWidth: 200 }} />
+          <span className="muted" style={{ fontSize: 12 }}>
+            Jira non la comunica via API: riportala qui da quella scelta al momento della creazione su
+            id.atlassian.com, solo per ricevere un avviso quando si avvicina.
+          </span>
+        </label>
+      </div>
+        </>
+      )}
+
+      <h4 style={{ margin: isAdmin ? '20px 0 4px' : '0 0 4px' }}>JQL della Dashboard generale (personali)</h4>
+      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+        Ogni utente ha le sue: finché non sono impostate la Dashboard generale resta vuota. La JQL dei Complaints si
+        imposta nella pagina Complaints.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>Team SW — JQL base</span>
           <input
             value={swJql}
             onChange={(e) => setSwJql(e.target.value)}
             placeholder='project in (PTBSYS) AND issuetype in (Activity, Bug, Story) AND labels not in (...)'
           />
+          {!swJql.trim() && (
+            <Suggestion value={suggestions?.team_sw_base_jql} source={suggestions?.source} onUse={setSwJql} />
+          )}
           <span className="muted" style={{ fontSize: 12 }}>
             PBI del Team SW nei grafici della Dashboard generale (Metriche, Cycle Time, Throughput), senza filtro di
             status/finestra temporale: il backend aggiunge automaticamente{' '}
@@ -141,17 +175,11 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
             onChange={(e) => setEmbeddedJql(e.target.value)}
             placeholder='project in (PTBSYS) AND issuetype in (Activity, Task, Bug, Story) AND labels in (...)'
           />
+          {!embeddedJql.trim() && (
+            <Suggestion value={suggestions?.team_embedded_base_jql} source={suggestions?.source} onUse={setEmbeddedJql} />
+          )}
           <span className="muted" style={{ fontSize: 12 }}>
             Stessi grafici, PBI del Team Embedded (stesso progetto Jira, issuetype/label diversi).
-          </span>
-        </label>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Scadenza token (facoltativa)</span>
-          <DateInput value={expiresAt} onChange={(value) => setExpiresAt(value ?? '')} style={{ maxWidth: 200 }} />
-          <span className="muted" style={{ fontSize: 12 }}>
-            Jira non la comunica via API: riportala qui da quella scelta al momento della creazione su
-            id.atlassian.com, solo per ricevere un avviso quando si avvicina.
           </span>
         </label>
       </div>
@@ -179,9 +207,11 @@ function ConfigurationForm({ settings }: { settings: AppSettings }) {
       )}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button className="btn" disabled={test.isPending} onClick={() => test.mutate()}>
-          {test.isPending ? 'Verifica...' : '🔌 Testa connessione'}
-        </button>
+        {isAdmin && (
+          <button className="btn" disabled={test.isPending} onClick={() => test.mutate()}>
+            {test.isPending ? 'Verifica...' : '🔌 Testa connessione'}
+          </button>
+        )}
         <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? 'Salvataggio...' : 'Salva'}
         </button>

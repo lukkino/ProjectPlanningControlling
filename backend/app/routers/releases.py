@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id
 from app.services.releases import export_releases
 
 router = APIRouter(prefix="/api/releases", tags=["releases"])
@@ -46,27 +47,37 @@ def sync_release_from_project(release: models.Release, project: models.Project) 
             setattr(release, field, value)
 
 
+def _projects_by_owner_code(db: Session) -> dict[tuple[int | None, str], models.Project]:
+    """(proprietario, codice) -> increment: lo stesso codice puo' esistere
+    per utenti diversi (ognuno ha i suoi increment e le sue release)."""
+    return {(project.owner_id, project.code): project for project in db.query(models.Project)}
+
+
 def _add_missing_project_releases(db: Session) -> None:
     """Ogni increment dell'app ha la sua release: se manca la si crea vuota,
     col solo codice, in fondo. Si riempie compilando i componenti dalla tab
     "Components & PN" dell'increment (vedi increment_components.py)."""
-    existing = {code for (code,) in db.query(models.Release.increment_code) if code}
-    missing = [project for project in db.query(models.Project).order_by(models.Project.code) if project.code not in existing]
+    existing = {(owner, code) for (owner, code) in db.query(models.Release.owner_id, models.Release.increment_code) if code}
+    missing = [
+        project
+        for project in db.query(models.Project).order_by(models.Project.code)
+        if (project.owner_id, project.code) not in existing
+    ]
     if not missing:
         return
     last = db.query(func.max(models.Release.sort_order)).scalar() or 0
     for offset, project in enumerate(missing, 1):
-        db.add(models.Release(increment_code=project.code, sort_order=last + offset))
+        db.add(models.Release(increment_code=project.code, owner_id=project.owner_id, sort_order=last + offset))
     db.commit()
 
 
 def _fill_missing_ptih_codes(db: Session) -> None:
     """Project ID vuoto: lo si prende dal progetto collegato all'increment
     nella sua tab Progetti, se c'e'. Quello gia' scritto non si tocca."""
-    projects = {project.code: project for project in db.query(models.Project)}
+    projects = _projects_by_owner_code(db)
     changed = False
     for release in db.query(models.Release).filter(models.Release.ptih_code.is_(None)):
-        project = projects.get(release.increment_code)
+        project = projects.get((release.owner_id, release.increment_code))
         codes = _project_ptih_codes(project) if project else None
         if codes:
             release.ptih_code = codes
@@ -77,10 +88,10 @@ def _fill_missing_ptih_codes(db: Session) -> None:
 
 def _sync_project_dates(db: Session) -> None:
     """Allinea le date delle release a quelle dei loro increment."""
-    projects = {project.code: project for project in db.query(models.Project)}
+    projects = _projects_by_owner_code(db)
     changed = False
     for release in db.query(models.Release):
-        project = projects.get(release.increment_code)
+        project = projects.get((release.owner_id, release.increment_code))
         if project is None:
             continue
         for field, value in _project_dates(project).items():
@@ -96,9 +107,9 @@ def _mark_project_releases(db: Session, releases: list[models.Release]) -> list[
     project_id (la pagina ne mostra le date in sola lettura) e
     scope_narrative, lo scopo discorsivo dell'increment che, se c'e', fa da
     Scopo al posto di quello scritto nella release."""
-    projects = {project.code: project for project in db.query(models.Project)}
+    projects = _projects_by_owner_code(db)
     for release in releases:
-        project = projects.get(release.increment_code)
+        project = projects.get((release.owner_id, release.increment_code))
         release.project_id = project.id if project else None
         release.scope_narrative = (project.scope_narrative or None) if project else None
     return releases
@@ -108,7 +119,12 @@ def _list(db: Session) -> list[models.Release]:
     _add_missing_project_releases(db)
     _fill_missing_ptih_codes(db)
     _sync_project_dates(db)
-    releases = db.query(models.Release).order_by(models.Release.sort_order, models.Release.id).all()
+    releases = (
+        db.query(models.Release)
+        .filter(models.Release.owner_id == scope_user_id())
+        .order_by(models.Release.sort_order, models.Release.id)
+        .all()
+    )
     return _mark_project_releases(db, releases)
 
 
@@ -147,7 +163,7 @@ def reorder_releases(payload: schemas.ReleaseOrder, db: Session = Depends(get_db
     cui i PN si susseguono (vedi increment_components._next_pn)."""
     for position, release_id in enumerate(payload.release_ids, start=1):
         release = db.get(models.Release, release_id)
-        if release is not None:
+        if release is not None and release.owner_id == scope_user_id():
             release.sort_order = position
     db.commit()
 
@@ -155,7 +171,7 @@ def reorder_releases(payload: schemas.ReleaseOrder, db: Session = Depends(get_db
 @router.post("", response_model=schemas.ReleaseRead, status_code=201)
 def create_release(payload: schemas.ReleaseWrite, db: Session = Depends(get_db)):
     last = db.query(func.max(models.Release.sort_order)).scalar() or 0
-    release = models.Release(**payload.model_dump(), sort_order=last + 1)
+    release = models.Release(**payload.model_dump(), owner_id=scope_user_id(), sort_order=last + 1)
     db.add(release)
     db.commit()
     db.refresh(release)
@@ -165,7 +181,12 @@ def create_release(payload: schemas.ReleaseWrite, db: Session = Depends(get_db))
 @router.put("/{release_id}", response_model=schemas.ReleaseRead)
 def update_release(release_id: int, payload: schemas.ReleaseWrite, db: Session = Depends(get_db)):
     release = _get_release_or_404(db, release_id)
-    linked = db.query(models.Project).filter(models.Project.code == release.increment_code).count() > 0
+    linked = (
+        db.query(models.Project)
+        .filter(models.Project.code == release.increment_code, models.Project.owner_id == release.owner_id)
+        .count()
+        > 0
+    )
     for field, value in payload.model_dump(exclude_unset=True).items():
         if linked and field in PROJECT_DATE_FIELDS:
             continue  # le date di un increment dell'app si cambiano nell'increment

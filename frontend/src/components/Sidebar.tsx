@@ -105,13 +105,6 @@ export function Sidebar() {
         {listFooter('/projects', projects?.length, shownIncrements.pinnedMode, shownIncrements.shown.length)}
       </div>
 
-      <NavLink
-        to="/settings"
-        className={({ isActive }) => `sidebar-settings-link${isActive ? ' active' : ''}`}
-        style={{ marginTop: 'auto' }}
-      >
-        ⚙️ Configurazione
-      </NavLink>
 
       {showNewProgetto && <IncrementFormModal onClose={() => setShowNewProgetto(false)} />}
       {showNewIncrement && <ProjectFormModal onClose={() => setShowNewIncrement(false)} />}

@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { useAuth } from './components/authContext'
 import { Sidebar } from './components/Sidebar'
+import { TopBar } from './components/TopBar'
 import { BacklogPage } from './pages/BacklogPage'
 import { ChangelogPage } from './pages/ChangelogPage'
 import { ComplaintsKpiPage } from './pages/ComplaintsKpiPage'
@@ -21,6 +23,7 @@ import { ProjectsListPage } from './pages/ProjectsListPage'
 import { ReleasesPage } from './pages/ReleasesPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
 import { ToolsPage } from './pages/ToolsPage'
+import { UsersPage } from './pages/UsersPage'
 import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 
@@ -28,6 +31,7 @@ const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documen
 
 export default function App() {
   const location = useLocation()
+  const { can } = useAuth()
   const isWide =
     WIDE_PAGE_SUFFIXES.some((suffix) => location.pathname.endsWith(suffix)) ||
     // Pagina di dettaglio di un progetto (non la lista /increments): la
@@ -41,7 +45,14 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar />
-      <main className={isWide ? 'main-content main-content--wide' : 'main-content'}>
+      <div className="main-column">
+        <TopBar />
+        <main className={isWide ? 'main-content main-content--wide' : 'main-content'}>
+        {!can('editor') && (
+          <div className="readonly-banner">
+            👁 Accesso in sola lettura (ruolo Viewer): puoi consultare tutto e generare documenti, ma non modificare i dati.
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/dashboard" element={<OverviewDashboardPage />} />
@@ -50,7 +61,8 @@ export default function App() {
             <Route path="kpi" element={<ComplaintsKpiPage />} />
           </Route>
           <Route path="/releases" element={<ReleasesPage />} />
-          <Route path="/settings" element={<ConfigurationPage />} />
+          <Route path="/settings" element={can('editor') ? <ConfigurationPage /> : <Navigate to="/" replace />} />
+          <Route path="/users" element={can('admin') ? <UsersPage /> : <Navigate to="/" replace />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />
           <Route path="/increments" element={<IncrementsPage />} />
           <Route path="/projects" element={<ProjectsListPage />} />
@@ -70,7 +82,8 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

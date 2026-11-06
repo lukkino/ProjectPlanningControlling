@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id
 from app.services.metrics import (
     compute_bugs_opened_metrics,
     compute_cycle_time_metrics,
@@ -53,6 +54,11 @@ def download_dashboard_presentation(
     )
 
 
+def _cycle_time_key(team: str) -> str:
+    """Ultima estrazione Cycle Time salvata: per utente (ognuno ha le sue JQL)."""
+    return f"cycle-time:{scope_user_id()}:{team}"
+
+
 @router.get("/api/dashboard/overview", response_model=schemas.OverviewMetrics)
 def get_overview_dashboard(team: Team = "sw", period: Period = "current", db: Session = Depends(get_db)):
     return compute_overview_metrics(db, team, period)
@@ -70,8 +76,8 @@ def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
     # Solo un'estrazione riuscita sostituisce quella salvata.
     if not metrics.error:
         metrics.fetched_at = dt.datetime.utcnow()
-        cached = db.get(models.CachedExtraction, f"cycle-time:{team}") or models.CachedExtraction(
-            key=f"cycle-time:{team}"
+        cached = db.get(models.CachedExtraction, _cycle_time_key(team)) or models.CachedExtraction(
+            key=_cycle_time_key(team)
         )
         cached.payload = metrics.model_dump_json()
         cached.fetched_at = metrics.fetched_at
@@ -84,7 +90,7 @@ def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
 def get_cached_cycle_time(team: Team = "sw", db: Session = Depends(get_db)):
     """Ultima estrazione Cycle Time salvata (null se mai fatta): Monte Carlo
     e Forecasting la mostrano subito, senza ripetere l'estrazione lenta."""
-    cached = db.get(models.CachedExtraction, f"cycle-time:{team}")
+    cached = db.get(models.CachedExtraction, _cycle_time_key(team))
     return schemas.CycleTimeMetrics.model_validate_json(cached.payload) if cached else None
 
 

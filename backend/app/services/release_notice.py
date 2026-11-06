@@ -90,7 +90,7 @@ class NoticeInput:
 def release_of(db, project: models.Project) -> models.Release | None:
     return (
         db.query(models.Release)
-        .filter(models.Release.increment_code == project.code)
+        .filter(models.Release.increment_code == project.code, models.Release.owner_id == project.owner_id)
         .order_by(models.Release.sort_order, models.Release.id)
         .first()
     )
@@ -105,7 +105,7 @@ def default_components(db, release: models.Release | None) -> list[NoticeCompone
     rows = (
         db.query(models.ReleaseComponent)
         .join(models.Release, models.Release.id == models.ReleaseComponent.release_id)
-        .filter(models.ReleaseComponent.abbreviation.isnot(None))
+        .filter(models.ReleaseComponent.abbreviation.isnot(None), models.Release.owner_id == release.owner_id)
         .order_by(models.Release.sort_order, models.ReleaseComponent.id)
     )
     for row in rows:

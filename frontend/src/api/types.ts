@@ -448,6 +448,16 @@ export type ReleaseNoticeMeta = {
   template: ReleaseNoticeTemplateInfo
 }
 
+// Valori di esempio per i campi vuoti (backend routers/suggestions.py).
+export type Suggestions = {
+  source: string | null
+  team_sw_base_jql: string | null
+  team_embedded_base_jql: string | null
+  complaints_base_jql: string | null
+  // Con "{code}" al posto del codice dell'increment.
+  increment_jql_template: string | null
+}
+
 export type ReleaseNoticeTemplateInfo = {
   // true = template caricato dall'utente, false = quello predefinito.
   custom: boolean

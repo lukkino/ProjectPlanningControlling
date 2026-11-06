@@ -41,6 +41,7 @@ import type {
   ReleaseNoticeMeta,
   ReleaseNoticeRequest,
   ReleaseNoticeTemplateInfo,
+  Suggestions,
   MaterialCost,
   MaterialBudget,
   MaterialFields,
@@ -235,6 +236,9 @@ export function saveBlob(blob: Blob, filename: string) {
 }
 
 export const api = {
+  suggestions: {
+    get: () => request<Suggestions>('/suggestions'),
+  },
   projects: {
     list: () => request<Project[]>('/projects'),
     get: (id: number) => request<ProjectDetail>(`/projects/${id}`),

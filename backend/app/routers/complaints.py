@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import scope_user_id, user_settings, user_settings_for_update
 from app.routers.settings import SETTINGS_ROW_ID
 from app.services.db_backup import DatabaseBackupError, backup_database
 from app.services.jira_client import JiraClientError, fetch_complaints, test_connection
@@ -103,14 +104,19 @@ def _settings_row(db: Session) -> models.AppSettings | None:
     return db.get(models.AppSettings, SETTINGS_ROW_ID)
 
 
-def _base_jql(row: models.AppSettings | None) -> str:
-    return (row.complaints_base_jql if row else None) or models.DEFAULT_COMPLAINTS_JQL
+def _base_jql(db: Session) -> str:
+    """JQL dei complaints dell'utente (vuota per un utente nuovo: va impostata)."""
+    return (user_settings(db).complaints_base_jql or "").strip()
+
+
+def _owned(db: Session):
+    return db.query(models.Complaint).filter(models.Complaint.owner_id == scope_user_id())
 
 
 @router.get("", response_model=list[schemas.Complaint])
 def list_complaints(db: Session = Depends(get_db)):
     return (
-        db.query(models.Complaint)
+        _owned(db)
         .order_by(models.Complaint.jira_created.desc(), models.Complaint.jira_key.desc())
         .all()
     )
@@ -120,7 +126,7 @@ def list_complaints(db: Session = Depends(get_db)):
 # "sync" verrebbero lette come id.
 @router.get("/settings", response_model=schemas.ComplaintsSettings)
 def get_complaints_settings(db: Session = Depends(get_db)):
-    return schemas.ComplaintsSettings(base_jql=_base_jql(_settings_row(db)))
+    return schemas.ComplaintsSettings(base_jql=_base_jql(db))
 
 
 @router.get("/export")
@@ -128,7 +134,7 @@ def export_complaints(db: Session = Depends(get_db)):
     """Tutti i complaint in un foglio Excel (indipendentemente dai filtri
     attivi nella pagina), dal piu' nuovo, con le intestazioni filtrabili."""
     complaints = (
-        db.query(models.Complaint)
+        _owned(db)
         .order_by(models.Complaint.jira_created.desc(), models.Complaint.jira_key.desc())
         .all()
     )
@@ -189,14 +195,10 @@ def export_complaints(db: Session = Depends(get_db)):
 
 @router.put("/settings", response_model=schemas.ComplaintsSettings)
 def update_complaints_settings(payload: schemas.ComplaintsSettings, db: Session = Depends(get_db)):
-    row = _settings_row(db)
-    if row is None:
-        row = models.AppSettings(id=SETTINGS_ROW_ID)
-        db.add(row)
-    # Vuota = si torna alla JQL di default.
+    row = user_settings_for_update(db)
     row.complaints_base_jql = payload.base_jql.strip() or None
     db.commit()
-    return schemas.ComplaintsSettings(base_jql=_base_jql(row))
+    return schemas.ComplaintsSettings(base_jql=_base_jql(db))
 
 
 @router.get("/sync/progress", response_model=schemas.SyncProgress)
@@ -226,7 +228,13 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
         api_token = (row.jira_api_token if row else None) or ""
         # Credenziali prima di tutto: vedi la sync del Backlog.
         test_connection(base_url, email, api_token)
-        issues = fetch_complaints(base_url, email, api_token, _base_jql(row), on_progress)
+        base_jql = _base_jql(db)
+        if not base_jql:
+            raise HTTPException(
+                status_code=400,
+                detail="Imposta prima la JQL dei complaints (pulsante JQL in questa pagina): senza non c'è niente da sincronizzare.",
+            )
+        issues = fetch_complaints(base_url, email, api_token, base_jql, on_progress)
     except JiraClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     on_progress("saving", len(issues), len(issues))
@@ -244,7 +252,8 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
     except DatabaseBackupError as exc:
         raise HTTPException(status_code=500, detail=f"{exc}. Sincronizzazione annullata.") from exc
 
-    existing = {c.jira_key: c for c in db.query(models.Complaint)}
+    owner_id = scope_user_id()
+    existing = {c.jira_key: c for c in _owned(db)}
     matched_keys = {issue.key for issue in issues}
     now = dt.datetime.utcnow()
     created = 0
@@ -254,7 +263,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
         complaint = existing.get(issue.key)
         if complaint is None:
             # salesforce_status resta al default ("Aperto"): non e' in Jira.
-            complaint = models.Complaint(jira_key=issue.key)
+            complaint = models.Complaint(jira_key=issue.key, owner_id=owner_id)
             db.add(complaint)
             created += 1
         else:

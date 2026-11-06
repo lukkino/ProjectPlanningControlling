@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { api, saveBlob } from '../api/client'
+import { Suggestion } from '../components/Suggestion'
+import { useSuggestions } from '../lib/useSuggestions'
 import type { Complaint, SalesforceStatus } from '../api/types'
 import { ARCHITECTURES, NO_ARCHITECTURE, architecturesOf } from '../lib/complaints'
 import { formatIsoDate } from '../lib/dates'
@@ -244,6 +246,7 @@ function toggled(set: Set<string>, value: string): Set<string> {
 
 function JqlSettings() {
   const queryClient = useQueryClient()
+  const suggestions = useSuggestions()
   const { data: settings } = useQuery({ queryKey: ['complaints-settings'], queryFn: api.complaints.getSettings })
   const [draft, setDraft] = useState<string | null>(null)
 
@@ -268,10 +271,12 @@ function JqlSettings() {
           {save.isPending ? 'Salvataggio...' : 'Salva JQL'}
         </button>
       </div>
+      {!value.trim() && (
+        <Suggestion value={suggestions?.complaints_base_jql} source={suggestions?.source} onUse={setDraft} />
+      )}
       {dirty && (
         <span className="muted" style={{ fontSize: 12 }}>
-          JQL modificata e non ancora salvata: la sincronizzazione usa quella salvata. Lasciandola vuota si torna a
-          quella predefinita.
+          JQL modificata e non ancora salvata: la sincronizzazione usa quella salvata.
         </span>
       )}
       {save.isError && <div className="error-banner">{(save.error as Error).message}</div>}

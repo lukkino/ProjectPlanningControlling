@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.ownership import user_settings, user_settings_for_update
 from app.services.jira_client import JiraClientError, test_connection
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -23,7 +24,12 @@ def _get_or_create(db: Session) -> models.AppSettings:
     return row
 
 
-def _to_public(row: models.AppSettings) -> schemas.AppSettingsPublic:
+# Campi globali (connessione Jira condivisa): li modifica solo l'Admin. Le
+# JQL dei team sono personali (models.UserSettings dell'utente dello scope).
+GLOBAL_FIELDS = ("jira_base_url", "jira_email", "jira_api_token", "jira_api_token_expires_at")
+
+
+def _to_public(row: models.AppSettings, personal: models.UserSettings) -> schemas.AppSettingsPublic:
     token = row.jira_api_token
     preview = None
     if token:
@@ -34,20 +40,23 @@ def _to_public(row: models.AppSettings) -> schemas.AppSettingsPublic:
         jira_api_token_set=bool(token),
         jira_api_token_preview=preview,
         jira_api_token_expires_at=row.jira_api_token_expires_at,
-        team_sw_base_jql=row.team_sw_base_jql,
-        team_embedded_base_jql=row.team_embedded_base_jql,
+        team_sw_base_jql=personal.team_sw_base_jql,
+        team_embedded_base_jql=personal.team_embedded_base_jql,
     )
 
 
 @router.get("", response_model=schemas.AppSettingsPublic)
 def get_settings_row(db: Session = Depends(get_db)):
-    return _to_public(_get_or_create(db))
+    return _to_public(_get_or_create(db), user_settings(db))
 
 
 @router.put("", response_model=schemas.AppSettingsPublic)
-def update_settings_row(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
+def update_settings_row(payload: schemas.AppSettingsUpdate, request: Request, db: Session = Depends(get_db)):
     row = _get_or_create(db)
     data = payload.model_dump(exclude_unset=True)
+    if any(field in data for field in GLOBAL_FIELDS) and request.state.user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo un Admin può modificare la connessione Jira.")
+    personal = user_settings_for_update(db)
     if "jira_base_url" in data:
         row.jira_base_url = data["jira_base_url"]
     if "jira_email" in data:
@@ -59,12 +68,12 @@ def update_settings_row(payload: schemas.AppSettingsUpdate, db: Session = Depend
     if "jira_api_token_expires_at" in data:
         row.jira_api_token_expires_at = data["jira_api_token_expires_at"]
     if "team_sw_base_jql" in data:
-        row.team_sw_base_jql = data["team_sw_base_jql"]
+        personal.team_sw_base_jql = data["team_sw_base_jql"]
     if "team_embedded_base_jql" in data:
-        row.team_embedded_base_jql = data["team_embedded_base_jql"]
+        personal.team_embedded_base_jql = data["team_embedded_base_jql"]
     db.commit()
     db.refresh(row)
-    return _to_public(row)
+    return _to_public(row, personal)
 
 
 @router.post("/test", response_model=schemas.TestConnectionResult)
