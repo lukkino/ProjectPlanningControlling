@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from 'react'
 import { api } from '../api/client'
+import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
 import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
 import { ACTIVITY_PHASES } from '../lib/activityPhases'
 import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
@@ -143,6 +144,12 @@ export function BacklogPage() {
   const [hideDone, setHideDone] = useState(true)
   const [hideCve, setHideCve] = useState(true)
   const [onlyComplaints, setOnlyComplaints] = useState(false)
+  // Ricerca testuale (tabella e Gantt): chiave Jira, summary o Parent; piu'
+  // termini separati da virgola valgono in OR (es. "5761, 4059").
+  const [search, setSearch] = useState('')
+  // Risultati della ricerca nascosti dagli altri filtri: mostrati comunque su
+  // richiesta, finche' non cambia la ricerca.
+  const [showHiddenMatches, setShowHiddenMatches] = useState(false)
   // Filtro "Impacts on": nessun valore selezionato = nessun filtro; con piu'
   // valori, l'item deve averne almeno uno ('any') o tutti ('all').
   const [impactFilter, setImpactFilter] = useState<Set<string>>(new Set())
@@ -586,12 +593,12 @@ export function BacklogPage() {
       // dalla cascata (es. validazione col cliente, preparazione documenti).
       // Il backend toglie il codefreeze quando si segna.
       key: 'is_activity',
-      label: 'Attività di servizio',
+      label: 'Attività per Release',
       className: 'editable-cell',
       render: (item) => (
         <select
           value={item.is_activity ? (item.activity_phase ?? 'execution') : ''}
-          title="Attività di servizio, per la fase entro cui va fatta: fuori dal code freeze, ma resta visibile in tabella e nel Gantt (a strisce, col colore della fase) e fuori dalla pianificazione a cascata"
+          title="Attività per Release, per la fase entro cui va fatta: fuori dal code freeze, ma resta visibile in tabella e nel Gantt (a strisce, col colore della fase) e fuori dalla pianificazione a cascata"
           onChange={(e) =>
             update.mutate({ id: item.id, data: { activity_phase: (e.target.value || null) as ActivityPhase | null } })
           }
@@ -1166,15 +1173,46 @@ export function BacklogPage() {
     return impactMatch === 'all' ? selected.every((v) => impacts.includes(v)) : selected.some((v) => impacts.includes(v))
   }
 
+  const searchTerms = search
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean)
+  const matchesSearch = (item: BacklogItem) =>
+    searchTerms.length === 0 ||
+    searchTerms.some((term) =>
+      [item.jira_key, item.summary, item.parent_key, item.parent_summary].some((v) => v?.toLowerCase().includes(term)),
+    )
+
+  // I filtri (esclusa la ricerca) che nascondono un item, per dire perche'.
+  const hiddenBy = (i: BacklogItem): string[] => {
+    const reasons: string[] = []
+    if (onlyInScope && !i.in_scope) reasons.push('fuori scope')
+    if (onlyCodefreeze && !i.included_in_codefreeze && !i.is_activity) reasons.push('non in code freeze')
+    if (hideDone && i.status === 'Done') reasons.push('Done')
+    if (hideCve && isCveBug(i)) reasons.push('bug CVE')
+    if (onlyComplaints && !isComplaintBug(i, complaintKeys)) reasons.push('non è un complaint')
+    if (i.issue_type && hiddenTypes.has(i.issue_type)) reasons.push(`tipo ${i.issue_type} nascosto`)
+    if (!matchesImpactFilter(i)) reasons.push('filtro Impacts on')
+    return reasons
+  }
+  const searching = searchTerms.length > 0
+  const hiddenMatches = searching
+    ? (items ?? []).filter(matchesSearch).flatMap((i) => {
+        const reasons = hiddenBy(i)
+        return reasons.length > 0 ? [{ item: i, reasons }] : []
+      })
+    : []
+  const hiddenMatchIds = new Set(hiddenMatches.map((m) => m.item.id))
+  // Se la ricerca trova solo item nascosti dai filtri (es. una chiave Jira di
+  // un item Done) li mostra subito: altrimenti a richiesta.
+  const onlyHiddenMatches =
+    hiddenMatches.length > 0 && (items ?? []).filter(matchesSearch).length === hiddenMatches.length
+  const showHidden = showHiddenMatches || onlyHiddenMatches
+  // Item non piu' nella JQL: non sono nel backlog, ma la ricerca li segnala.
+  const archivedMatches = searching ? (archivedItems ?? []).filter(matchesSearch) : []
+
   const visibleItems = (items ?? []).filter(
-    (i) =>
-      (!onlyInScope || i.in_scope) &&
-      (!onlyCodefreeze || i.included_in_codefreeze || i.is_activity) &&
-      (!hideDone || i.status !== 'Done') &&
-      (!hideCve || !isCveBug(i)) &&
-      (!onlyComplaints || isComplaintBug(i, complaintKeys)) &&
-      (!i.issue_type || !hiddenTypes.has(i.issue_type)) &&
-      matchesImpactFilter(i),
+    (i) => matchesSearch(i) && (!hiddenMatchIds.has(i.id) ? hiddenBy(i).length === 0 : showHidden),
   )
 
   // Ordinamento per stato su richiesta esplicita: sort stabile, a parita' di
@@ -1454,8 +1492,27 @@ export function BacklogPage() {
           {sync.data.total_matched}).
         </div>
       )}
+      {sync.isSuccess && <CodeFreezeCheck projectId={project.id} items={items} />}
 
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 10, fontSize: 13 }}>
+        <span className="backlog-search">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setShowHiddenMatches(false)
+            }}
+            placeholder="🔍 Cerca id Jira o testo (es. 5761, 4059)"
+            title="Cerca nella chiave Jira, nel summary e nel Parent; più termini separati da virgola. Vale insieme agli altri filtri."
+          />
+          {searching && (
+            <span className="muted">
+              {visibleItems.length === 1 ? '1 trovato' : `${visibleItems.length} trovati`}
+            </span>
+          )}
+        </span>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
           Mostra solo item "In Scope"
@@ -1463,7 +1520,7 @@ export function BacklogPage() {
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyCodefreeze} onChange={(e) => setOnlyCodefreeze(e.target.checked)} />
-          Mostra solo item "Incluso in codefreeze" e attività di servizio
+          Mostra solo item "Incluso in codefreeze" e attività per Release
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1587,6 +1644,50 @@ export function BacklogPage() {
         )}
       </div>
 
+      {hiddenMatches.length > 0 && (
+        <div className="search-hidden">
+          <span>
+            {showHidden
+              ? hiddenMatches.length === 1
+                ? 'Mostro 1 risultato che i filtri nasconderebbero: '
+                : `Mostro ${hiddenMatches.length} risultati che i filtri nasconderebbero: `
+              : hiddenMatches.length === 1
+                ? '1 risultato è nascosto dai filtri: '
+                : `${hiddenMatches.length} risultati sono nascosti dai filtri: `}
+            {hiddenMatches.slice(0, 8).map((m, index) => (
+              <span key={m.item.id}>
+                {index > 0 && ', '}
+                <strong>{m.item.jira_key}</strong> ({m.reasons.join(', ')})
+              </span>
+            ))}
+            {hiddenMatches.length > 8 && ` e altri ${hiddenMatches.length - 8}`}.
+          </span>
+          {!onlyHiddenMatches && (
+            <button type="button" className="btn" onClick={() => setShowHiddenMatches((v) => !v)}>
+              {showHiddenMatches ? 'Nascondili' : 'Mostrali comunque'}
+            </button>
+          )}
+        </div>
+      )}
+      {archivedMatches.length > 0 && (
+        <div className="search-hidden">
+          <span>
+            {archivedMatches.length === 1 ? '1 risultato è tra gli archiviati' : `${archivedMatches.length} risultati sono tra gli archiviati`}{' '}
+            (non più nella JQL):{' '}
+            {archivedMatches.slice(0, 8).map((i, index) => (
+              <span key={i.id}>
+                {index > 0 && ', '}
+                <strong>{i.jira_key}</strong>
+              </span>
+            ))}
+            {archivedMatches.length > 8 && ` e altri ${archivedMatches.length - 8}`}.
+          </span>
+          <button type="button" className="btn" onClick={() => setArchivedOpen(true)}>
+            Apri archiviati
+          </button>
+        </div>
+      )}
+
       {view === 'gantt' && (
         <BacklogGanttChart
           items={
@@ -1695,7 +1796,7 @@ export function BacklogPage() {
                     </button>
                   </div>
                   <div className="bulk-menu-row">
-                    <span>Attività di servizio</span>
+                    <span>Attività per Release</span>
                     {ACTIVITY_PHASES.map((p) => (
                       <button
                         key={p.value}

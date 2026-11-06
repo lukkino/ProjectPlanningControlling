@@ -15,6 +15,7 @@ import {
   YAxis,
 } from 'recharts'
 import { api, saveBlob } from '../api/client'
+import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
 import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
@@ -41,7 +42,7 @@ const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%
 
 const COMPLETION_HELP =
   'PBI Done su PBI totali del code freeze: item in scope e "Incluso in codefreeze", come nel Backlog, ' +
-  "nell'Andamento e nel Forecasting. Non contano le story senza sviluppi né le attività di servizio.\n\n" +
+  "nell'Andamento e nel Forecasting. Non contano le story senza sviluppi né le attività per Release.\n\n" +
   "Se c'è almeno uno snapshot nell'Andamento, il valore è quello dell'ultimo snapshot."
 
 const HOURS_HELP =
@@ -618,6 +619,7 @@ export function DashboardPage() {
             trovate: {sync.data.total_matched}).
           </div>
         )}
+        {sync.isSuccess && <CodeFreezeCheck projectId={project.id} items={backlogItems} />}
         {presentation.isError && (
           <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
             Generazione della presentazione non riuscita: {(presentation.error as Error).message}

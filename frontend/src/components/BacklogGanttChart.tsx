@@ -901,7 +901,7 @@ export function BacklogGanttChart({
           <button
             className={showCritical ? 'btn btn-primary' : 'btn'}
             onClick={() => setShowCritical((v) => !v)}
-            title="Evidenzia gli item che, se slittano, spostano la fine del progetto (item da finire, con Start e Fine pian.; attività di servizio escluse)"
+            title="Evidenzia gli item che, se slittano, spostano la fine del progetto (item da finire, con Start e Fine pian.; attività per Release escluse)"
             aria-pressed={showCritical}
           >
             Percorso critico

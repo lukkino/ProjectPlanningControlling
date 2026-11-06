@@ -1211,3 +1211,13 @@ ul.changelog-body { padding-left: 20px; }
 .missing-info-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; font: inherit; font-weight: 600; font-size: 15px; color: var(--text); cursor: pointer; text-align: left; }
 .missing-info-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: #c97a12; color: #fff; font-size: 12px; text-align: center; }
 .missing-info-list { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+
+/* Controllo code freeze dopo la sync Jira (components/CodeFreezeCheck.tsx) */
+.codefreeze-check { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; padding: 10px 14px; border: 1px solid #f1d8a8; border-radius: var(--radius); background: #fffaf0; color: #8a5300; font-size: 13px; }
+.codefreeze-check ul { margin: 0; padding-left: 20px; max-height: 180px; overflow-y: auto; color: var(--text); }
+.codefreeze-check .error-text { color: #c0392b; }
+
+/* Ricerca nel Backlog (pages/BacklogPage.tsx) */
+.backlog-search { display: inline-flex; align-items: center; gap: 8px; }
+.backlog-search input { width: 260px; max-width: 100%; padding: 5px 8px; font-size: 13px; }
+.search-hidden { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; padding: 8px 12px; border: 1px solid #f1d8a8; border-radius: var(--radius); background: #fffaf0; color: #8a5300; font-size: 13px; }
