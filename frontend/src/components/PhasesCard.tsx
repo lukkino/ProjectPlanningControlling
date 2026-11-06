@@ -100,6 +100,12 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
   const todayEpoch = toEpochDays(new Date())
   const dateDomain: [number, number] =
     allEpochs.length > 0 ? [Math.min(...allEpochs, todayEpoch) - 3, Math.max(...allEpochs, todayEpoch) + 3] : [0, 1]
+  // Etichetta "Today" dal lato con piu' spazio: a destra della linea nella
+  // prima meta' del grafico (a inizio progetto la linea e' vicina all'asse
+  // delle fasi e il testo a sinistra ci finirebbe sopra), a sinistra nella
+  // seconda (a destra uscirebbe dal grafico).
+  const todayLabelPosition =
+    todayEpoch - dateDomain[0] < (dateDomain[1] - dateDomain[0]) / 2 ? 'insideTopLeft' : 'insideTopRight'
 
   return (
     <div className="card">
@@ -257,7 +263,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   x={todayEpoch}
                   stroke={COLOR_TODAY}
                   strokeWidth={2}
-                  label={{ value: 'Today', position: 'insideTopRight', fill: COLOR_TODAY, fontSize: 11, fontWeight: 700 }}
+                  label={{ value: 'Today', position: todayLabelPosition, fill: COLOR_TODAY, fontSize: 11, fontWeight: 700 }}
                 />
                 {/* Punta della freccia verso la data effettiva, arretrata di
                     qualche pixel per non finire sotto il pallino. */}
