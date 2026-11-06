@@ -236,6 +236,7 @@ export function IncrementComponentsPage() {
               <tr>
                 <th>Componente</th>
                 <th>PN</th>
+                <th title="Sigla del componente nella Release Notice (es. PSDA → PSDA_6.0.0)">Sigla</th>
                 <th>Fix version</th>
                 <th>Dettaglio</th>
                 <th>Note</th>
@@ -244,7 +245,7 @@ export function IncrementComponentsPage() {
             </thead>
             <tbody>
               {components.map((component) => {
-                const save = (field: 'pn' | 'fix_version' | 'detail' | 'note') => (value: string | null) =>
+                const save = (field: 'pn' | 'abbreviation' | 'fix_version' | 'detail' | 'note') => (value: string | null) =>
                   updateComponent.mutate({ id: component.id, data: { [field]: value } })
                 return (
                   <tr key={component.id}>
@@ -256,6 +257,9 @@ export function IncrementComponentsPage() {
                           ⚠ già usato da {component.pn_used_by.join(', ')}
                         </div>
                       )}
+                    </td>
+                    <td className="editable-cell" style={{ minWidth: 80 }}>
+                      <CellInput value={component.abbreviation} label="Sigla" onSave={save('abbreviation')} />
                     </td>
                     <td className="editable-cell" style={{ minWidth: 100 }}>
                       <CellInput value={component.fix_version} label="Fix version" onSave={save('fix_version')} />

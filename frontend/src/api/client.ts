@@ -37,6 +37,10 @@ import type {
   PprFileRole,
   PprInspection,
   PprReviewDeliverable,
+  ReleaseNoticeHtml,
+  ReleaseNoticeMeta,
+  ReleaseNoticeRequest,
+  ReleaseNoticeTemplateInfo,
   MaterialCost,
   MaterialBudget,
   MaterialFields,
@@ -468,6 +472,27 @@ export const api = {
         version: String(version),
         revision_text: revisionText,
       }),
+    // Release Notice: .docx dal template e corpo della mail (HTML) per Outlook.
+    releaseNoticeMeta: (projectId: number) =>
+      request<ReleaseNoticeMeta>(`/projects/${projectId}/documents/release-notice/meta`),
+    releaseNotice: (projectId: number, data: ReleaseNoticeRequest) =>
+      downloadFile(`/projects/${projectId}/documents/release-notice`, undefined, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    releaseNoticeHtml: (projectId: number, data: ReleaseNoticeRequest) =>
+      post<ReleaseNoticeHtml>(`/projects/${projectId}/documents/release-notice/html`, data),
+    // Template Word della Release Notice (unico per tutta l'app).
+    releaseNoticeTemplate: () => downloadFile('/documents/release-notice/template'),
+    uploadReleaseNoticeTemplate: (file: File) =>
+      request<ReleaseNoticeTemplateInfo>('/documents/release-notice/template', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      }),
+    resetReleaseNoticeTemplate: () =>
+      request<ReleaseNoticeTemplateInfo>('/documents/release-notice/template', { method: 'DELETE' }),
     releaseReportMeta: (projectId: number) =>
       request<DocumentRevisionMeta>(`/projects/${projectId}/documents/release-report/meta`),
     releaseReport: (projectId: number, version: number, revisionText: string) =>

@@ -39,6 +39,8 @@ from app.services.ppr_document import (
     inspect_ppr_file,
     previous_phase_of,
 )
+from app.services import release_notice
+from app.services.release_notice import NoticeComponent, NoticeInput, default_components, release_of
 from app.services.project_folders import existing_folder, file_in_folder, require_folder
 from app.services.jira_client import JiraClientError, fetch_requirement_issues
 from app.services.kickoff_presentation import generate_kickoff_presentation, scope_narrative_html
@@ -619,3 +621,124 @@ def _check_requirements(
         unknown_in_document=newest_first(in_document - set(all_by_key)),
         repeated_in_document=newest_first({k for k in document_ids if document_ids.count(k) > 1}),
     )
+
+
+# ---------- Release Notice ----------
+
+
+def _release_notice_input(db: Session, project: models.Project, payload: schemas.ReleaseNoticeRequest) -> NoticeInput:
+    release = release_of(db, project)
+    return NoticeInput(
+        increment_code=project.code,
+        scope_html=project.scope_narrative,
+        fallback_scope=release.objective if release else None,
+        components=[NoticeComponent(pn=c.pn.strip(), name=c.name.strip(), code=c.code.strip()) for c in payload.components],
+        pn_links=payload.pn_links,
+        change_order_label=payload.change_order_label,
+        change_order_url=payload.change_order_url,
+        compatibility_matrix_url=payload.compatibility_matrix_url,
+        note=payload.note,
+    )
+
+
+def _release_notice_template_info(tokens: list[str] | None = None) -> schemas.ReleaseNoticeTemplateInfo:
+    custom = release_notice.is_custom_template()
+    found = tokens if tokens is not None else release_notice.template_tokens()
+    return schemas.ReleaseNoticeTemplateInfo(
+        custom=custom,
+        updated_at=dt.datetime.fromtimestamp(release_notice.template_path().stat().st_mtime) if custom else None,
+        unknown_placeholders=release_notice.unknown_tokens(found),
+        placeholders=[schemas.ReleaseNoticePlaceholder(token=t, description=d) for t, d in release_notice.PLACEHOLDERS],
+    )
+
+
+@router.get("/api/projects/{project_id}/documents/release-notice/meta", response_model=schemas.ReleaseNoticeMeta)
+def release_notice_meta(project_id: int, db: Session = Depends(get_db)):
+    """Valori proposti per il popup: componenti della release dell'increment
+    (sezione Releases) e Change Order, piu' lo stato del template."""
+    project = _get_project_or_404(db, project_id)
+    release = release_of(db, project)
+    components = default_components(db, release)
+    warnings = []
+    if not (project.scope_narrative or "").strip():
+        warnings.append(
+            "Manca lo Scope discorsivo dell'increment (Dashboard): "
+            + ("si usa lo Scopo scritto in Releases." if release and release.objective else "la sezione delle novità resta vuota.")
+        )
+    if not components:
+        warnings.append("Nessun componente nella release dell'increment (sezione Releases o tab Components & PN).")
+    missing = [c.name or c.pn for c in components if not c.code or "_" not in c.code]
+    if missing:
+        warnings.append("Componenti senza sigla o fix version: " + ", ".join(missing) + ".")
+    if not project.change_order_label:
+        warnings.append("Manca il Change Order dell'increment (sezione Documents).")
+    request = schemas.ReleaseNoticeRequest(
+        components=[schemas.ReleaseNoticeComponent(pn=c.pn, name=c.name, code=c.code) for c in components],
+        change_order_label=project.change_order_label,
+    )
+    try:
+        subject = release_notice.subject(_release_notice_input(db, project, request))
+        template = _release_notice_template_info()
+    except Exception as exc:  # template caricato non leggibile
+        raise HTTPException(status_code=422, detail=f"Template della Release Notice non leggibile: {exc}") from exc
+    if template.unknown_placeholders:
+        warnings.append("Segnaposto non riconosciuti nel template: " + ", ".join(template.unknown_placeholders) + ".")
+    return schemas.ReleaseNoticeMeta(
+        subject=subject,
+        components=request.components,
+        change_order_label=project.change_order_label,
+        change_order_url=project.change_order_url,
+        has_scope_narrative=bool((project.scope_narrative or "").strip()),
+        warnings=warnings,
+        template=template,
+    )
+
+
+INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]+')
+
+
+@router.post("/api/projects/{project_id}/documents/release-notice")
+def download_release_notice(project_id: int, payload: schemas.ReleaseNoticeRequest, db: Session = Depends(get_db)):
+    project = _get_project_or_404(db, project_id)
+    content, subject = release_notice.generate_docx(_release_notice_input(db, project, payload))
+    filename = INVALID_FILENAME_CHARS.sub("-", subject).strip() or f"Release Notice {project.code}"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.docx"'},
+    )
+
+
+@router.post("/api/projects/{project_id}/documents/release-notice/html", response_model=schemas.ReleaseNoticeHtml)
+def release_notice_html(project_id: int, payload: schemas.ReleaseNoticeRequest, db: Session = Depends(get_db)):
+    """Il corpo della mail da incollare in Outlook (HTML e testo semplice)."""
+    project = _get_project_or_404(db, project_id)
+    subject, html, text = release_notice.generate_html(_release_notice_input(db, project, payload))
+    return schemas.ReleaseNoticeHtml(subject=subject, html=html, text=text)
+
+
+@router.get("/api/documents/release-notice/template")
+def download_release_notice_template():
+    """Il template in uso (personalizzato o predefinito), da modificare in Word."""
+    return Response(
+        content=release_notice.template_path().read_bytes(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="Release Notice - template.docx"'},
+    )
+
+
+@router.put("/api/documents/release-notice/template", response_model=schemas.ReleaseNoticeTemplateInfo)
+def upload_release_notice_template(content: bytes = Body(..., media_type="application/octet-stream")):
+    try:
+        tokens = release_notice.validate_template(content)
+        release_notice.save_custom_template(content)
+    except release_notice.ReleaseNoticeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _release_notice_template_info(tokens)
+
+
+@router.delete("/api/documents/release-notice/template", response_model=schemas.ReleaseNoticeTemplateInfo)
+def reset_release_notice_template():
+    """Torna al template predefinito."""
+    release_notice.reset_template()
+    return _release_notice_template_info()

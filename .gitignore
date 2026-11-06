@@ -14,3 +14,4 @@ frontend/dist/
 
 # IDE
 .idea/
+backend/data/templates/

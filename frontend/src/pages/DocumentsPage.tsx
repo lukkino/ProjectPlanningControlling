@@ -11,10 +11,14 @@ import type {
   PprInspection,
   PprReviewDeliverable,
   Project,
+  ReleaseNoticeComponent,
+  ReleaseNoticeMeta,
+  ReleaseNoticeRequest,
   RequirementCheckItem,
   RequirementsCheck,
 } from '../api/types'
 import { useReviewDelivery } from '../components/ReviewDelivery'
+import { formatDateTime } from '../lib/dates'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -312,6 +316,309 @@ function PresentationDownloadButton({
               <button className="btn btn-primary" onClick={() => run.reset()}>
                 Chiudi
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {delivery.dialog}
+    </>
+  )
+}
+
+// Release Notice: la mail che annuncia il rilascio. Il popup propone
+// componenti (sezione Releases: PN, nome, sigla_versione) e Change Order;
+// i link del Service Portal e della Compatibility Matrix cambiano a ogni
+// release e si scrivono qui. Si scarica il .docx o si copia il corpo della
+// mail (HTML) da incollare in Outlook.
+function ReleaseNoticeButton({ projectId }: { projectId: number }) {
+  const delivery = useReviewDelivery(projectId)
+  const [meta, setMeta] = useState<ReleaseNoticeMeta | null>(null)
+  const [components, setComponents] = useState<ReleaseNoticeComponent[]>([])
+  const [pnLinks, setPnLinks] = useState<Record<string, string>>({})
+  const [changeOrderLabel, setChangeOrderLabel] = useState('')
+  const [changeOrderUrl, setChangeOrderUrl] = useState('')
+  const [matrixUrl, setMatrixUrl] = useState('')
+  const [note, setNote] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
+  const templateInput = useRef<HTMLInputElement>(null)
+
+  const prepare = useMutation({
+    mutationFn: () => api.documents.releaseNoticeMeta(projectId),
+    onSuccess: (data) => {
+      setMeta(data)
+      setComponents(data.components)
+      setPnLinks({})
+      setChangeOrderLabel(data.change_order_label ?? '')
+      setChangeOrderUrl(data.change_order_url ?? '')
+      setMatrixUrl('')
+      setNote('')
+      setCopied(null)
+    },
+  })
+  const payload = (): ReleaseNoticeRequest => ({
+    components,
+    pn_links: pnLinks,
+    change_order_label: changeOrderLabel || null,
+    change_order_url: changeOrderUrl || null,
+    compatibility_matrix_url: matrixUrl || null,
+    note: note || null,
+  })
+  const download = useMutation({
+    mutationFn: async () => delivery.deliver([await api.documents.releaseNotice(projectId, payload())]),
+  })
+  const copy = useMutation({
+    mutationFn: async () => {
+      const result = await api.documents.releaseNoticeHtml(projectId, payload())
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([result.html], { type: 'text/html' }),
+          'text/plain': new Blob([result.text], { type: 'text/plain' }),
+        }),
+      ])
+      return result.subject
+    },
+    onSuccess: (subject) => setCopied(subject),
+  })
+  // Template: dopo un caricamento o un ripristino si rileggono oggetto,
+  // avvisi e stato del template, senza toccare quanto scritto nel popup.
+  const template = useMutation({
+    mutationFn: async (action: { upload: File } | 'reset' | 'download') => {
+      if (action === 'download') {
+        const file = await api.documents.releaseNoticeTemplate()
+        saveBlob(file.blob, file.filename)
+        return null
+      }
+      if (action === 'reset') await api.documents.resetReleaseNoticeTemplate()
+      else await api.documents.uploadReleaseNoticeTemplate(action.upload)
+      return api.documents.releaseNoticeMeta(projectId)
+    },
+    onSuccess: (data) => {
+      if (data) setMeta(data)
+      setCopied(null)
+    },
+  })
+  const close = () => {
+    setMeta(null)
+    download.reset()
+    copy.reset()
+    template.reset()
+  }
+  const pns = [...new Set(components.map((c) => c.pn.trim()).filter(Boolean))]
+  const setComponent = (index: number, field: keyof ReleaseNoticeComponent, value: string) =>
+    setComponents((list) => list.map((c, i) => (i === index ? { ...c, [field]: value } : c)))
+  const busy = download.isPending || copy.isPending || template.isPending
+  const error = (prepare.error ?? download.error ?? copy.error ?? template.error) as Error | null
+
+  return (
+    <>
+      <button className="btn btn-primary" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
+        {prepare.isPending ? 'Caricamento…' : '✉ Release Notice'}
+      </button>
+      {(meta || prepare.isError) && (
+        // onMouseDown (non onClick): vedi commento in DocumentDownloadButton.
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && (close(), prepare.reset())}>
+          <div className="modal" style={{ width: 760 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Release Notice</h3>
+            {meta && (
+              <>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Oggetto: <strong>{meta.subject}</strong>. Le novità vengono dallo Scope discorsivo della Dashboard.
+                </p>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginBottom: 10,
+                    padding: '6px 10px',
+                    border: '1px solid var(--border, #ddd)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <span>
+                    Template:{' '}
+                    <strong>
+                      {meta.template.custom
+                        ? `personalizzato${meta.template.updated_at ? ` (caricato il ${formatDateTime(meta.template.updated_at)})` : ''}`
+                        : 'predefinito'}
+                    </strong>
+                  </span>
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button className="btn" type="button" disabled={busy} onClick={() => template.mutate('download')}>
+                      ⬇ Scarica template
+                    </button>
+                    <button className="btn" type="button" disabled={busy} onClick={() => templateInput.current?.click()}>
+                      ⬆ Carica template
+                    </button>
+                    {meta.template.custom && (
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (window.confirm('Tornare al template predefinito? Quello caricato viene eliminato.')) template.mutate('reset')
+                        }}
+                      >
+                        ↺ Predefinito
+                      </button>
+                    )}
+                  </span>
+                  <input
+                    ref={templateInput}
+                    type="file"
+                    accept=".docx"
+                    hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) template.mutate({ upload: file })
+                    }}
+                  />
+                  <details style={{ flexBasis: '100%' }}>
+                    <summary className="muted">
+                      Come modificarlo: scaricalo, cambialo in Word usando questi segnaposto e ricaricalo
+                    </summary>
+                    <table style={{ marginTop: 6, fontSize: 13 }}>
+                      <tbody>
+                        {meta.template.placeholders.map((p) => (
+                          <tr key={p.token}>
+                            <td style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                              <code>{p.token}</code>
+                            </td>
+                            <td>{p.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+                      Il resto del documento (testi, colori, font, elenchi) resta com'è nel template; i paragrafi generati
+                      da {'{{scope}}'}, {'{{componenti}}'} e {'{{note}}'} prendono font e dimensione del paragrafo del
+                      segnaposto. Il template vale per tutti gli increment.
+                    </p>
+                  </details>
+                </div>
+                {meta.warnings.length > 0 && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 6, background: '#fef3c7', color: '#92400e' }}>
+                    {meta.warnings.map((w) => (
+                      <div key={w}>⚠ {w}</div>
+                    ))}
+                  </div>
+                )}
+                <h4 style={{ margin: '8px 0 4px' }}>Componenti</h4>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>PN</th>
+                        <th>Componente</th>
+                        <th title="In grassetto nella mail">Sigla_versione</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {components.map((c, index) => (
+                        <tr key={index}>
+                          <td>
+                            <input value={c.pn} onChange={(e) => setComponent(index, 'pn', e.target.value)} style={{ width: 120 }} />
+                          </td>
+                          <td>
+                            <input value={c.name} onChange={(e) => setComponent(index, 'name', e.target.value)} style={{ width: '100%' }} />
+                          </td>
+                          <td>
+                            <input value={c.code} onChange={(e) => setComponent(index, 'code', e.target.value)} style={{ width: 200 }} />
+                          </td>
+                          <td>
+                            <button
+                              className="link-btn"
+                              type="button"
+                              title="Togli dalla mail"
+                              onClick={() => setComponents((list) => list.filter((_, i) => i !== index))}
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  className="link-btn"
+                  type="button"
+                  onClick={() => setComponents((list) => [...list, { pn: list.at(-1)?.pn ?? '', name: '', code: '' }])}
+                >
+                  + Aggiungi componente
+                </button>
+                <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                  Modifiche valide solo per questa mail: sigle e fix version si salvano in Releases (o nella tab Components &amp; PN).
+                </p>
+
+                <h4 style={{ margin: '14px 0 4px' }}>Link</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '6px 10px', alignItems: 'center' }}>
+                  {pns.map((pn) => (
+                    <Fragment key={pn}>
+                      <label>Service Portal {pn}</label>
+                      <input
+                        value={pnLinks[pn] ?? ''}
+                        placeholder="https://…"
+                        onChange={(e) => setPnLinks((links) => ({ ...links, [pn]: e.target.value }))}
+                      />
+                    </Fragment>
+                  ))}
+                  <label>Change Order</label>
+                  <span style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      value={changeOrderLabel}
+                      placeholder="CO2026-…"
+                      onChange={(e) => setChangeOrderLabel(e.target.value)}
+                      style={{ width: 130 }}
+                    />
+                    <input
+                      value={changeOrderUrl}
+                      placeholder="https://…"
+                      onChange={(e) => setChangeOrderUrl(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                  </span>
+                  <label>Compatibility Matrix</label>
+                  <input value={matrixUrl} placeholder="https://…" onChange={(e) => setMatrixUrl(e.target.value)} />
+                </div>
+
+                <h4 style={{ margin: '14px 0 4px' }}>Note (facoltative)</h4>
+                <textarea
+                  value={note}
+                  rows={3}
+                  style={{ width: '100%' }}
+                  placeholder="Se vuota, la sezione Note non compare"
+                  onChange={(e) => setNote(e.target.value)}
+                />
+                {copied && (
+                  <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, background: '#e6f4ea', color: '#1e6b34' }}>
+                    ✓ Corpo della mail copiato: incollalo in una nuova mail di Outlook. Oggetto:{' '}
+                    <strong>{copied}</strong>{' '}
+                    <button className="link-btn" type="button" onClick={() => void navigator.clipboard.writeText(copied)}>
+                      copia oggetto
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            {error && <div className="error-banner">{error.message}</div>}
+            <div className="form-actions">
+              <button className="btn" onClick={() => (close(), prepare.reset())} disabled={busy}>
+                Chiudi
+              </button>
+              {meta && (
+                <>
+                  <button className="btn" onClick={() => copy.mutate()} disabled={busy}>
+                    {copy.isPending ? 'Copia…' : '📋 Copia per email'}
+                  </button>
+                  <button className="btn btn-primary" onClick={() => download.mutate()} disabled={busy}>
+                    {download.isPending ? 'Generazione…' : `${delivery.inFolder ? '💾 Salva' : '⬇ Scarica'} .docx`}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1566,6 +1873,7 @@ export function DocumentsPage() {
                 </span>
               </>
             )}
+            {docType === 'release-to-market' && <ReleaseNoticeButton projectId={project.id} />}
           </div>
           <ReviewDeliverablesSection docType={docType} />
         </div>

@@ -775,6 +775,7 @@ class ReleaseComponentWrite(BaseModel):
     pn: str | None = None
     component: str | None = None
     fix_version: str | None = None
+    abbreviation: str | None = None
     detail: str | None = None
     note: str | None = None
 
@@ -1178,6 +1179,7 @@ class IncrementComponentCreate(BaseModel):
 class IncrementComponentUpdate(BaseModel):
     pn: str | None = None
     fix_version: str | None = None
+    abbreviation: str | None = None
     detail: str | None = None
     note: str | None = None
 
@@ -1187,7 +1189,60 @@ class IncrementComponentRead(BaseModel):
     name: str
     pn: str | None
     fix_version: str | None
+    abbreviation: str | None
     detail: str | None
     note: str | None
     # Altri increment (Releases o tab di altri increment) con lo stesso PN.
     pn_used_by: list[str]
+
+
+# ---------- Release Notice ----------
+
+
+class ReleaseNoticeComponent(BaseModel):
+    pn: str = ""
+    name: str = ""
+    # Sigla e versione in grassetto, es. "PSDA_6.0.0".
+    code: str = ""
+
+
+class ReleaseNoticeMeta(BaseModel):
+    subject: str
+    components: list[ReleaseNoticeComponent]
+    change_order_label: str | None
+    change_order_url: str | None
+    has_scope_narrative: bool
+    # Cosa manca per una Notice completa (avvisi nel popup, non bloccanti).
+    warnings: list[str]
+    template: "ReleaseNoticeTemplateInfo"
+
+
+class ReleaseNoticeRequest(BaseModel):
+    components: list[ReleaseNoticeComponent]
+    pn_links: dict[str, str] = {}
+    change_order_label: str | None = None
+    change_order_url: str | None = None
+    compatibility_matrix_url: str | None = None
+    note: str | None = None
+
+
+class ReleaseNoticePlaceholder(BaseModel):
+    token: str
+    description: str
+
+
+class ReleaseNoticeTemplateInfo(BaseModel):
+    # True = template caricato dall'utente, False = quello predefinito.
+    custom: bool
+    updated_at: dt.datetime | None
+    unknown_placeholders: list[str]
+    placeholders: list[ReleaseNoticePlaceholder]
+
+
+class ReleaseNoticeHtml(BaseModel):
+    subject: str
+    html: str
+    text: str
+
+
+ReleaseNoticeMeta.model_rebuild()

@@ -990,6 +990,9 @@ class ReleaseComponent(Base):
     pn: Mapped[str | None] = mapped_column(String(64), nullable=True)
     component: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fix_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Sigla del componente (es. PSDA, PTBS): nella Release Notice il
+    # componente diventa "<nome> <SIGLA>_<fix version>".
+    abbreviation: Mapped[str | None] = mapped_column(String(32), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

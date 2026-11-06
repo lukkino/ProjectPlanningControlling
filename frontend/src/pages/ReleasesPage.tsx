@@ -30,6 +30,7 @@ const COLUMNS: Column[] = [
   { key: 'increment_code', label: 'Increment', level: 'release', kind: 'text', minWidth: 170, centered: true, sticky: true },
   { key: 'pn', label: 'PN', level: 'component', kind: 'text', minWidth: 120, centered: true },
   { key: 'component', label: 'Componente', level: 'component', kind: 'text', minWidth: 210 },
+  { key: 'abbreviation', label: 'Sigla', level: 'component', kind: 'text', minWidth: 70, centered: true },
   { key: 'fix_version', label: 'Fix version', level: 'component', kind: 'text', minWidth: 80 },
   { key: 'detail', label: 'Dettaglio', level: 'component', kind: 'multiline', minWidth: 240 },
   { key: 'note', label: 'Note', level: 'component', kind: 'multiline', minWidth: 140 },

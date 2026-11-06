@@ -101,9 +101,22 @@ def _read(component: models.ReleaseComponent, usages: dict[str, set[str]]) -> sc
         name=component.component or "",
         pn=component.pn,
         fix_version=component.fix_version,
+        abbreviation=component.abbreviation,
         detail=component.detail,
         note=component.note,
         pn_used_by=sorted(usages.get((component.pn or "").strip(), set())),
+    )
+
+
+def _last_abbreviation(db: Session, name: str) -> str | None:
+    """Sigla gia' usata per lo stesso componente nell'ultima release che ce l'ha."""
+    return (
+        db.query(models.ReleaseComponent.abbreviation)
+        .join(models.Release, models.Release.id == models.ReleaseComponent.release_id)
+        .filter(func.lower(models.ReleaseComponent.component) == name.lower(), models.ReleaseComponent.abbreviation.isnot(None))
+        .order_by(models.Release.sort_order.desc(), models.ReleaseComponent.id.desc())
+        .limit(1)
+        .scalar()
     )
 
 
@@ -193,7 +206,9 @@ def create_component(project_id: int, payload: schemas.IncrementComponentCreate,
     for sibling in siblings:
         if sibling.sort_order >= position:
             sibling.sort_order += 1
-    component = models.ReleaseComponent(release_id=release.id, component=name, pn=pn, sort_order=position)
+    component = models.ReleaseComponent(
+        release_id=release.id, component=name, pn=pn, abbreviation=_last_abbreviation(db, name), sort_order=position
+    )
     db.add(component)
     db.commit()
     db.refresh(component)

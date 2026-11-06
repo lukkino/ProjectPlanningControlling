@@ -413,6 +413,7 @@ export type ReleaseComponent = {
   pn: string | null
   component: string | null
   fix_version: string | null
+  abbreviation: string | null
   detail: string | null
   note: string | null
 }
@@ -428,10 +429,43 @@ export type IncrementComponent = {
   name: string
   pn: string | null
   fix_version: string | null
+  abbreviation: string | null
   detail: string | null
   note: string | null
   pn_used_by: string[]
 }
+
+// Release Notice (Documents > Release to Market).
+export type ReleaseNoticeComponent = { pn: string; name: string; code: string }
+
+export type ReleaseNoticeMeta = {
+  subject: string
+  components: ReleaseNoticeComponent[]
+  change_order_label: string | null
+  change_order_url: string | null
+  has_scope_narrative: boolean
+  warnings: string[]
+  template: ReleaseNoticeTemplateInfo
+}
+
+export type ReleaseNoticeTemplateInfo = {
+  // true = template caricato dall'utente, false = quello predefinito.
+  custom: boolean
+  updated_at: string | null
+  unknown_placeholders: string[]
+  placeholders: { token: string; description: string }[]
+}
+
+export type ReleaseNoticeRequest = {
+  components: ReleaseNoticeComponent[]
+  pn_links: Record<string, string>
+  change_order_label: string | null
+  change_order_url: string | null
+  compatibility_matrix_url: string | null
+  note: string | null
+}
+
+export type ReleaseNoticeHtml = { subject: string; html: string; text: string }
 
 export type Release = {
   id: number

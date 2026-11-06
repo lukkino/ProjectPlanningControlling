@@ -304,6 +304,30 @@ def run_lightweight_migrations() -> None:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE projects DROP COLUMN {orphan_column}"))
 
+    if "release_components" in table_names:
+        component_columns = {col["name"] for col in inspector.get_columns("release_components")}
+        if "abbreviation" not in component_columns:
+            # Sigle note dei componenti (dalla Release Notice di PTBSYS-03-002).
+            known = {
+                "ProTube smart Device App": "PSDA",
+                "ProTube Service": "PTBS",
+                "Traceability Service": "TS",
+                "Interoperability Service": "INTS",
+                "DAS Connector": "DASC",
+                "QMS": "QMS",
+                "ProTube THUB (System Installer)": "PTHUB",
+                "PAS (Keycloak)": "PAS",
+                "Hub Manager": "HUBM",
+                "Check-in station": "PCIS",
+            }
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE release_components ADD COLUMN abbreviation VARCHAR(32)"))
+                for name, abbreviation in known.items():
+                    conn.execute(
+                        text("UPDATE release_components SET abbreviation = :a WHERE lower(component) = lower(:n)"),
+                        {"a": abbreviation, "n": name},
+                    )
+
     if "app_settings" in table_names:
         app_settings_columns = {col["name"] for col in inspector.get_columns("app_settings")}
         if "jira_api_token_expires_at" not in app_settings_columns:
