@@ -1671,6 +1671,10 @@ export function DocumentsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
   })
 
+  const openCoSoftware = useMutation({
+    mutationFn: () => api.projects.openChangeOrderSoftware(project.id),
+  })
+
   const toggleType = (type: string) => {
     setHiddenTypes((prev) => {
       const next = new Set(prev)
@@ -1706,6 +1710,14 @@ export function DocumentsPage() {
             <a href={project.change_order_url} target="_blank" rel="noreferrer" className="btn btn-primary">
               {project.change_order_label || project.change_order_url}
             </a>
+            <button
+              className="btn"
+              disabled={openCoSoftware.isPending}
+              onClick={() => openCoSoftware.mutate()}
+              title="Apre il Change Order in una finestra di Chrome dedicata e clicca il pulsante delle attività Software. La prima volta va fatto il login Microsoft in quella finestra."
+            >
+              {openCoSoftware.isPending ? 'Apertura…' : 'Apri attività Software'}
+            </button>
             <button
               className="btn"
               onClick={() => {
@@ -1749,6 +1761,13 @@ export function DocumentsPage() {
           </div>
         )}
         {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
+        {openCoSoftware.isError && <div className="error-banner">{(openCoSoftware.error as Error).message}</div>}
+        {openCoSoftware.isSuccess && (
+          <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+            Si sta aprendo una finestra di Chrome sul Change Order. Se chiede il login Microsoft, fallo lì: lo script
+            aspetta fino a 5 minuti e poi clicca da solo il pulsante delle attività Software.
+          </div>
+        )}
       </div>
 
       {/* Dove finiscono i documenti generati qui sotto (vedi useReviewDelivery). */}

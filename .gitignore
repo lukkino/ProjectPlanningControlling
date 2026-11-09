@@ -15,3 +15,5 @@ frontend/dist/
 # IDE
 .idea/
 backend/data/templates/
+backend/data/browser-profile/
+backend/data/change_order_browser.log

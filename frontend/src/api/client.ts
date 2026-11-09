@@ -245,6 +245,9 @@ export const api = {
     create: (data: Partial<Project>) => post<ProjectDetail>('/projects', data),
     update: (id: number, data: Partial<Project>) => put<ProjectDetail>(`/projects/${id}`, data),
     remove: (id: number) => del(`/projects/${id}`),
+    // Apre sulla macchina del backend una finestra del browser sul Change
+    // Order, gia' sul popup delle attivita' Software.
+    openChangeOrderSoftware: (id: number) => post<void>(`/projects/${id}/change-order/open-software`),
     setGanttOrder: (projectIds: number[]) => put<void>('/projects/gantt-order', { project_ids: projectIds }),
     setPinned: (id: number, pinned: boolean) => put<void>(`/projects/${id}/pinned`, { pinned }),
   },
