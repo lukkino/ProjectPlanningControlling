@@ -168,7 +168,7 @@ export function NonWorkingDaysModal({
       <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>Giorni non lavorativi</h3>
         <p className="muted" style={{ fontSize: 13, marginTop: -4 }}>
-          Ferie, malattia, chiusure: la pianificazione (Sizing → Fine pian., cascata, predecessori) li salta come i
+          Ferie, malattia, chiusure: la pianificazione (Sizing → Fine agg., cascata, predecessori) li salta come i
           weekend. Clicca il primo e l'ultimo giorno del periodo (due volte lo stesso giorno per un giorno solo).
         </p>
 

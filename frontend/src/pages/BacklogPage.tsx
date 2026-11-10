@@ -35,6 +35,7 @@ import {
   scheduleFromPredecessors,
   earliestStart,
   toIsoLocal,
+  workingDaysShift,
   wouldCreateCycle,
   type BacklogPatch,
   type DaysOff,
@@ -76,6 +77,10 @@ const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
 // Colonne nascoste dal menu "Colonne": come ordine e larghezze, e' una
 // preferenza per-browser valida per tutti gli increment.
 const HIDDEN_COLUMNS_STORAGE_KEY = 'backlog-hidden-columns-v1'
+// Colonne della baseline: per un breve periodo erano nascoste di default; chi
+// le ha avute nascoste cosi' (non per scelta) le ritrova visibili una volta.
+const BASELINE_COLUMN_KEYS = ['baseline_start', 'baseline_finish', 'baseline_shift']
+const LEGACY_DEFAULT_HIDDEN_STORAGE_KEY = 'backlog-default-hidden-columns-v1'
 // Sempre visibile: senza la chiave Jira non si capisce a quale item si
 // riferisce la riga.
 const ALWAYS_VISIBLE_COLUMN_KEYS = new Set(['jira_key'])
@@ -103,6 +108,9 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   predecessors: 120,
   planned_start: 90,
   expected_finish: 90,
+  baseline_start: 90,
+  baseline_finish: 90,
+  baseline_shift: 75,
   actual_start: 90,
   actual_finish: 90,
   duration: 70,
@@ -411,7 +419,7 @@ export function BacklogPage() {
       const anchor = chain[0]
       if (!anchor || !anchor.planned_start || !anchor.expected_finish) {
         throw new Error(
-          `Imposta prima Start pian. e Fine pian. per l'item in cima alla lista${anchor ? ` (${anchor.jira_key})` : ''}.`,
+          `Imposta prima Start agg. e Fine agg. per l'item in cima alla lista${anchor ? ` (${anchor.jira_key})` : ''}.`,
         )
       }
       const patches = new Map<number, Partial<BacklogItem>>()
@@ -497,6 +505,20 @@ export function BacklogPage() {
     isMilestone(item) && !item.milestone_phase_id && item.status === 'Done' && item.actual_finish
       ? { ...item, planned_start: item.actual_finish, expected_finish: item.actual_finish }
       : item
+
+  // Baseline: le date pianificate di adesso diventano quelle originali.
+  const hasBaseline = (items ?? []).some((i) => i.baseline_start)
+  const setBaseline = useMutation({
+    mutationFn: () => api.backlog.setBaseline(project.id),
+    onSuccess: invalidate,
+  })
+  const confirmBaseline = () => {
+    const planned = (items ?? []).filter((i) => i.planned_start && i.expected_finish).length
+    const message = hasBaseline
+      ? `Rifare la baseline? Le date originali attuali verranno sostituite con le date aggiornate di adesso (${planned} item).`
+      : `Fissare la baseline con le date aggiornate di adesso (${planned} item)? Da qui in poi, spostando le barre, le date originali restano ferme.`
+    if (window.confirm(message)) setBaseline.mutate()
+  }
 
   // Primo Start possibile per i predecessori (limite minimo nel Gantt e in tabella).
   const minStartOf = (item: BacklogItem) => earliestStart(item, itemsByKey, offDays)
@@ -794,7 +816,7 @@ export function BacklogPage() {
     },
     {
       key: 'planned_start',
-      label: 'Start pian.',
+      label: 'Start agg.',
       className: 'editable-cell',
       // La Fine pian. si ricalcola da Start pian. + Sizing (gg), in giorni
       // lavorativi (vedi addWorkingDays) - se il sizing non e' ancora
@@ -815,7 +837,7 @@ export function BacklogPage() {
             min={min ?? undefined}
             title={
               min
-                ? `Non prima del ${formatIsoDate(min)}: il giorno lavorativo dopo la Fine pian. dei predecessori (${driving.map((p) => p.jira_key).join(', ')})`
+                ? `Non prima del ${formatIsoDate(min)}: il giorno lavorativo dopo la Fine agg. dei predecessori (${driving.map((p) => p.jira_key).join(', ')})`
                 : undefined
             }
             onChange={(planned_start) => reschedule.mutate({ item, planned_start })}
@@ -825,7 +847,7 @@ export function BacklogPage() {
     },
     {
       key: 'expected_finish',
-      label: 'Fine pian.',
+      label: 'Fine agg.',
       className: 'editable-cell',
       // key sul valore: campo non controllato, serve a rimontarlo quando il
       // valore cambia da fuori (calcolo automatico da Start pian./Sizing),
@@ -838,7 +860,7 @@ export function BacklogPage() {
           />
           {item.planned_start && !item.planned_duration_days && (
             <span
-              title="Sizing (gg) mancante: la Fine pian. non può essere calcolata automaticamente (da Start pian. o dalla pianificazione a cascata) — inseriscila a mano o compila il Sizing."
+              title="Sizing (gg) mancante: la Fine agg. non può essere calcolata automaticamente (da Start agg. o dalla pianificazione a cascata) — inseriscila a mano o compila il Sizing."
               style={{ cursor: 'help' }}
             >
               ⚠️
@@ -846,6 +868,34 @@ export function BacklogPage() {
           )}
         </div>
       ),
+    },
+    {
+      // Baseline: date fissate col pulsante "Fissa baseline", non modificabili
+      // qui. Lo scostamento e' quello della Fine pian. in giorni lavorativi.
+      key: 'baseline_start',
+      label: 'Start orig.',
+      render: (item) => formatIsoDate(item.baseline_start) ?? <span className="muted">—</span>,
+    },
+    {
+      key: 'baseline_finish',
+      label: 'Fine orig.',
+      render: (item) => formatIsoDate(item.baseline_finish) ?? <span className="muted">—</span>,
+    },
+    {
+      key: 'baseline_shift',
+      label: 'Scost.',
+      render: (item) => {
+        const shift = workingDaysShift(item.baseline_finish, item.expected_finish, offDays)
+        if (shift === null) return <span className="muted">—</span>
+        return (
+          <span
+            title="Fine agg. rispetto alla baseline, in giorni lavorativi"
+            style={{ color: shift > 0 ? '#b91c1c' : shift < 0 ? '#15803d' : undefined, fontWeight: shift ? 600 : undefined }}
+          >
+            {shift > 0 ? `+${shift}` : shift} gg
+          </span>
+        )
+      },
     },
     {
       key: 'actual_start',
@@ -1054,13 +1104,18 @@ export function BacklogPage() {
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(HIDDEN_COLUMNS_STORAGE_KEY)
-      if (stored) {
-        return new Set(
-          (JSON.parse(stored) as string[]).filter(
-            (k) => defaultColumnOrder.includes(k) && !ALWAYS_VISIBLE_COLUMN_KEYS.has(k),
-          ),
-        )
+      const hidden = new Set(
+        stored
+          ? (JSON.parse(stored) as string[]).filter(
+              (k) => defaultColumnOrder.includes(k) && !ALWAYS_VISIBLE_COLUMN_KEYS.has(k),
+            )
+          : [],
+      )
+      if (localStorage.getItem(LEGACY_DEFAULT_HIDDEN_STORAGE_KEY)) {
+        for (const key of BASELINE_COLUMN_KEYS) hidden.delete(key)
+        localStorage.removeItem(LEGACY_DEFAULT_HIDDEN_STORAGE_KEY)
       }
+      return hidden
     } catch {
       // localStorage non disponibile o dato corrotto: mostra tutte le colonne
     }
@@ -1443,11 +1498,23 @@ export function BacklogPage() {
           </div>
           <button
             className="btn"
-            title="Ricalcola Start pian./Fine pian. di tutti gli item successivi al primo, in cascata dal suo Sizing (gg)"
+            title="Ricalcola Start agg./Fine agg. di tutti gli item successivi al primo, in cascata dal suo Sizing (gg)"
             onClick={() => cascadeSchedule.mutate()}
             disabled={cascadeSchedule.isPending}
           >
             {cascadeSchedule.isPending ? 'Calcolo...' : '📐 Pianificazione a cascata'}
+          </button>
+          <button
+            className="btn"
+            title={
+              hasBaseline
+                ? 'Rifà la baseline: le date aggiornate di adesso diventano quelle originali (sostituisce la baseline attuale)'
+                : 'Fotografa le date aggiornate di adesso come date originali, per confrontarle poi con quelle aggiornate'
+            }
+            onClick={confirmBaseline}
+            disabled={setBaseline.isPending}
+          >
+            {setBaseline.isPending ? 'Salvataggio…' : hasBaseline ? '📌 Rifai baseline' : '📌 Fissa baseline'}
           </button>
           <button
             className="btn"
@@ -1463,6 +1530,15 @@ export function BacklogPage() {
       </div>
 
       {cascadeSchedule.isError && <div className="error-banner">{(cascadeSchedule.error as Error).message}</div>}
+      {setBaseline.isError && <div className="error-banner">{(setBaseline.error as Error).message}</div>}
+      {setBaseline.isSuccess && (
+        <div className="error-banner" style={{ background: '#e9f7ee', color: '#1a9c5c', borderColor: '#b8e3c8' }}>
+          Baseline fissata per {setBaseline.data.baselined} item
+          {setBaseline.data.without_dates > 0 &&
+            ` (${setBaseline.data.without_dates} in scope e non Done senza date: prenderanno la baseline la prima volta che li pianifichi)`}
+          . In tabella sono le colonne Start orig., Fine orig. e Scost.; nel Gantt la vedi con "Mostra baseline".
+        </div>
+      )}
       {reschedule.isError && (
         <div className="error-banner">Ripianificazione non riuscita: {(reschedule.error as Error).message}</div>
       )}

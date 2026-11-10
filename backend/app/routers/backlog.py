@@ -110,12 +110,60 @@ def _link_milestone(item: models.BacklogItem, phase_id: int) -> None:
     models.align_milestone(item, phase)
 
 
+def _project_has_baseline(item: models.BacklogItem) -> bool:
+    db = object_session(item)
+    return (
+        db.query(models.BacklogItem.id)
+        .filter(models.BacklogItem.project_id == item.project_id, models.BacklogItem.baseline_start.is_not(None))
+        .first()
+        is not None
+    )
+
+
 def _apply_update(item: models.BacklogItem, data: dict) -> None:
     _normalize_activity(data)
     for field, value in data.items():
         setattr(item, field, value)
+    # Item arrivato dopo la baseline dell'increment: la prende la prima volta
+    # che viene ripianificato (le date di default non contano come piano).
+    if (
+        ("planned_start" in data or "expected_finish" in data)
+        and item.baseline_start is None
+        and "baseline_start" not in data
+        and item.planned_start is not None
+        and item.expected_finish is not None
+        and _project_has_baseline(item)
+    ):
+        item.baseline_start = item.planned_start
+        item.baseline_finish = item.expected_finish
     if data.get("milestone_phase_id") is not None:
         _link_milestone(item, data["milestone_phase_id"])
+
+
+@router.post("/api/projects/{project_id}/backlog/baseline", response_model=schemas.BaselineResult)
+def set_baseline(project_id: int, db: Session = Depends(get_db)):
+    """Fissa la baseline: le date pianificate di adesso diventano quelle
+    originali di ogni item che le ha (sostituendo una baseline precedente)."""
+    _get_project_or_404(db, project_id)
+    items = (
+        db.query(models.BacklogItem)
+        .filter(models.BacklogItem.project_id == project_id, models.BacklogItem.archived_at.is_(None))
+        .all()
+    )
+    baselined = 0
+    without_dates = 0
+    for item in items:
+        if item.planned_start is not None and item.expected_finish is not None:
+            item.baseline_start = item.planned_start
+            item.baseline_finish = item.expected_finish
+            baselined += 1
+        else:
+            item.baseline_start = None
+            item.baseline_finish = None
+            if item.in_scope and item.status != "Done":
+                without_dates += 1
+    db.commit()
+    return schemas.BaselineResult(baselined=baselined, without_dates=without_dates)
 
 
 @router.put("/api/projects/{project_id}/backlog/bulk", response_model=list[schemas.BacklogItem])

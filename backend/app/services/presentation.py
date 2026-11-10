@@ -100,6 +100,8 @@ COLOR_GANTT_PHASE = RGBColor(0x7C, 0x4D, 0xBD)
 # Milestone (label Milestone su Jira): come nel Gantt del Backlog, rossa
 # finche' non e' Done, poi verde.
 COLOR_MILESTONE = RGBColor(0xDC, 0x26, 0x26)
+# Baseline (date originali) sotto la barra pianificata, come nel Gantt.
+COLOR_BASELINE = RGBColor(0x6B, 0x72, 0x80)
 COLOR_MILESTONE_BORDER = RGBColor(0x99, 0x1B, 0x1B)
 COLOR_MILESTONE_DONE = RGBColor(0x16, 0xA3, 0x4A)
 COLOR_MILESTONE_DONE_BORDER = RGBColor(0x15, 0x80, 0x3D)
@@ -1142,7 +1144,8 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         mark_lanes.append((left, text_width, name, color, lane))
     axis_label_height = Inches(0.32)
     header_height = axis_label_height + Inches(0.04) + mark_lane_height * len(lane_ends)
-    legend_height = Inches(0.45)
+    # Due righe di legenda: con baseline, attivita' e milestone non sta in una.
+    legend_height = Inches(0.75)
     row_height = min(Inches(0.42), int((box.height - header_height - legend_height) / len(items)))
     # Testo delle righe proporzionato all'altezza della riga.
     row_font = max(5.5, min(9.0, round(row_height / 12700 * 0.62 * 2) / 2))
@@ -1237,6 +1240,21 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
             shape.shadow.inherit = False
             if item.is_activity:
                 shape.line.fill.background()
+        # Baseline (date originali): linea grigia sottile tra la barra
+        # pianificata e quella effettiva, come "Mostra baseline" nel Gantt.
+        if item.baseline_start and item.baseline_finish and item.baseline_finish >= axis_start:
+            left = x_of(max(item.baseline_start, axis_start))
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                left,
+                top + int(row_height * 0.46),
+                max(x_of(item.baseline_finish + dt.timedelta(days=1)) - left, Inches(0.04)),
+                max(int(row_height * 0.06), Pt(1.5)),
+            )
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = COLOR_BASELINE
+            shape.line.fill.background()
+            shape.shadow.inherit = False
         end = bar_end(item)
         if item.actual_start is not None and end is not None and end >= item.actual_start:
             shape = bar(item.actual_start, end, top + int(row_height * 0.56))
@@ -1283,8 +1301,16 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
     swatch = Inches(0.16)
     x = box.left
 
+    def room(width: int) -> None:
+        """Va a capo se la voce non sta nella riga della legenda."""
+        nonlocal x, legend_top
+        if x + width > box.left + box.width:
+            x = box.left
+            legend_top += Inches(0.3)
+
     def legend_entry(label: str, fill, width: int = Inches(1.1)) -> None:
         nonlocal x
+        room(swatch + Inches(0.06) + width)
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, legend_top + Inches(0.07), swatch, swatch)
         fill(shape)
         shape.shadow.inherit = False
@@ -1307,8 +1333,13 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
 
     for type_name, color in GANTT_TYPE_COLORS.items():
         legend_entry(type_name, solid(color), Inches(0.55) + Inches(0.02) * len(type_name))
-    legend_entry("Pianificato", outlined, Inches(0.85))
+    legend_entry("Aggiornato", outlined, Inches(0.85))
     legend_entry("Effettivo", solid(COLOR_GANTT_OTHER), Inches(0.75))
+    if any(i.baseline_start for i in items):
+        room(Inches(0.95))
+        line(x, legend_top + Inches(0.15), x + Inches(0.2), legend_top + Inches(0.15), COLOR_BASELINE, width=2.5)
+        cell(x + Inches(0.26), legend_top, Inches(0.7), Inches(0.3), "Baseline", size=9, color=COLOR_MUTED).word_wrap = False
+        x += Inches(0.95)
     legend_entry("In corso (fino a oggi)", lambda s: (_fading(s, COLOR_GANTT_OTHER), s.line.fill.background()), Inches(1.5))
     used_phases = {_activity_phase(i)[0] for i in items if i.is_activity}
     for value, label, _, phase_color in ACTIVITY_PHASES:
@@ -1319,6 +1350,7 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
                 Inches(0.75) + Inches(0.075) * len(label),
             )
     if any(models.is_milestone(i.labels) for i in items):
+        room((swatch + Inches(0.06)) * 2 + Inches(0.85))
         for fill, border in ((COLOR_MILESTONE, COLOR_MILESTONE_BORDER), (COLOR_MILESTONE_DONE, COLOR_MILESTONE_DONE_BORDER)):
             shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, x, legend_top + Inches(0.06), swatch + Inches(0.02), swatch + Inches(0.02))
             shape.fill.solid()
@@ -1330,6 +1362,7 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         # Rosso da fare, verde Done: i due rombi bastano a spiegarlo.
         cell(x, legend_top, Inches(0.8), Inches(0.3), "Milestone", size=9, color=COLOR_MUTED).word_wrap = False
         x += Inches(0.85)
+    room(Inches(1.6))
     line(x, legend_top + Inches(0.15), x + Inches(0.25), legend_top + Inches(0.15), COLOR_DANGER, width=1.5)
     cell(x + Inches(0.3), legend_top, Inches(1.3), Inches(0.3), f"Oggi {_date(today)}", size=9, color=COLOR_MUTED)
 

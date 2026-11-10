@@ -397,6 +397,8 @@ export const api = {
     update: (id: number, data: Partial<BacklogItem>) => put<BacklogItem>(`/backlog/${id}`, data),
     bulkUpdate: (projectId: number, data: (Partial<BacklogItem> & { id: number })[]) =>
       put<BacklogItem[]>(`/projects/${projectId}/backlog/bulk`, data),
+    setBaseline: (projectId: number) =>
+      post<{ baselined: number; without_dates: number }>(`/projects/${projectId}/backlog/baseline`),
     remove: (id: number) => del(`/backlog/${id}`),
     archived: (projectId: number) => request<BacklogItem[]>(`/projects/${projectId}/backlog/archived`),
     restore: (id: number) => post<BacklogItem>(`/backlog/${id}/restore`),

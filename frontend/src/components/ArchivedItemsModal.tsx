@@ -40,7 +40,7 @@ export function ArchivedItemsModal({ projectId, items, onClose }: Props) {
                 <tr>
                   <th>Chiave</th>
                   <th>Summary</th>
-                  <th>Pianificato</th>
+                  <th>Aggiornato</th>
                   <th>Archiviato il</th>
                   <th />
                 </tr>

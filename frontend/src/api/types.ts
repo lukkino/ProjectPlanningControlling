@@ -231,6 +231,9 @@ export type BacklogItem = {
   predecessors: string | null
   // Fase dell'increment a cui e' collegata una milestone (ne prende la data).
   milestone_phase_id: number | null
+  // Baseline (date originali), fissata col pulsante "Fissa baseline".
+  baseline_start: string | null
+  baseline_finish: string | null
   status: 'To Do' | 'In Progress' | 'Done'
 }
 

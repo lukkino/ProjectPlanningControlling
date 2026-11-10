@@ -54,6 +54,13 @@ export function addWorkingDays(startStr: string | null, days: number | null, off
   return toIsoLocal(cursor)
 }
 
+// Scostamento in giorni lavorativi da una data a un'altra (positivo se la
+// seconda e' dopo): es. Fine pian. rispetto alla baseline. null se ne manca una.
+export function workingDaysShift(fromStr: string | null, toStr: string | null, off: DaysOff = NO_DAYS_OFF): number | null {
+  if (!fromStr || !toStr || fromStr === toStr) return fromStr && toStr ? 0 : null
+  return fromStr < toStr ? countWorkingDays(fromStr, toStr, off) - 1 : -(countWorkingDays(toStr, fromStr, off) - 1)
+}
+
 // Giorni lavorativi da startStr a endStr, estremi inclusi, saltando anche i
 // giorni non lavorativi del team (inverso di addWorkingDays): il Sizing (gg)
 // che corrisponde a una barra del Gantt allungata o accorciata col mouse.

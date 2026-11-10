@@ -760,6 +760,13 @@ class BacklogItem(Base):
     milestone_phase_id: Mapped[int | None] = mapped_column(
         ForeignKey("phases.id", ondelete="SET NULL"), nullable=True
     )
+    # Baseline (date originali), come per le Fasi: fissata col pulsante
+    # "Fissa baseline" del Backlog (routers/backlog.py::set_baseline) dalle
+    # date pianificate di quel momento, poi ferma mentre Start/Fine pian.
+    # cambiano. Un item arrivato dopo la prende la prima volta che viene
+    # ripianificato (vedi _apply_update).
+    baseline_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    baseline_finish: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Presentazione degli scenari collegata a mano (Story gia' fatte prima
     # della cartella Scenarios, o file altrove): percorso di un file o URL
     # (es. SharePoint). Se manca vale il pptx trovato nella cartella

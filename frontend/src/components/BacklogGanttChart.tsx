@@ -5,7 +5,7 @@ import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDa
 import { isMilestone } from '../lib/milestone'
 import { ACTIVITY_PHASES, activityPhaseInfo } from '../lib/activityPhases'
 import { computeCriticalPath } from '../lib/criticalPath'
-import { daysOffSet, parsePredecessors, type BacklogPatch } from '../lib/scheduling'
+import { daysOffSet, parsePredecessors, workingDaysShift, type BacklogPatch } from '../lib/scheduling'
 
 // Barre effettive delle attivita' di servizio: arancio come l'Actual in
 // IncrementHistoryCard (il pianificato ha il colore della fase, vedi
@@ -54,6 +54,8 @@ const COLOR_MILESTONE = '#dc2626'
 const COLOR_MILESTONE_BORDER = '#991b1b'
 const COLOR_MILESTONE_DONE = '#16a34a'
 const COLOR_MILESTONE_DONE_BORDER = '#15803d'
+// Baseline (date originali), sotto la barra pianificata.
+const COLOR_BASELINE = '#6b7280'
 const MILESTONE_HALF = 8
 // Esporta PNG: giorni prima di oggi da cui parte il calendario dell'immagine.
 const EXPORT_DAYS_BEFORE_TODAY = 7
@@ -474,6 +476,18 @@ export function BacklogGanttChart({
   // Percorso critico (vedi lib/criticalPath): calcolato sulle date salvate,
   // non sull'anteprima del trascinamento.
   const [showCritical, setShowCritical] = useState(false)
+  // Baseline (date originali): barra grigia sottile sotto quella pianificata,
+  // nascosta di default.
+  const [showBaseline, setShowBaseline] = useState(false)
+  const daysOff = useMemo(() => daysOffSet(nonWorkingDays), [nonWorkingDays])
+  const baselineNote = (item: BacklogItem) => {
+    if (!item.baseline_start || !item.baseline_finish) return ''
+    const shift = workingDaysShift(item.baseline_finish, item.expected_finish, daysOff)
+    return (
+      `\nBaseline: ${formatIsoDate(item.baseline_start)} → ${formatIsoDate(item.baseline_finish)}` +
+      (shift ? ` (fine ${shift > 0 ? '+' : ''}${shift} gg lavorativi)` : ' (in linea)')
+    )
+  }
   const [criticalByAssignee, setCriticalByAssignee] = useState(true)
   const criticalPath = useMemo(
     () => (showCritical ? computeCriticalPath(items, criticalByAssignee, daysOffSet(nonWorkingDays)) : null),
@@ -1060,7 +1074,7 @@ export function BacklogGanttChart({
               display: 'inline-block',
             }}
           />
-          Pianificato
+          Aggiornato
         </span>
         <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 12, height: 12, borderRadius: 3, background: COLOR_OTHER_TYPE, display: 'inline-block' }} />
@@ -1117,6 +1131,12 @@ export function BacklogGanttChart({
             Attività (fuori code freeze): effettivo
           </span>
         )}
+        {showBaseline && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 14, height: 4, borderRadius: 2, background: COLOR_BASELINE, display: 'inline-block' }} />
+            Baseline (date originali)
+          </span>
+        )}
         {items.some(isMilestone) && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span
@@ -1169,15 +1189,25 @@ export function BacklogGanttChart({
               }}
             />
             {criticalPath.considered === 0 || !criticalPath.projectFinish
-              ? 'Percorso critico: nessun item da finire con date pianificate'
+              ? 'Percorso critico: nessun item da finire con date aggiornate'
               : `Percorso critico: ${criticalPath.critical.size} item su ${criticalPath.considered} senza margine, fine ${formatIsoDate(criticalPath.projectFinish)}`}
           </span>
         )}
         <span className="gantt-no-export" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {items.some((i) => i.baseline_start) && (
+            <button
+              className={showBaseline ? 'btn btn-primary' : 'btn'}
+              onClick={() => setShowBaseline((v) => !v)}
+              title="Mostra sotto ogni barra le date originali (baseline), fissate col pulsante Fissa baseline"
+              aria-pressed={showBaseline}
+            >
+              Mostra baseline
+            </button>
+          )}
           <button
             className={showCritical ? 'btn btn-primary' : 'btn'}
             onClick={() => setShowCritical((v) => !v)}
-            title="Evidenzia gli item che, se slittano, spostano la fine del progetto (item da finire, con Start e Fine pian.; attività per Release escluse)"
+            title="Evidenzia gli item che, se slittano, spostano la fine del progetto (item da finire, con Start e Fine agg.; attività per Release escluse)"
             aria-pressed={showCritical}
           >
             Percorso critico
@@ -1668,7 +1698,8 @@ export function BacklogGanttChart({
                       title={
                         barDrag
                           ? undefined
-                          : `Pian.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}` +
+                          : `Agg.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}` +
+                            baselineNote(item) +
                             (criticalPath?.float.has(item.id)
                               ? criticalPath.critical.has(item.id)
                                 ? '\nCritico: nessun margine, uno slittamento sposta la fine del progetto'
@@ -1708,6 +1739,31 @@ export function BacklogGanttChart({
                       }}
                     />
                   )}
+
+                  {/* Baseline: barra grigia sottile tra la pianificata e
+                      l'effettiva, con le date originali. */}
+                  {showBaseline &&
+                    !isMilestone(item) &&
+                    (() => {
+                      const bStart = dateStrToEpochDays(item.baseline_start)
+                      const bEnd = dateStrToEpochDays(item.baseline_finish)
+                      if (bStart === null || bEnd === null) return null
+                      return (
+                        <div
+                          title={baselineNote(item).trim()}
+                          style={{
+                            position: 'absolute',
+                            left: dayToX(bStart),
+                            width: Math.max(MIN_BAR_WIDTH, dayToX(bEnd) - dayToX(bStart) + dayWidth),
+                            top: PLANNED_BAR_TOP + BAR_HEIGHT + 0.5,
+                            height: 3,
+                            borderRadius: 2,
+                            background: COLOR_BASELINE,
+                            opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
+                          }}
+                        />
+                      )
+                    })()}
 
                   {/* Date nuove sopra la barra trascinata, e quanti altri
                       item si spostano con lei. */}

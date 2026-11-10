@@ -414,6 +414,8 @@ class BacklogItemBase(BaseModel):
     progetto_id: int | None = None
     predecessors: str | None = None
     milestone_phase_id: int | None = None
+    baseline_start: dt.date | None = None
+    baseline_finish: dt.date | None = None
 
 
 class BacklogItemCreate(BacklogItemBase):
@@ -444,6 +446,8 @@ class BacklogItemUpdate(BaseModel):
     progetto_id: int | None = None
     predecessors: str | None = None
     milestone_phase_id: int | None = None
+    baseline_start: dt.date | None = None
+    baseline_finish: dt.date | None = None
 
 
 class BacklogItemBulkUpdate(BacklogItemUpdate):
@@ -471,6 +475,13 @@ class BacklogItem(BacklogItemBase):
     implemented_by_json: str | None = None
     last_synced_at: dt.datetime | None = None
     status: str
+
+
+class BaselineResult(BaseModel):
+    # Item a cui e' stata fissata la baseline e item in scope, non Done, senza
+    # date pianificate (rimasti senza baseline).
+    baselined: int
+    without_dates: int
 
 
 class SyncResult(BaseModel):
