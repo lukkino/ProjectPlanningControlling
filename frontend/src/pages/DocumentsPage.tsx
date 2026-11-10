@@ -1648,6 +1648,164 @@ function parseImplementedBy(json: string | null): ImplementedByTask[] {
   }
 }
 
+const CO_STATUS_KEY = ['change-order-status']
+
+// Avanzamento dell'automazione del CO: lo script nella finestra di Chrome
+// scrive passo per passo cosa sta facendo (backend: GET
+// /api/change-order/status), qui si vede senza guardare il browser.
+// Interroga spesso mentre la finestra e' aperta, di rado altrimenti.
+function ChangeOrderProgress({ projectId }: { projectId: number }) {
+  const { data: status } = useQuery({
+    queryKey: CO_STATUS_KEY,
+    queryFn: api.projects.changeOrderStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 1500 : 10000),
+  })
+  if (!status || status.project_id !== projectId || !status.phase) return null
+
+  const title = status.action === 'fill-target' ? `Compilazione target ${status.pn}` : 'Apertura parte Software'
+  const failed = status.phase === 'Errore'
+  const finished = status.phase === 'Fatto'
+  const state = failed ? 'Interrotta' : finished ? 'Completata' : status.running ? 'In corso' : 'Finestra chiusa'
+  const stateColor = failed ? '#b91c1c' : finished ? '#15803d' : status.running ? '#1d4ed8' : '#6b7280'
+  const total = status.rows_total ?? 0
+  const done = status.rows_done ?? 0
+  const events = (status.events ?? []).slice(-8)
+
+  return (
+    <div className="card" style={{ background: 'var(--bg)', marginTop: 12, marginBottom: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <strong>Automazione CO — {title}</strong>
+        <span style={{ fontSize: 12, fontWeight: 600, color: stateColor }}>● {state}</span>
+        {status.phase && !failed && !finished && <span className="muted" style={{ fontSize: 12 }}>{status.phase}</span>}
+      </div>
+
+      {status.running && status.waiting_user && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: '8px 12px',
+            borderRadius: 6,
+            background: '#fef3c7',
+            color: '#78350f',
+            fontWeight: 600,
+            fontSize: 13,
+          }}
+        >
+          👉 Tocca a te nella finestra di Chrome: {status.message}
+        </div>
+      )}
+      {failed && status.error && <div className="error-banner" style={{ marginTop: 8 }}>{status.error}</div>}
+
+      {total > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, marginBottom: 4 }}>
+            Righe Data Collection: {done} / {total}
+          </div>
+          <div style={{ height: 8, borderRadius: 4, background: 'var(--border, #e5e7eb)', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${Math.round((done / total) * 100)}%`,
+                height: '100%',
+                background: finished ? '#15803d' : '#1d4ed8',
+                transition: 'width .3s',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <ol style={{ margin: '10px 0 0', paddingLeft: 0, listStyle: 'none', fontSize: 12 }}>
+          {events.map((event, index) => (
+            <li
+              key={`${event.at}-${index}`}
+              className={index === events.length - 1 ? undefined : 'muted'}
+              style={{ fontWeight: index === events.length - 1 ? 600 : 400 }}
+            >
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{event.at}</span> — {event.text}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+// Target Software del Change Order (uno per PN, dalla tab Components & PN)
+// con le righe Data Collection da inserire. "Compila nel CO" apre il CO nel
+// browser della macchina del backend, crea il target se manca e compila le
+// righe mancanti: ogni Save lo preme l'utente.
+function ChangeOrderTargets({ projectId }: { projectId: number }) {
+  const { data: targets, error } = useQuery({
+    queryKey: ['change-order-targets', projectId],
+    queryFn: () => api.projects.changeOrderTargets(projectId),
+  })
+  const queryClient = useQueryClient()
+  const fill = useMutation({
+    mutationFn: (pn: string) => api.projects.fillChangeOrderTarget(projectId, pn),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CO_STATUS_KEY }),
+  })
+
+  if (error) return <div className="error-banner">{(error as Error).message}</div>
+  if (!targets || targets.length === 0) return null
+  return (
+    <div style={{ marginTop: 14 }}>
+      <h4 style={{ margin: '0 0 4px' }}>Target Software</h4>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+        Un target per PN, dalla tab Components &amp; PN. "Compila nel CO" apre il CO in una finestra di Chrome, crea il
+        target se manca (Change Reason = PN) e compila le righe Data Collection mancanti: ogni Save lo premi tu, un banner
+        in cima alla pagina dice cosa controllare. Load Type, Disposition, Backwards Compatible e Specific Impact restano
+        ai valori di default.
+      </p>
+      {fill.isError && <div className="error-banner">{(fill.error as Error).message}</div>}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Target (Change Reason)</th>
+              <th>Bom Level</th>
+              <th>Old Code</th>
+              <th>New Code</th>
+              <th>Code Description</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {targets.map((target, index) =>
+              target.rows.map((row, rowIndex) => (
+                <tr key={`${target.pn}-${rowIndex}`}>
+                  {rowIndex === 0 && (
+                    <td rowSpan={target.rows.length} style={{ verticalAlign: 'top' }}>
+                      <strong>{target.change_reason}</strong>
+                      {index === 0 && <div className="muted" style={{ fontSize: 12 }}>primo target</div>}
+                      {target.warnings.map((warning) => (
+                        <div key={warning} style={{ fontSize: 11, color: '#b45309' }}>
+                          ⚠ {warning}
+                        </div>
+                      ))}
+                    </td>
+                  )}
+                  <td>{row.bom_level}</td>
+                  <td>{row.old_code ?? <span style={{ color: '#b45309' }}>—</span>}</td>
+                  <td>{row.new_code}</td>
+                  <td>{row.code_description ?? <span style={{ color: '#b45309' }}>—</span>}</td>
+                  {rowIndex === 0 && (
+                    <td rowSpan={target.rows.length} style={{ verticalAlign: 'top' }}>
+                      <button className="btn" disabled={fill.isPending} onClick={() => fill.mutate(target.pn)}>
+                        Compila nel CO
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export function DocumentsPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
@@ -1673,6 +1831,7 @@ export function DocumentsPage() {
 
   const openCoSoftware = useMutation({
     mutationFn: () => api.projects.openChangeOrderSoftware(project.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CO_STATUS_KEY }),
   })
 
   const toggleType = (type: string) => {
@@ -1762,12 +1921,8 @@ export function DocumentsPage() {
         )}
         {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
         {openCoSoftware.isError && <div className="error-banner">{(openCoSoftware.error as Error).message}</div>}
-        {openCoSoftware.isSuccess && (
-          <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-            Si sta aprendo una finestra di Chrome sul Change Order. Se chiede il login Microsoft, fallo lì: lo script
-            aspetta fino a 5 minuti e poi clicca da solo il pulsante delle attività Software.
-          </div>
-        )}
+        {!editingChangeOrder && project.change_order_url && <ChangeOrderTargets projectId={project.id} />}
+        {project.change_order_url && <ChangeOrderProgress projectId={project.id} />}
       </div>
 
       {/* Dove finiscono i documenti generati qui sotto (vedi useReviewDelivery). */}

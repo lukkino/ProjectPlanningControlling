@@ -63,6 +63,8 @@ import type {
   ReleaseComponent,
   ComponentCatalogItem,
   IncrementComponent,
+  ChangeOrderTarget,
+  ChangeOrderStatus,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -248,6 +250,12 @@ export const api = {
     // Apre sulla macchina del backend una finestra del browser sul Change
     // Order, gia' sul popup delle attivita' Software.
     openChangeOrderSoftware: (id: number) => post<void>(`/projects/${id}/change-order/open-software`),
+    // Target Software del CO ricavati da Components & PN, e compilazione di
+    // uno di essi nel browser (i Save li preme l'utente).
+    changeOrderTargets: (id: number) => request<ChangeOrderTarget[]>(`/projects/${id}/change-order/targets`),
+    changeOrderStatus: () => request<ChangeOrderStatus>(`/change-order/status`),
+    fillChangeOrderTarget: (id: number, pn: string) =>
+      post<void>(`/projects/${id}/change-order/fill-target?${new URLSearchParams({ pn })}`),
     setGanttOrder: (projectIds: number[]) => put<void>('/projects/gantt-order', { project_ids: projectIds }),
     setPinned: (id: number, pinned: boolean) => put<void>(`/projects/${id}/pinned`, { pinned }),
   },

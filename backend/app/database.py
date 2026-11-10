@@ -362,6 +362,9 @@ def run_lightweight_migrations() -> None:
                         text("UPDATE release_components SET abbreviation = :a WHERE lower(component) = lower(:n)"),
                         {"a": abbreviation, "n": name},
                     )
+        if "artifactory_url" not in component_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE release_components ADD COLUMN artifactory_url TEXT"))
 
     if "app_settings" in table_names:
         app_settings_columns = {col["name"] for col in inspector.get_columns("app_settings")}

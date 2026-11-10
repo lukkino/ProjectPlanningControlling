@@ -1005,6 +1005,9 @@ class ReleaseComponent(Base):
     # Sigla del componente (es. PSDA, PTBS): nella Release Notice il
     # componente diventa "<nome> <SIGLA>_<fix version>".
     abbreviation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Link all'artefatto del componente su Artifactory (servira' anche per il
+    # rilascio).
+    artifactory_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

@@ -105,6 +105,7 @@ def _read(component: models.ReleaseComponent, usages: dict[str, set[str]]) -> sc
         pn=component.pn,
         fix_version=component.fix_version,
         abbreviation=component.abbreviation,
+        artifactory_url=component.artifactory_url,
         detail=component.detail,
         note=component.note,
         pn_used_by=sorted(usages.get((component.pn or "").strip(), set())),

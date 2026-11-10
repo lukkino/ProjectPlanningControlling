@@ -17,3 +17,6 @@ frontend/dist/
 backend/data/templates/
 backend/data/browser-profile/
 backend/data/change_order_browser.log
+backend/data/co_debug/
+backend/data/change_order_status.json
+backend/data/change_order_status.tmp

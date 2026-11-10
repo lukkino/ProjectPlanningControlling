@@ -238,6 +238,7 @@ export function IncrementComponentsPage() {
                 <th>PN</th>
                 <th title="Sigla del componente nella Release Notice (es. PSDA → PSDA_6.0.0)">Sigla</th>
                 <th>Fix version</th>
+                <th title="Link all'artefatto del componente su Artifactory">Artifactory</th>
                 <th>Dettaglio</th>
                 <th>Note</th>
                 <th />
@@ -245,7 +246,7 @@ export function IncrementComponentsPage() {
             </thead>
             <tbody>
               {components.map((component) => {
-                const save = (field: 'pn' | 'abbreviation' | 'fix_version' | 'detail' | 'note') => (value: string | null) =>
+                const save = (field: 'pn' | 'abbreviation' | 'fix_version' | 'artifactory_url' | 'detail' | 'note') => (value: string | null) =>
                   updateComponent.mutate({ id: component.id, data: { [field]: value } })
                 return (
                   <tr key={component.id}>
@@ -263,6 +264,22 @@ export function IncrementComponentsPage() {
                     </td>
                     <td className="editable-cell" style={{ minWidth: 100 }}>
                       <CellInput value={component.fix_version} label="Fix version" onSave={save('fix_version')} />
+                    </td>
+                    <td className="editable-cell" style={{ minWidth: 220 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <CellInput value={component.artifactory_url} label="Link Artifactory" onSave={save('artifactory_url')} />
+                        {component.artifactory_url && (
+                          <a
+                            href={component.artifactory_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Apri l'artefatto su Artifactory"
+                            aria-label={`Apri ${component.name} su Artifactory`}
+                          >
+                            ↗
+                          </a>
+                        )}
+                      </div>
                     </td>
                     <td className="editable-cell" style={{ minWidth: 240, width: '50%', whiteSpace: 'normal' }}>
                       <CellInput value={component.detail} label="Dettaglio" multiline onSave={save('detail')} />

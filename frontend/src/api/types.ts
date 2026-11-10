@@ -414,6 +414,7 @@ export type ReleaseComponent = {
   component: string | null
   fix_version: string | null
   abbreviation: string | null
+  artifactory_url: string | null
   detail: string | null
   note: string | null
 }
@@ -424,12 +425,38 @@ export type ComponentCatalogItem = {
   next_pn: string | null
 }
 
+// Target Software del Change Order (un PN) con le righe Data Collection.
+export type ChangeOrderTarget = {
+  pn: string
+  family: string | null
+  change_reason: string
+  rows: { bom_level: number; old_code: string | null; new_code: string; code_description: string | null }[]
+  warnings: string[]
+}
+
+// Avanzamento dell'automazione del CO nella finestra di Chrome.
+export type ChangeOrderStatus = {
+  running: boolean
+  project_id?: number
+  action?: 'open-software' | 'fill-target'
+  pn?: string | null
+  phase?: string
+  message?: string
+  waiting_user?: boolean
+  rows_total?: number
+  rows_done?: number
+  error?: string
+  events?: { at: string; text: string }[]
+  updated_at?: string
+}
+
 export type IncrementComponent = {
   id: number
   name: string
   pn: string | null
   fix_version: string | null
   abbreviation: string | null
+  artifactory_url: string | null
   detail: string | null
   note: string | null
   pn_used_by: string[]

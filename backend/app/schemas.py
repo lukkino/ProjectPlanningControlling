@@ -776,6 +776,7 @@ class ReleaseComponentWrite(BaseModel):
     component: str | None = None
     fix_version: str | None = None
     abbreviation: str | None = None
+    artifactory_url: str | None = None
     detail: str | None = None
     note: str | None = None
 
@@ -1180,6 +1181,7 @@ class IncrementComponentUpdate(BaseModel):
     pn: str | None = None
     fix_version: str | None = None
     abbreviation: str | None = None
+    artifactory_url: str | None = None
     detail: str | None = None
     note: str | None = None
 
@@ -1190,6 +1192,7 @@ class IncrementComponentRead(BaseModel):
     pn: str | None
     fix_version: str | None
     abbreviation: str | None
+    artifactory_url: str | None
     detail: str | None
     note: str | None
     # Altri increment (Releases o tab di altri increment) con lo stesso PN.
