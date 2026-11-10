@@ -42,6 +42,11 @@ const BAR_HEIGHT = 14
 const PLANNED_BAR_TOP = 22
 // Frecce predecessore -> successore.
 const COLOR_LINK = '#5b6472'
+// Freccia sotto il mouse e collegamento in creazione.
+const COLOR_LINK_HOVER = '#2563eb'
+// Collegamento in creazione agganciato a un PBI: si puo' fare / non si puo'.
+const COLOR_LINK_VALID = '#16a34a'
+const COLOR_LINK_INVALID = '#dc2626'
 // Percorso critico: barre e legami evidenziati, il resto attenuato.
 const COLOR_CRITICAL = '#d3402f'
 const DIMMED_OPACITY = 0.3
@@ -293,6 +298,12 @@ type Props = {
   planBarChange?: (item: BacklogItem, change: GanttBarChange) => BacklogPatch[]
   onBarChange?: (updates: BacklogPatch[]) => void
   minStart?: (item: BacklogItem) => string | null
+  // Collegamenti creati trascinando dal pallino a fine barra su un altro PBI
+  // (assente = non si creano dal Gantt) e tolti col clic sulla freccia.
+  // linkError dice perche' un collegamento non si puo' fare (null = si').
+  onAddPredecessor?: (predecessor: BacklogItem, successor: BacklogItem) => void
+  onRemovePredecessor?: (predecessor: BacklogItem, successor: BacklogItem) => void
+  linkError?: (predecessor: BacklogItem, successor: BacklogItem) => string | null
   // Riga trascinata sulla colonna delle chiavi: l'item prende il posto di
   // quello di destinazione, come nella tabella (assente = ordine fisso).
   onRowMove?: (itemId: number, targetId: number) => void
@@ -313,6 +324,9 @@ export function BacklogGanttChart({
   planBarChange,
   onBarChange,
   minStart,
+  onAddPredecessor,
+  onRemovePredecessor,
+  linkError,
   onRowMove,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
@@ -389,6 +403,43 @@ export function BacklogGanttChart({
     barDragRef.current = next
     setBarDrag(next)
   }
+
+  // Collegamento in creazione: dal pallino a fine barra di "from" fino al
+  // puntatore (coordinate del contenuto del Gantt); target = riga sotto il
+  // puntatore, reason = perche' non si puo' collegare (null = si').
+  type LinkDrag = {
+    from: BacklogItem
+    x1: number
+    y1: number
+    x: number
+    y: number
+    target: BacklogItem | null
+    reason: string | null
+  }
+  const [linkDrag, setLinkDrag] = useState<LinkDrag | null>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  // Freccia sotto il mouse e menu aperto col clic su una freccia.
+  const [hoveredLinkId, setHoveredLinkId] = useState<string | null>(null)
+  const [linkMenu, setLinkMenu] = useState<{
+    from: BacklogItem
+    to: BacklogItem
+    x: number
+    y: number
+  } | null>(null)
+  useEffect(() => {
+    if (!linkMenu) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest?.('.gantt-link-menu')) {
+        setLinkMenu(null)
+      }
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [linkMenu])
 
   // Trascinamento di una riga (vedi rowDragHandlers sotto).
   const [rowDragId, setRowDragId] = useState<number | null>(null)
@@ -805,7 +856,17 @@ export function BacklogGanttChart({
       if (path === null) return []
       const predecessor = shownItems[predecessorRow]
       const id = `${predecessor.id}-${successor.id}`
-      return [{ id, path, title: `${predecessor.jira_key} → ${successor.jira_key}`, critical: criticalLinkIds.has(id), implicit: false }]
+      return [
+        {
+          id,
+          path,
+          title: `${predecessor.jira_key} → ${successor.jira_key}`,
+          critical: criticalLinkIds.has(id),
+          implicit: false,
+          from: predecessor as BacklogItem | undefined,
+          to: successor as BacklogItem | undefined,
+        },
+      ]
     }),
   )
   // Legami impliciti del percorso critico (stesso assegnatario, uno dopo
@@ -819,9 +880,77 @@ export function BacklogGanttChart({
     const path = linkPath(from, to)
     if (path === null) return []
     const title = `${shownItems[from].jira_key} → ${shownItems[to].jira_key} (stesso assegnatario: ${shownItems[to].assignee})`
-    return [{ id: `i${l.from}-${l.to}`, path, title, critical: true, implicit: true }]
+    return [
+      {
+        id: `i${l.from}-${l.to}`,
+        path,
+        title,
+        critical: true,
+        implicit: true,
+        from: undefined as BacklogItem | undefined,
+        to: undefined as BacklogItem | undefined,
+      },
+    ]
   })
   const allLinks = [...links, ...implicitLinks]
+
+  // Creazione di un collegamento trascinando dal pallino a fine barra.
+  const linkable = !!onAddPredecessor && !exporting
+  const contentPoint = (e: PointerEvent<HTMLElement>) => {
+    const rect = contentRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+  const startLinkDrag = (e: PointerEvent<HTMLDivElement>, item: BacklogItem, row: number, plannedEnd: number) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setLinkMenu(null)
+    const x1 = dayToX(plannedEnd) + dayWidth
+    const y1 = barCenterY(row)
+    setLinkDrag({ from: item, x1, y1, ...contentPoint(e), target: null, reason: null })
+  }
+  const moveLinkDrag = (e: PointerEvent<HTMLDivElement>) => {
+    if (!linkDrag) return
+    // Vicino ai bordi il Gantt scorre da solo, per arrivare a barre fuori vista.
+    const wrap = wrapRef.current
+    if (wrap) {
+      const rect = wrap.getBoundingClientRect()
+      if (e.clientX > rect.right - 40) wrap.scrollLeft += 15
+      else if (e.clientX < rect.left + 40) wrap.scrollLeft -= 15
+    }
+    const rowEl = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-gantt-item]')
+    const targetId = rowEl ? Number(rowEl.dataset.ganttItem) : null
+    const target = targetId === null || targetId === linkDrag.from.id ? null : (items.find((i) => i.id === targetId) ?? null)
+    setLinkDrag({
+      ...linkDrag,
+      ...contentPoint(e),
+      target,
+      reason: target ? (linkError?.(linkDrag.from, target) ?? null) : null,
+    })
+  }
+  const endLinkDrag = () => {
+    if (linkDrag?.target && !linkDrag.reason) onAddPredecessor!(linkDrag.from, linkDrag.target)
+    setLinkDrag(null)
+  }
+  const linkTargetColor = linkDrag?.reason ? COLOR_LINK_INVALID : COLOR_LINK_VALID
+  const isLinkTarget = (item: BacklogItem) => linkDrag?.target?.id === item.id
+  // Riga del PBI di arrivo appena colorata; la barra ha il contorno pieno.
+  const linkTargetStyle = (item: BacklogItem): CSSProperties | undefined =>
+    isLinkTarget(item) ? { background: linkDrag?.reason ? '#fef2f2' : '#f0fdf4' } : undefined
+  // Anteprima del collegamento: sul PBI di arrivo (con la barra pianificata)
+  // la freccia si aggancia all'inizio della barra col percorso definitivo;
+  // altrimenti segue il puntatore.
+  const linkPreview = (() => {
+    if (!linkDrag) return null
+    const fromRow = shownItems.findIndex((i) => i.id === linkDrag.from.id)
+    const targetRow = linkDrag.target ? shownItems.findIndex((i) => i.id === linkDrag.target!.id) : -1
+    const snapped = fromRow >= 0 && targetRow >= 0 ? linkPath(fromRow, targetRow) : null
+    if (snapped) {
+      const start = dateStrToEpochDays(shownItems[targetRow].planned_start)!
+      return { path: snapped, anchor: { x: dayToX(start), y: barCenterY(targetRow) } }
+    }
+    return { path: `M${linkDrag.x1},${linkDrag.y1} L${linkDrag.x},${linkDrag.y}`, anchor: null }
+  })()
   // Assegnatario di un item da cui parte una freccia: spostato oltre il
   // tratto d'uscita, cosi' la freccia scende prima del testo.
   const linkSourceIds = new Set(allLinks.map((link) => Number(link.id.split('-')[0])))
@@ -1258,7 +1387,7 @@ export function BacklogGanttChart({
             mirrorHeaderScroll(wrapRef)
           }}
         >
-          <div className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
+          <div ref={contentRef} className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
             {/* Griglia (una linea per cella del calendario, weekend in grigio
                 con lo zoom sui giorni): un solo strato sotto tutte le righe,
                 invece di ripeterla in ognuna (con i giorni sarebbero migliaia
@@ -1311,7 +1440,8 @@ export function BacklogGanttChart({
                 <Fragment key={item.id}>
                 <div
                   className="gantt-timeline-row"
-                  style={{ height: ROW_HEIGHT, ...rowDragStyle(item) }}
+                  data-gantt-item={item.id}
+                  style={{ height: ROW_HEIGHT, ...rowDragStyle(item), ...linkTargetStyle(item) }}
                   {...rowDropHandlers(item)}
                 >
                   {marks.map((mark) => (
@@ -1391,12 +1521,15 @@ export function BacklogGanttChart({
                         // Sopra la linea di oggi, per poterla afferrare anche li'.
                         zIndex: editable ? 2 : undefined,
                         // Item spostati dal trascinamento: contorno tratteggiato.
-                        outline: previewById.has(item.id)
+                        outline: isLinkTarget(item)
+                          ? `2px solid ${linkTargetColor}`
+                          : previewById.has(item.id)
                           ? `2px dashed ${color}`
                           : criticalPath?.critical.has(item.id)
                             ? `2px solid ${COLOR_CRITICAL}`
                             : undefined,
                         outlineOffset: 1,
+                        boxShadow: isLinkTarget(item) ? `0 0 0 5px ${linkTargetColor}33` : undefined,
                         opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
                     />
@@ -1441,6 +1574,20 @@ export function BacklogGanttChart({
                         borderRadius: 3,
                         opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
+                    />
+                  )}
+
+                  {/* Pallino per collegare: trascinato su un altro PBI ne fa il
+                      successore di questo (compare passando sulla riga). */}
+                  {linkable && pStart !== null && pEnd !== null && !barDrag && (
+                    <div
+                      className={linkDrag?.from.id === item.id ? 'gantt-link-handle gantt-link-handle--active' : 'gantt-link-handle'}
+                      title="Trascina su un altro PBI per farne il successore"
+                      style={{ left: dayToX(pEnd) + dayWidth + 3, top: PLANNED_BAR_TOP + BAR_HEIGHT / 2 - 6 }}
+                      onPointerDown={(e) => startLinkDrag(e, item, row, pEnd)}
+                      onPointerMove={moveLinkDrag}
+                      onPointerUp={endLinkDrag}
+                      onPointerCancel={() => setLinkDrag(null)}
                     />
                   )}
 
@@ -1511,7 +1658,7 @@ export function BacklogGanttChart({
             />
             {/* Sopra le righe ma trasparente al mouse: tooltip delle barre e
                 trascinamento continuano a funzionare. */}
-            {allLinks.length > 0 && (
+            {(allLinks.length > 0 || linkDrag) && (
               <svg
                 width={chartWidth}
                 height={rowTop(items.length)}
@@ -1541,34 +1688,149 @@ export function BacklogGanttChart({
                   >
                     <path d="M0,0.5 L8,5 L0,9.5 Z" fill={COLOR_CRITICAL} stroke="white" strokeWidth="0.75" />
                   </marker>
+                  <marker
+                    id="gantt-link-arrow-hover"
+                    markerUnits="userSpaceOnUse"
+                    markerWidth="9"
+                    markerHeight="10"
+                    refX="8"
+                    refY="5"
+                    orient="auto"
+                  >
+                    <path d="M0,0.5 L8,5 L0,9.5 Z" fill={COLOR_LINK_HOVER} stroke="white" strokeWidth="0.75" />
+                  </marker>
+                  <marker
+                    id="gantt-link-arrow-valid"
+                    markerUnits="userSpaceOnUse"
+                    markerWidth="9"
+                    markerHeight="10"
+                    refX="8"
+                    refY="5"
+                    orient="auto"
+                  >
+                    <path d="M0,0.5 L8,5 L0,9.5 Z" fill={COLOR_LINK_VALID} stroke="white" strokeWidth="0.75" />
+                  </marker>
                 </defs>
-                {allLinks.map((link) => (
-                  <g key={link.id} opacity={criticalPath && !link.critical ? DIMMED_OPACITY : undefined}>
-                    {/* Alone bianco: la linea resta leggibile sopra griglia, testi e barre. */}
+                {allLinks.map((link) => {
+                  const hovered = hoveredLinkId === link.id
+                  const removable = !!onRemovePredecessor && !exporting && link.from && link.to
+                  return (
+                    <g key={link.id} opacity={criticalPath && !link.critical && !hovered ? DIMMED_OPACITY : undefined}>
+                      {/* Alone bianco: la linea resta leggibile sopra griglia, testi e barre. */}
+                      <path
+                        d={link.path}
+                        fill="none"
+                        stroke="white"
+                        strokeWidth={(link.critical ? 2.5 : 2) + 3}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        opacity={0.85}
+                      />
+                      <path
+                        d={link.path}
+                        fill="none"
+                        stroke={hovered ? COLOR_LINK_HOVER : link.critical ? COLOR_CRITICAL : COLOR_LINK}
+                        strokeWidth={(link.critical ? 2.5 : 2) + (hovered ? 1 : 0)}
+                        strokeDasharray={link.implicit ? '5 3' : undefined}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        markerEnd={
+                          hovered
+                            ? 'url(#gantt-link-arrow-hover)'
+                            : link.critical
+                              ? 'url(#gantt-link-arrow-critical)'
+                              : 'url(#gantt-link-arrow)'
+                        }
+                      />
+                      {/* Fascia invisibile piu' larga della linea: si prende col
+                          mouse; clic = menu per togliere il collegamento. */}
+                      <path
+                        d={link.path}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={12}
+                        style={{ pointerEvents: removable ? 'stroke' : 'none', cursor: removable ? 'pointer' : undefined }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseEnter={() => setHoveredLinkId(link.id)}
+                        onMouseLeave={() => setHoveredLinkId((id) => (id === link.id ? null : id))}
+                        onClick={(e) => {
+                          const rect = contentRef.current!.getBoundingClientRect()
+                          setLinkMenu({ from: link.from!, to: link.to!, x: e.clientX - rect.left, y: e.clientY - rect.top })
+                        }}
+                      >
+                        <title>{removable ? `${link.title}\nClic per rimuovere il collegamento` : link.title}</title>
+                      </path>
+                    </g>
+                  )
+                })}
+                {linkPreview && (
+                  <>
                     <path
-                      d={link.path}
+                      d={linkPreview.path}
                       fill="none"
                       stroke="white"
-                      strokeWidth={(link.critical ? 2.5 : 2) + 3}
+                      strokeWidth={5}
                       strokeLinejoin="round"
-                      strokeLinecap="round"
                       opacity={0.85}
                     />
                     <path
-                      d={link.path}
+                      d={linkPreview.path}
                       fill="none"
-                      stroke={link.critical ? COLOR_CRITICAL : COLOR_LINK}
-                      strokeWidth={link.critical ? 2.5 : 2}
-                      strokeDasharray={link.implicit ? '5 3' : undefined}
+                      stroke={linkPreview.anchor ? linkTargetColor : COLOR_LINK_HOVER}
+                      strokeWidth={2}
                       strokeLinejoin="round"
-                      strokeLinecap="round"
-                      markerEnd={link.critical ? 'url(#gantt-link-arrow-critical)' : 'url(#gantt-link-arrow)'}
-                    >
-                      <title>{link.title}</title>
-                    </path>
-                  </g>
-                ))}
+                      // Tratteggiata finche' non e' agganciata (o se non si puo').
+                      strokeDasharray={linkPreview.anchor && !linkDrag?.reason ? undefined : '6 4'}
+                      markerEnd={
+                        linkDrag?.reason
+                          ? undefined
+                          : linkPreview.anchor
+                            ? 'url(#gantt-link-arrow-valid)'
+                            : 'url(#gantt-link-arrow-hover)'
+                      }
+                    />
+                    {linkPreview.anchor && (
+                      <circle
+                        cx={linkPreview.anchor.x}
+                        cy={linkPreview.anchor.y}
+                        r={5}
+                        fill={linkTargetColor}
+                        stroke="white"
+                        strokeWidth={2}
+                      />
+                    )}
+                  </>
+                )}
               </svg>
+            )}
+            {linkDrag?.target && (
+              <div
+                className={linkDrag.reason ? 'gantt-link-hint gantt-link-hint--error' : 'gantt-link-hint'}
+                style={{ left: linkDrag.x + 14, top: linkDrag.y + 14 }}
+              >
+                {linkDrag.reason ?? `${linkDrag.from.jira_key} → ${linkDrag.target.jira_key}`}
+              </div>
+            )}
+            {linkMenu && (
+              <div
+                className="gantt-link-menu"
+                style={{ left: linkMenu.x, top: linkMenu.y + 8 }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <div className="gantt-link-menu-title">
+                  {linkMenu.from.jira_key} → {linkMenu.to.jira_key}
+                </div>
+                <button
+                  type="button"
+                  className="gantt-link-menu-item"
+                  onClick={() => {
+                    onRemovePredecessor!(linkMenu.from, linkMenu.to)
+                    setLinkMenu(null)
+                  }}
+                >
+                  Rimuovi collegamento
+                </button>
+              </div>
             )}
           </div>
         </div>

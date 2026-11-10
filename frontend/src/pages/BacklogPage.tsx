@@ -517,6 +517,27 @@ export function BacklogPage() {
     return true
   }
 
+  // Collegamenti creati o tolti dal Gantt: stessa strada della colonna
+  // Predecessori (controlli e ripianificazione dei successori).
+  const addPredecessor = (predecessor: BacklogItem, successor: BacklogItem) =>
+    savePredecessors(successor, [...parsePredecessors(successor.predecessors), predecessor.jira_key].join(', '))
+  const removePredecessor = (predecessor: BacklogItem, successor: BacklogItem) =>
+    savePredecessors(
+      successor,
+      parsePredecessors(successor.predecessors)
+        .filter((key) => key !== predecessor.jira_key.toUpperCase())
+        .join(', '),
+    )
+  const linkError = (predecessor: BacklogItem, successor: BacklogItem): string | null => {
+    if (parsePredecessors(successor.predecessors).includes(predecessor.jira_key.toUpperCase())) {
+      return `${predecessor.jira_key} è già predecessore di ${successor.jira_key}`
+    }
+    if (wouldCreateCycle(items ?? [], successor.jira_key, [predecessor.jira_key])) {
+      return `Dipendenza circolare: ${successor.jira_key} viene già prima di ${predecessor.jira_key}`
+    }
+    return null
+  }
+
   const num = (v: string) => (v === '' ? null : Number(v))
 
   // Progetti a cui si possono attribuire le ore di un item: quelli collegati
@@ -1709,6 +1730,9 @@ export function BacklogPage() {
           planBarChange={planGanttChange}
           onBarChange={(updates) => applyGanttChange.mutate(updates)}
           minStart={minStartOf}
+          onAddPredecessor={addPredecessor}
+          onRemovePredecessor={removePredecessor}
+          linkError={linkError}
           onRowMove={moveItem}
         />
       )}
