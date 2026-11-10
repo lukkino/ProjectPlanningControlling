@@ -97,6 +97,12 @@ def _activity_phase(item: models.BacklogItem) -> tuple[str, str, str, RGBColor] 
 def _normalize_phase_name(name: str) -> str:
     return name.strip().lower().replace("-", " ")
 COLOR_GANTT_PHASE = RGBColor(0x7C, 0x4D, 0xBD)
+# Milestone (label Milestone su Jira): come nel Gantt del Backlog, rossa
+# finche' non e' Done, poi verde.
+COLOR_MILESTONE = RGBColor(0xDC, 0x26, 0x26)
+COLOR_MILESTONE_BORDER = RGBColor(0x99, 0x1B, 0x1B)
+COLOR_MILESTONE_DONE = RGBColor(0x16, 0xA3, 0x4A)
+COLOR_MILESTONE_DONE_BORDER = RGBColor(0x15, 0x80, 0x3D)
 MONTH_NAMES = ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
 # Evidenziatore (giallo chiaro) delle voci dello Scope in lavorazione.
 COLOR_HIGHLIGHT = "FFE98A"
@@ -1006,6 +1012,11 @@ def _timeline_slide(deck: _Deck, project: models.Project) -> None:
         cell(x, legend_top, Inches(2.5), Inches(0.3), "In grassetto la fase corrente", size=10, color=COLOR_MUTED)
 
 
+# Gantt del Backlog nella presentazione: giorni prima di oggi da cui parte
+# l'asse (come EXPORT_DAYS_BEFORE_TODAY in BacklogGanttChart.tsx).
+GANTT_DAYS_BEFORE_TODAY = 7
+
+
 def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
     """Gantt del Backlog, come la vista Gantt della pagina Backlog coi filtri
     di default: item del piano (code freeze e attivita' di servizio) non
@@ -1017,11 +1028,32 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
     stringono, mentre le date dell'asse restano grandi."""
     title = "Gantt Backlog"
     today = dt.date.today()
+    first = today - dt.timedelta(days=GANTT_DAYS_BEFORE_TODAY)
+
+    def milestone_day(item) -> dt.date | None:
+        """Data della milestone come nel Gantt del Backlog: quella
+        pianificata (per le collegate a una fase, gia' allineata dal backend);
+        chiusa e non collegata, la chiusura su Jira."""
+        if item.status == "Done" and item.milestone_phase_id is None and item.actual_finish:
+            return item.actual_finish
+        return item.planned_start or item.expected_finish
+
+    # Milestone (rombi): anche quelle chiuse, se cadono dentro l'asse, per
+    # vederle diventare verdi.
+    def shown_milestone(item) -> bool:
+        day = milestone_day(item)
+        return item.in_scope and day is not None and (item.status != "Done" or day >= first)
+
     items = sorted(
         (
             i
             for i in project.backlog_items
-            if i.is_in_plan and i.status != "Done" and not models.is_cve_bug(i.issue_type, i.summary)
+            if i.archived_at is None
+            and (
+                shown_milestone(i)
+                if models.is_milestone(i.labels)
+                else i.is_in_plan and i.status != "Done" and not models.is_cve_bug(i.issue_type, i.summary)
+            )
         ),
         key=lambda i: i.priority_order,
     )
@@ -1035,6 +1067,9 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         return max(item.actual_start, today) if item.status == "In Progress" else None
 
     def bars(item) -> list[tuple[dt.date, dt.date]]:
+        if models.is_milestone(item.labels):
+            day = milestone_day(item)
+            return [(day, day)] if day else []
         result = []
         if item.planned_start and item.expected_finish and item.expected_finish >= item.planned_start:
             result.append((item.planned_start, item.expected_finish))
@@ -1065,14 +1100,12 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         marks.append((project.code_freeze_date, "Code Freeze", COLOR_SUCCESS))
     marks = [m for m in marks if m[0] is not None]
 
+    # Come l'export PNG del Gantt del Backlog: l'asse parte da una settimana
+    # prima di oggi (il lavoro gia' fatto non interessa) e arriva all'ultima
+    # data degli item o all'ultima fase, se viene dopo. Le barre che iniziano
+    # prima partono dal bordo sinistro, con scritto da quando (vedi sotto).
     item_days = [d for i in items for bar in bars(i) for d in bar]
-    first, last = min(item_days + [today]), max(item_days + [today])
-    # Item ancora "In Progress" su Jira da anni allargherebbero l'asse fino a
-    # schiacciare tutto il resto: l'asse parte al massimo 3 mesi prima del
-    # primo inizio pianificato (o di oggi), e le barre che iniziano prima
-    # partono dal bordo sinistro, con scritto da quando (vedi sotto).
-    planned_starts = [i.planned_start for i in items if i.planned_start]
-    first = max(first, min(planned_starts + [today]) - dt.timedelta(days=90))
+    last = max(item_days + [today] + [m[0] for m in marks if m[0] >= first])
     # Asse a settimane (dal lunedi') se il periodo e' breve, altrimenti a mesi.
     weekly = (last - first).days <= 120
     if weekly:
@@ -1169,6 +1202,22 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
 
         color = GANTT_TYPE_COLORS.get(item.issue_type or "", COLOR_GANTT_OTHER)
 
+        if models.is_milestone(item.labels):
+            # Rombo sulla data (sulla linea della fase, se collegata): rosso
+            # finche' non e' Done, poi verde.
+            day = milestone_day(item)
+            size = min(int(row_height * 0.55), Inches(0.18))
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.DIAMOND, x_of(day) - size // 2, top + (row_height - size) // 2, size, size
+            )
+            done = item.status == "Done"
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = COLOR_MILESTONE_DONE if done else COLOR_MILESTONE
+            shape.line.color.rgb = COLOR_MILESTONE_DONE_BORDER if done else COLOR_MILESTONE_BORDER
+            shape.line.width = Pt(0.75)
+            shape.shadow.inherit = False
+            continue
+
         def bar(start: dt.date, end: dt.date, y: int):
             start = max(start, axis_start)
             left = x_of(start)
@@ -1203,18 +1252,26 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
             shape.shadow.inherit = False
             if item.actual_start < axis_start:
                 # Iniziata prima dell'inizio dell'asse: la data vera, sopra
-                # la barra (sulla barra, sottile, non si leggerebbe).
+                # la barra (sulla barra, sottile, non si leggerebbe), su fondo
+                # bianco per restare leggibile anche sulle barre a righe.
+                text = f"◀ dal {_date(item.actual_start)}"
+                note_size = max(5.5, row_font - 1)
                 note = cell(
                     x_of(axis_start) + Inches(0.04),
-                    top,
-                    Inches(1.4),
-                    int(row_height * 0.55),
-                    f"◀ dal {_date(item.actual_start)}",
-                    size=max(5.5, row_font - 1),
+                    top + int(row_height * 0.1),
+                    int(Pt(note_size) * 0.62 * len(text)) + Inches(0.12),
+                    int(row_height * 0.4),
+                    text,
+                    size=note_size,
                     bold=True,
                     color=COLOR_MUTED,
                 )
                 note.word_wrap = False
+                for margin in ("margin_left", "margin_right", "margin_top", "margin_bottom"):
+                    setattr(note, margin, Inches(0.02))
+                background = slide.shapes[-1]
+                background.fill.solid()
+                background.fill.fore_color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
     for day, _, color in marks:
         line(x_of(day), rows_top, x_of(day), rows_bottom, color, width=1.25, dashed=True)
@@ -1249,7 +1306,7 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
         shape.line.width = Pt(0.75)
 
     for type_name, color in GANTT_TYPE_COLORS.items():
-        legend_entry(type_name, solid(color), Inches(0.7))
+        legend_entry(type_name, solid(color), Inches(0.55) + Inches(0.02) * len(type_name))
     legend_entry("Pianificato", outlined, Inches(0.85))
     legend_entry("Effettivo", solid(COLOR_GANTT_OTHER), Inches(0.75))
     legend_entry("In corso (fino a oggi)", lambda s: (_fading(s, COLOR_GANTT_OTHER), s.line.fill.background()), Inches(1.5))
@@ -1261,6 +1318,18 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
                 lambda s, c=phase_color: (_striped(s, c), s.line.fill.background()),
                 Inches(0.75) + Inches(0.075) * len(label),
             )
+    if any(models.is_milestone(i.labels) for i in items):
+        for fill, border in ((COLOR_MILESTONE, COLOR_MILESTONE_BORDER), (COLOR_MILESTONE_DONE, COLOR_MILESTONE_DONE_BORDER)):
+            shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, x, legend_top + Inches(0.06), swatch + Inches(0.02), swatch + Inches(0.02))
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = fill
+            shape.line.color.rgb = border
+            shape.line.width = Pt(0.75)
+            shape.shadow.inherit = False
+            x += swatch + Inches(0.06)
+        # Rosso da fare, verde Done: i due rombi bastano a spiegarlo.
+        cell(x, legend_top, Inches(0.8), Inches(0.3), "Milestone", size=9, color=COLOR_MUTED).word_wrap = False
+        x += Inches(0.85)
     line(x, legend_top + Inches(0.15), x + Inches(0.25), legend_top + Inches(0.15), COLOR_DANGER, width=1.5)
     cell(x + Inches(0.3), legend_top, Inches(1.3), Inches(0.3), f"Oggi {_date(today)}", size=9, color=COLOR_MUTED)
 

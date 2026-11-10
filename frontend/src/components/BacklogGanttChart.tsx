@@ -55,6 +55,8 @@ const COLOR_MILESTONE_BORDER = '#991b1b'
 const COLOR_MILESTONE_DONE = '#16a34a'
 const COLOR_MILESTONE_DONE_BORDER = '#15803d'
 const MILESTONE_HALF = 8
+// Esporta PNG: giorni prima di oggi da cui parte il calendario dell'immagine.
+const EXPORT_DAYS_BEFORE_TODAY = 7
 const COLOR_LINK_INVALID = '#dc2626'
 // Percorso critico: barre e legami evidenziati, il resto attenuato.
 const COLOR_CRITICAL = '#d3402f'
@@ -327,7 +329,7 @@ const NO_PHASES: { name: string; date: string | null; milestone?: boolean; miles
 const NO_NON_WORKING_DAYS: NonWorkingDay[] = []
 
 export function BacklogGanttChart({
-  items,
+  items: allItems,
   jiraBrowseUrl,
   forecastCutoffId = null,
   forecastCutoffLabel,
@@ -344,6 +346,12 @@ export function BacklogGanttChart({
   milestonePhase,
   onRowMove,
 }: Props) {
+  // Esporta PNG: l'immagine mostra solo il lavoro ancora da fare (gli item
+  // visibili col filtro, senza i Done) e il calendario si stringe sulle loro
+  // date, invece di partire dall'inizio dell'increment.
+  const [exporting, setExporting] = useState(false)
+  const notDone = (item: BacklogItem) => item.status !== 'Done'
+  const items = exporting && allItems.some(notDone) ? allItems.filter(notDone) : allItems
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
   // alto, la barra "specchio" sopra la tabella e lo scroll vero (sulle
   // righe). Calendario e specchio stanno sopra le righe, fuori da
@@ -473,7 +481,6 @@ export function BacklogGanttChart({
   )
   const isDimmed = (item: BacklogItem) => !!criticalPath && !criticalPath.critical.has(item.id)
   const rootRef = useRef<HTMLDivElement>(null)
-  const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const exportPng = async () => {
     const savedScroll = wrapRef.current?.scrollLeft ?? 0
@@ -547,8 +554,14 @@ export function BacklogGanttChart({
       .filter((p) => p.milestone && dateStrToEpochDays(p.date) === day)
       .every((p) => p.milestoneDone)
   const markDays = [...namesByDay.keys()].sort((a, b) => a - b)
-  const rangeDays = [...allDays, todayDay, ...markDays]
-  const minDay = Math.min(...rangeDays) - 2
+  // Nell'export il calendario parte da una settimana prima di oggi (le barre
+  // che iniziano prima si tagliano al bordo) e arriva all'ultima data degli
+  // item da fare o all'ultima fase, se viene dopo.
+  const exportStartDay = todayDay - EXPORT_DAYS_BEFORE_TODAY
+  const rangeDays = exporting
+    ? [...allDays.filter((day) => day >= exportStartDay), todayDay, ...markDays.filter((day) => day >= exportStartDay)]
+    : [...allDays, todayDay, ...markDays]
+  const minDay = exporting ? exportStartDay : Math.min(...rangeDays) - 2
   const rangeMaxDay = Math.max(...rangeDays) + 2
 
   // Zoom. "Intero progetto" (fit) adatta la larghezza del giorno perche'
@@ -811,7 +824,7 @@ export function BacklogGanttChart({
   // Dentro il calendario anche quando oggi e' vicino a un suo bordo.
   const todayLabelStart = Math.min(Math.max(0, lineX(todayDay) - todayLabelWidth / 2), chartWidth - todayLabelWidth)
   const todaySlot = { start: todayLabelStart, width: todayLabelWidth, lane: 0 }
-  const marks = markDays.map((day) => {
+  const marks = markDays.filter((day) => day >= minDay).map((day) => {
     const label = `${namesByDay.get(day)!.join(' · ')} ${formatEpochDaysAsDate(day)}`
     const width = markTextWidth(label, 600)
     // Con la milestone il testo si scosta dal rombo, centrato sulla data.
@@ -1211,7 +1224,7 @@ export function BacklogGanttChart({
             </button>
           </span>
           {exportError && <span style={{ color: 'var(--danger)' }}>Export non riuscito: {exportError}</span>}
-          <button className="btn" disabled={exporting} onClick={exportPng} title="Scarica tutto il Gantt come immagine PNG">
+          <button className="btn" disabled={exporting} onClick={exportPng} title="Scarica il Gantt come immagine PNG: gli item visibili col filtro senza i Done, da una settimana prima di oggi">
             {exporting ? 'Esportazione…' : 'Esporta PNG'}
           </button>
         </span>
@@ -1472,7 +1485,13 @@ export function BacklogGanttChart({
             mirrorHeaderScroll(wrapRef)
           }}
         >
-          <div ref={contentRef} className={dragClassName} {...dragHandlers} style={{ width: chartWidth, position: 'relative' }}>
+          <div
+            ref={contentRef}
+            className={dragClassName}
+            {...dragHandlers}
+            // Nell'export le barre che iniziano prima del calendario si tagliano al bordo.
+            style={{ width: chartWidth, position: 'relative', overflow: exporting ? 'hidden' : undefined }}
+          >
             {/* Griglia (una linea per cella del calendario, weekend in grigio
                 con lo zoom sui giorni): un solo strato sotto tutte le righe,
                 invece di ripeterla in ognuna (con i giorni sarebbero migliaia
@@ -1554,9 +1573,14 @@ export function BacklogGanttChart({
                     <div
                       style={{
                         position: 'absolute',
-                        left: dayToX(labelAnchor) + 2,
+                        // Nell'export una barra iniziata prima del calendario ha il
+                        // titolo dal bordo sinistro, non tagliato.
+                        left: Math.max(dayToX(labelAnchor), exporting ? 0 : -Infinity) + 2,
                         top: 2,
-                        width: barEnd === null ? undefined : Math.max(0, dayToX(barEnd) + dayWidth - dayToX(labelAnchor) - 2),
+                        width:
+                          barEnd === null
+                            ? undefined
+                            : Math.max(0, dayToX(barEnd) + dayWidth - Math.max(dayToX(labelAnchor), exporting ? 0 : -Infinity) - 2),
                         zIndex: 3,
                         pointerEvents: 'none',
                       }}
