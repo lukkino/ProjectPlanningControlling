@@ -1,11 +1,98 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { api } from '../api/client'
 import type { IncrementComponent } from '../api/types'
 import { formatIsoDate } from '../lib/dates'
 import { useProjectContext } from './useProjectContext'
 
 const NEW_COMPONENT = '__new__'
+
+// Colonna Artifactory ISP: larghezza scelta trascinando il bordo
+// dell'intestazione, ricordata in questo browser.
+const ARTIFACTORY_WIDTH_KEY = 'ppc-components-artifactory-width'
+const ARTIFACTORY_DEFAULT_WIDTH = 260
+const ARTIFACTORY_MIN_WIDTH = 120
+
+function loadArtifactoryWidth(): number {
+  try {
+    const value = Number(localStorage.getItem(ARTIFACTORY_WIDTH_KEY))
+    return value >= ARTIFACTORY_MIN_WIDTH ? value : ARTIFACTORY_DEFAULT_WIDTH
+  } catch {
+    return ARTIFACTORY_DEFAULT_WIDTH
+  }
+}
+
+function saveArtifactoryWidth(width: number | null) {
+  try {
+    if (width === null) localStorage.removeItem(ARTIFACTORY_WIDTH_KEY)
+    else localStorage.setItem(ARTIFACTORY_WIDTH_KEY, String(width))
+  } catch {
+    // storage non disponibile: la larghezza vale solo per questa pagina
+  }
+}
+
+// Link Artifactory: fuori modifica il testo e' allineato a destra, cosi' se
+// non ci sta si legge la fine del link (il nome del file) e si taglia
+// l'inizio. Clic per modificarlo; il link completo nel tooltip.
+function ArtifactoryCell({
+  value,
+  width,
+  componentName,
+  onSave,
+}: {
+  value: string | null
+  width: number
+  componentName: string
+  onSave: (value: string | null) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const current = value ?? ''
+  const finish = (next: string, save: boolean) => {
+    setEditing(false)
+    if (save && next.trim() !== current) onSave(next.trim() || null)
+  }
+  return (
+    <div className="artifactory-cell" style={{ width }}>
+      {editing ? (
+        <input
+          autoFocus
+          aria-label="Link Artifactory ISP"
+          defaultValue={current}
+          onFocus={(e) => {
+            const end = e.currentTarget.value.length
+            e.currentTarget.setSelectionRange(end, end)
+            e.currentTarget.scrollLeft = e.currentTarget.scrollWidth
+          }}
+          onBlur={(e) => finish(e.target.value, true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+            if (e.key === 'Escape') finish(current, false)
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="artifactory-text"
+          title={current ? `${current}\n\nClic per modificare` : 'Clic per inserire il link'}
+          onClick={() => setEditing(true)}
+        >
+          {current ? <span>{current}</span> : <span className="muted">—</span>}
+        </button>
+      )}
+      {current && !editing && (
+        <a
+          href={current}
+          target="_blank"
+          rel="noreferrer"
+          title="Apri l'artefatto su Artifactory ISP"
+          aria-label={`Apri ${componentName} su Artifactory ISP`}
+        >
+          ↗
+        </a>
+      )}
+    </div>
+  )
+}
 
 // Testo che si salva uscendo dal campo; key sul valore per riallinearlo dopo
 // il salvataggio.
@@ -59,6 +146,28 @@ export function IncrementComponentsPage() {
   const [newName, setNewName] = useState('')
   const [newFamily, setNewFamily] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [artifactoryWidth, setArtifactoryWidth] = useState(loadArtifactoryWidth)
+
+  // Bordo destro dell'intestazione trascinato: nuova larghezza della colonna.
+  const startArtifactoryResize = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = artifactoryWidth
+    let width = startWidth
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      width = Math.max(ARTIFACTORY_MIN_WIDTH, Math.round(startWidth + moveEvent.clientX - startX))
+      setArtifactoryWidth(width)
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      saveArtifactoryWidth(width)
+    }
+    document.body.style.cursor = 'col-resize'
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
 
   const componentsKey = ['increment-components', project.id]
   const { data: components, isLoading, error } = useQuery({
@@ -238,7 +347,18 @@ export function IncrementComponentsPage() {
                 <th>PN</th>
                 <th title="Sigla del componente nella Release Notice (es. PSDA → PSDA_6.0.0)">Sigla</th>
                 <th>Fix version</th>
-                <th title="Link all'artefatto del componente su Artifactory ISP">Artifactory ISP</th>
+                <th title="Link all'artefatto del componente su Artifactory ISP" style={{ position: 'relative' }}>
+                  Artifactory ISP
+                  <span
+                    className="col-resize-handle"
+                    onMouseDown={startArtifactoryResize}
+                    onDoubleClick={() => {
+                      setArtifactoryWidth(ARTIFACTORY_DEFAULT_WIDTH)
+                      saveArtifactoryWidth(null)
+                    }}
+                    title="Trascina per allargare la colonna (doppio clic: larghezza iniziale)"
+                  />
+                </th>
                 <th>Dettaglio</th>
                 <th>Note</th>
                 <th />
@@ -265,21 +385,13 @@ export function IncrementComponentsPage() {
                     <td className="editable-cell" style={{ minWidth: 100 }}>
                       <CellInput value={component.fix_version} label="Fix version" onSave={save('fix_version')} />
                     </td>
-                    <td className="editable-cell" style={{ minWidth: 220 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <CellInput value={component.artifactory_url} label="Link Artifactory ISP" onSave={save('artifactory_url')} />
-                        {component.artifactory_url && (
-                          <a
-                            href={component.artifactory_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            title="Apri l'artefatto su Artifactory ISP"
-                            aria-label={`Apri ${component.name} su Artifactory ISP`}
-                          >
-                            ↗
-                          </a>
-                        )}
-                      </div>
+                    <td className="editable-cell">
+                      <ArtifactoryCell
+                        value={component.artifactory_url}
+                        width={artifactoryWidth}
+                        componentName={component.name}
+                        onSave={save('artifactory_url')}
+                      />
                     </td>
                     <td className="editable-cell" style={{ minWidth: 240, width: '50%', whiteSpace: 'normal' }}>
                       <CellInput value={component.detail} label="Dettaglio" multiline onSave={save('detail')} />

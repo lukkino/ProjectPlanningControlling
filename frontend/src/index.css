@@ -1245,3 +1245,25 @@ ul.changelog-body { padding-left: 20px; }
 
 /* Tab Components & PN (pages/IncrementComponentsPage.tsx) */
 .components-table th { text-align: center; font-weight: 700; }
+.artifactory-cell { display: flex; align-items: center; gap: 6px; }
+.artifactory-cell input { flex: 1; min-width: 0; }
+/* Testo allineato a destra e tagliato a sinistra: resta visibile la fine del
+   link (il nome del file). direction rtl sul contenitore, ltr sul testo. */
+.artifactory-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: right;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  cursor: text;
+}
+.artifactory-text:hover { border-color: var(--border); background: var(--surface); }
+.artifactory-text span { direction: ltr; unicode-bidi: isolate; }
