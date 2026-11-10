@@ -45,7 +45,32 @@ const COLOR_LINK = '#5b6472'
 // Percorso critico: barre e legami evidenziati, il resto attenuato.
 const COLOR_CRITICAL = '#d3402f'
 const DIMMED_OPACITY = 0.3
-const LINK_STUB = 8
+// Frecce dei predecessori: tratto orizzontale all'uscita dalla barra e
+// all'arrivo (prima della punta), raggio degli angoli arrotondati.
+const LINK_STUB = 12
+const LINK_ARRIVAL = 10
+const LINK_RADIUS = 5
+
+// Spezzata ortogonale con gli angoli arrotondati (come nei Gantt di
+// Wrike/TeamGantt): ogni angolo diventa una curva di raggio al massimo
+// LINK_RADIUS, meno se i tratti sono corti.
+function roundedPath(points: [number, number][]): string {
+  const pts = points.filter((p, i) => i === 0 || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1])
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1]
+    const [x, y] = pts[i]
+    const [nx, ny] = pts[i + 1]
+    const r = Math.min(LINK_RADIUS, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2)
+    const inX = x - Math.sign(x - px) * r
+    const inY = y - Math.sign(y - py) * r
+    const outX = x + Math.sign(nx - x) * r
+    const outY = y + Math.sign(ny - y) * r
+    d += ` L${inX},${inY} Q${x},${y} ${outX},${outY}`
+  }
+  const [lx, ly] = pts[pts.length - 1]
+  return `${d} L${lx},${ly}`
+}
 // Fascia verde sotto l'ultimo item della finestra di forecast, come la riga
 // "Forecasting - Code Freeze" nella tabella del Backlog.
 const CUTOFF_BAND_HEIGHT = 18
@@ -262,11 +287,12 @@ type Props = {
   // Modifica delle barre "Pianificato" col mouse (assente = Gantt in sola
   // lettura). planBarChange dice cosa cambierebbe (l'item e quelli che ne
   // dipendono), per l'anteprima durante il trascinamento; onBarChange salva
-  // quelle modifiche al rilascio. isStartLocked: item con lo Start calcolato
-  // dai predecessori, di cui si puo' cambiare solo la fine.
+  // quelle modifiche al rilascio. minStart: primo Start possibile di un item
+  // coi predecessori (ISO, null = nessun vincolo): la barra non va piu'
+  // indietro di cosi', in avanti si'.
   planBarChange?: (item: BacklogItem, change: GanttBarChange) => BacklogPatch[]
   onBarChange?: (updates: BacklogPatch[]) => void
-  isStartLocked?: (item: BacklogItem) => boolean
+  minStart?: (item: BacklogItem) => string | null
   // Riga trascinata sulla colonna delle chiavi: l'item prende il posto di
   // quello di destinazione, come nella tabella (assente = ordine fisso).
   onRowMove?: (itemId: number, targetId: number) => void
@@ -286,7 +312,7 @@ export function BacklogGanttChart({
   exportName = 'Gantt',
   planBarChange,
   onBarChange,
-  isStartLocked,
+  minStart,
   onRowMove,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
@@ -352,6 +378,8 @@ export function BacklogGanttChart({
     startX: number
     start: number
     end: number
+    // Primo giorno possibile per lo Start (predecessori), null = libero.
+    minStart: number | null
     delta: number
     updates: BacklogPatch[]
   }
@@ -574,16 +602,23 @@ export function BacklogGanttChart({
   // Barre modificabili col mouse: cursore secondo la zona (bordi o centro),
   // trascinamento a giorni interi con anteprima, salvataggio al rilascio.
   const editable = !!planBarChange && !!onBarChange && !exporting
-  const barZone = (e: PointerEvent<HTMLDivElement>, item: BacklogItem): BarDragMode | null => {
+  const barZone = (e: PointerEvent<HTMLDivElement>): BarDragMode | null => {
     const rect = e.currentTarget.getBoundingClientRect()
     const edge = Math.min(BAR_EDGE_ZONE, rect.width / 3)
     const x = e.clientX - rect.left
-    const mode: BarDragMode = x <= edge ? 'start' : x >= rect.width - edge ? 'end' : 'move'
-    // Start calcolato dai predecessori: si cambia solo la fine.
-    return mode !== 'end' && isStartLocked?.(item) ? null : mode
+    return x <= edge ? 'start' : x >= rect.width - edge ? 'end' : 'move'
   }
-  const barChange = (drag: BarDrag, delta: number): GanttBarChange => {
-    const start = drag.mode === 'end' ? drag.start : Math.min(drag.start + delta, drag.mode === 'start' ? drag.end : Infinity)
+  const barChange = (drag: BarDrag, rawDelta: number): GanttBarChange => {
+    // Coi predecessori lo Start non va prima del loro limite: spostando la
+    // barra si ferma li', col bordo sinistro anche.
+    const lowest = drag.minStart ?? -Infinity
+    const delta = drag.mode === 'move' ? Math.max(rawDelta, Math.min(0, lowest - drag.start)) : rawDelta
+    const start =
+      drag.mode === 'end'
+        ? drag.start
+        : drag.mode === 'start'
+          ? Math.min(Math.max(drag.start + delta, Math.min(lowest, drag.start)), drag.end)
+          : drag.start + delta
     const end = drag.mode === 'start' ? drag.end : Math.max(drag.end + delta, drag.mode === 'end' ? drag.start : -Infinity)
     return { mode: drag.mode, planned_start: epochDaysToIso(start), expected_finish: epochDaysToIso(end) }
   }
@@ -597,7 +632,7 @@ export function BacklogGanttChart({
           onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
             const drag = barDragRef.current
             if (!drag) {
-              const zone = barZone(e, item)
+              const zone = barZone(e)
               e.currentTarget.style.cursor = zone ? CURSOR_BY_MODE[zone] : ''
               return
             }
@@ -608,13 +643,23 @@ export function BacklogGanttChart({
           },
           onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
             if (e.pointerType !== 'mouse' || e.button !== 0) return
-            const zone = barZone(e, item)
+            const zone = barZone(e)
             // Fuori dalle zone modificabili il trascinamento sposta il Gantt.
             if (!zone) return
             e.stopPropagation()
             e.currentTarget.setPointerCapture(e.pointerId)
             document.body.style.cursor = CURSOR_BY_MODE[zone]
-            updateBarDrag({ item, mode: zone, startX: e.clientX, start, end, delta: 0, updates: [] })
+            const min = minStart?.(item)
+            updateBarDrag({
+              item,
+              mode: zone,
+              startX: e.clientX,
+              start,
+              end,
+              minStart: min ? dateStrToEpochDays(min) : null,
+              delta: 0,
+              updates: [],
+            })
           },
           onPointerUp: () => {
             const drag = barDragRef.current
@@ -725,15 +770,30 @@ export function BacklogGanttChart({
       const y1 = barCenterY(predecessorRow)
       const x2 = dayToX(sStart)
       const y2 = barCenterY(successorRow)
-      // Con spazio tra le due barre basta un gomito; altrimenti (successore
-      // che parte subito sotto la fine del predecessore, il caso normale) la
-      // linea rientra a sinistra passando tra le righe, per arrivare alla
-      // barra da sinistra.
+      // Esce a destra dalla fine del predecessore e arriva da sinistra
+      // all'inizio del successore. Con spazio tra le due barre basta un
+      // gomito; altrimenti (successore che parte subito dopo, il caso
+      // normale) la linea rientra a sinistra lungo il bordo tra le righe,
+      // sopra la riga del successore (sotto, se il successore sta sopra).
       const below = successorRow > predecessorRow
-      const yGap = below ? y2 - BAR_HEIGHT / 2 - 3 : rowTop(successorRow) + ROW_HEIGHT
-      return x2 >= x1 + 2 * LINK_STUB
-        ? `M${x1},${y1} H${x1 + LINK_STUB} V${y2} H${x2}`
-        : `M${x1},${y1} H${x1 + LINK_STUB} V${yGap} H${x2 - LINK_STUB} V${y2} H${x2}`
+      const out = x1 + LINK_STUB
+      if (x2 - LINK_ARRIVAL >= out) {
+        return roundedPath([
+          [x1, y1],
+          [out, y1],
+          [out, y2],
+          [x2, y2],
+        ])
+      }
+      const yGap = below ? rowTop(successorRow) + 3 : rowTop(successorRow) + ROW_HEIGHT - 3
+      return roundedPath([
+        [x1, y1],
+        [out, y1],
+        [out, yGap],
+        [x2 - LINK_ARRIVAL, yGap],
+        [x2 - LINK_ARRIVAL, y2],
+        [x2, y2],
+      ])
     }
   }
   const criticalLinkIds = new Set(criticalPath?.links.map((l) => `${l.from}-${l.to}`))
@@ -762,6 +822,15 @@ export function BacklogGanttChart({
     return [{ id: `i${l.from}-${l.to}`, path, title, critical: true, implicit: true }]
   })
   const allLinks = [...links, ...implicitLinks]
+  // Assegnatario di un item da cui parte una freccia: spostato oltre il
+  // tratto d'uscita, cosi' la freccia scende prima del testo.
+  const linkSourceIds = new Set(allLinks.map((link) => Number(link.id.split('-')[0])))
+  const assigneeLabelLeft = (item: BacklogItem, barEnd: number) => {
+    const afterBar = dayToX(barEnd) + dayWidth + ASSIGNEE_LABEL_GAP
+    const plannedEnd = dateStrToEpochDays(item.expected_finish)
+    if (!linkSourceIds.has(item.id) || plannedEnd === null) return afterBar
+    return Math.max(afterBar, dayToX(plannedEnd) + dayWidth + LINK_STUB + ASSIGNEE_LABEL_GAP)
+  }
 
   return (
     <div
@@ -1302,9 +1371,10 @@ export function BacklogGanttChart({
                                 : `\nMargine: ${criticalPath.float.get(item.id)} gg lavorativi`
                               : '') +
                             (editable
-                              ? isStartLocked?.(item)
-                                ? '\nInizio calcolato dai predecessori: trascina il bordo destro per cambiare la fine'
-                                : '\nTrascina per spostare, i bordi per cambiare inizio o fine'
+                              ? '\nTrascina per spostare, i bordi per cambiare inizio o fine' +
+                                (minStart?.(item)
+                                  ? `\nPredecessori: non prima del ${formatIsoDate(minStart(item))}`
+                                  : '')
                               : '')
                       }
                       {...barHandlers(item, pStart, pEnd)}
@@ -1381,14 +1451,14 @@ export function BacklogGanttChart({
                       className="muted"
                       style={{
                         position: 'absolute',
-                        left: dayToX(barEnd) + dayWidth + ASSIGNEE_LABEL_GAP,
+                        left: assigneeLabelLeft(item, barEnd),
                         top: 22,
                         fontSize: 11,
                         lineHeight: `${BAR_HEIGHT}px`,
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        maxWidth: Math.max(0, chartWidth - dayToX(barEnd) - dayWidth - ASSIGNEE_LABEL_GAP - 2),
+                        maxWidth: Math.max(0, chartWidth - assigneeLabelLeft(item, barEnd) - 2),
                         pointerEvents: 'none',
                       }}
                     >
@@ -1448,27 +1518,55 @@ export function BacklogGanttChart({
                 style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
               >
                 <defs>
-                  <marker id="gantt-link-arrow" markerWidth="7" markerHeight="8" refX="7" refY="4" orient="auto">
-                    <path d="M0,0 L7,4 L0,8 Z" fill={COLOR_LINK} />
+                  {/* Punta di dimensione fissa (non scala con lo spessore della linea). */}
+                  <marker
+                    id="gantt-link-arrow"
+                    markerUnits="userSpaceOnUse"
+                    markerWidth="9"
+                    markerHeight="10"
+                    refX="8"
+                    refY="5"
+                    orient="auto"
+                  >
+                    <path d="M0,0.5 L8,5 L0,9.5 Z" fill={COLOR_LINK} stroke="white" strokeWidth="0.75" />
                   </marker>
-                  <marker id="gantt-link-arrow-critical" markerWidth="7" markerHeight="8" refX="7" refY="4" orient="auto">
-                    <path d="M0,0 L7,4 L0,8 Z" fill={COLOR_CRITICAL} />
+                  <marker
+                    id="gantt-link-arrow-critical"
+                    markerUnits="userSpaceOnUse"
+                    markerWidth="9"
+                    markerHeight="10"
+                    refX="8"
+                    refY="5"
+                    orient="auto"
+                  >
+                    <path d="M0,0.5 L8,5 L0,9.5 Z" fill={COLOR_CRITICAL} stroke="white" strokeWidth="0.75" />
                   </marker>
                 </defs>
                 {allLinks.map((link) => (
-                  <path
-                    key={link.id}
-                    d={link.path}
-                    fill="none"
-                    stroke={link.critical ? COLOR_CRITICAL : COLOR_LINK}
-                    strokeWidth={link.critical ? 2.5 : 1.5}
-                    strokeDasharray={link.implicit ? '5 3' : undefined}
-                    strokeLinejoin="round"
-                    opacity={criticalPath && !link.critical ? DIMMED_OPACITY : undefined}
-                    markerEnd={link.critical ? 'url(#gantt-link-arrow-critical)' : 'url(#gantt-link-arrow)'}
-                  >
-                    <title>{link.title}</title>
-                  </path>
+                  <g key={link.id} opacity={criticalPath && !link.critical ? DIMMED_OPACITY : undefined}>
+                    {/* Alone bianco: la linea resta leggibile sopra griglia, testi e barre. */}
+                    <path
+                      d={link.path}
+                      fill="none"
+                      stroke="white"
+                      strokeWidth={(link.critical ? 2.5 : 2) + 3}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      opacity={0.85}
+                    />
+                    <path
+                      d={link.path}
+                      fill="none"
+                      stroke={link.critical ? COLOR_CRITICAL : COLOR_LINK}
+                      strokeWidth={link.critical ? 2.5 : 2}
+                      strokeDasharray={link.implicit ? '5 3' : undefined}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      markerEnd={link.critical ? 'url(#gantt-link-arrow-critical)' : 'url(#gantt-link-arrow)'}
+                    >
+                      <title>{link.title}</title>
+                    </path>
+                  </g>
                 ))}
               </svg>
             )}

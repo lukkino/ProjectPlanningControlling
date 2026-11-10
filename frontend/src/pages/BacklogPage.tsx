@@ -32,6 +32,7 @@ import {
   parsePredecessors,
   resolvePredecessors,
   scheduleFromPredecessors,
+  earliestStart,
   toIsoLocal,
   wouldCreateCycle,
   type BacklogPatch,
@@ -475,7 +476,8 @@ export function BacklogPage() {
       if (queryClient.isMutating({ mutationKey: ganttMutationKey }) === 1) invalidate()
     },
   })
-  const isStartLocked = (item: BacklogItem) => resolvePredecessors(item, itemsByKey).some((p) => p.expected_finish)
+  // Primo Start possibile per i predecessori (limite minimo nel Gantt e in tabella).
+  const minStartOf = (item: BacklogItem) => earliestStart(item, itemsByKey, offDays)
 
   // Predecessori scritti a mano: chiavi Jira separate da virgola; basta
   // anche il solo numero ("1234") se identifica un unico item del backlog.
@@ -743,17 +745,19 @@ export function BacklogPage() {
       // davvero cambiata: uscire dal campo senza toccarlo non deve
       // riscrivere le date degli item successivi. key sul valore come per
       // Fine pian.: il campo va rimontato quando la cascata lo cambia.
-      // Con predecessori che hanno una Fine pian. la data e' calcolata da
-      // loro (giorno lavorativo successivo alla piu' tarda): non si scrive.
+      // Con predecessori che hanno una Fine pian. la data non puo' essere
+      // prima del giorno lavorativo dopo la piu' tarda (scheduleFromPredecessors
+      // la riporta li'), dopo si'.
       render: (item) => {
         const driving = resolvePredecessors(item, itemsByKey).filter((p) => p.expected_finish)
+        const min = minStartOf(item)
         return (
           <DateInput
             value={item.planned_start}
-            disabled={driving.length > 0}
+            min={min ?? undefined}
             title={
-              driving.length > 0
-                ? `Calcolato dai predecessori (${driving.map((p) => p.jira_key).join(', ')}): il giorno lavorativo dopo la loro Fine pian.`
+              min
+                ? `Non prima del ${formatIsoDate(min)}: il giorno lavorativo dopo la Fine pian. dei predecessori (${driving.map((p) => p.jira_key).join(', ')})`
                 : undefined
             }
             onChange={(planned_start) => reschedule.mutate({ item, planned_start })}
@@ -1704,7 +1708,7 @@ export function BacklogPage() {
           exportName={`Gantt_${project.code}`}
           planBarChange={planGanttChange}
           onBarChange={(updates) => applyGanttChange.mutate(updates)}
-          isStartLocked={isStartLocked}
+          minStart={minStartOf}
           onRowMove={moveItem}
         />
       )}

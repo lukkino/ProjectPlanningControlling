@@ -117,12 +117,29 @@ export function wouldCreateCycle(items: BacklogItem[], itemKey: string, predeces
 
 export type BacklogPatch = Partial<BacklogItem> & { id: number }
 
+// Primo Start pian. possibile per un item coi predecessori: il giorno
+// lavorativo dopo la Fine pian. piu' tarda tra di loro. null se nessun
+// predecessore ha una Fine pian. (nessun vincolo).
+export function earliestStart(
+  item: BacklogItem,
+  byKey: Map<string, BacklogItem>,
+  off: DaysOff = NO_DAYS_OFF,
+): string | null {
+  const finishes = resolvePredecessors(item, byKey)
+    .map((p) => p.expected_finish)
+    .filter((f): f is string => !!f)
+  return finishes.length > 0 ? nextWorkingDay(finishes.reduce((a, b) => (a > b ? a : b)), off) : null
+}
+
 // Applica le modifiche in "patches" (per id) e propaga le date lungo i
-// predecessori, come in Project/Wrike con un legame fine-inizio: un item con
-// predecessori inizia il primo giorno lavorativo dopo la Fine pian. piu'
-// tarda tra i suoi predecessori, e la sua Fine pian. si ricalcola dal Sizing
-// (gg) - solo quando lo Start cambia, cosi' una Fine pian. corretta a mano
-// resta finche' lo Start non si sposta. Un predecessore senza Fine pian. non
+// predecessori, con un legame fine-inizio come in Project/Wrike: un item con
+// predecessori non puo' iniziare prima del giorno lavorativo dopo la Fine
+// pian. piu' tarda tra i suoi predecessori. E' un limite minimo: piu' avanti
+// l'item si puo' mettere a mano (es. trascinandolo nel Gantt), e se un
+// predecessore si anticipa l'item resta dov'e'; se un predecessore slitta
+// oltre, l'item viene spinto avanti. Quando lo Start cambia la Fine pian. si
+// ricalcola dal Sizing (gg), cosi' una Fine pian. corretta a mano resta
+// finche' lo Start non si sposta. Un predecessore senza Fine pian. non
 // vincola nulla. Restituisce tutte le modifiche da salvare (quelle richieste
 // piu' quelle propagate), pronte per il salvataggio in blocco.
 export function scheduleFromPredecessors(
@@ -148,7 +165,7 @@ export function scheduleFromPredecessors(
     const finishes = predecessors.map((p) => p.expected_finish).filter((f): f is string => !!f)
     if (finishes.length > 0) {
       const planned_start = nextWorkingDay(finishes.reduce((a, b) => (a > b ? a : b)), off)
-      if (planned_start !== item.planned_start) {
+      if (!item.planned_start || item.planned_start < planned_start) {
         const change: Partial<BacklogItem> = { planned_start }
         const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, off)
         if (expected_finish) change.expected_finish = expected_finish
