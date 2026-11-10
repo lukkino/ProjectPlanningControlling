@@ -157,6 +157,9 @@ def run_lightweight_migrations() -> None:
         if "is_activity" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN is_activity BOOLEAN DEFAULT 0"))
+        if "milestone_phase_id" not in backlog_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN milestone_phase_id INTEGER REFERENCES phases(id)"))
         if "activity_phase" not in backlog_columns:
             # Le attivita' di servizio esistenti diventano attivita' di Execution.
             with engine.begin() as conn:

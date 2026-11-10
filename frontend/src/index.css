@@ -1278,7 +1278,8 @@ ul.changelog-body { padding-left: 20px; }
   background: #fff;
   box-sizing: border-box;
   cursor: crosshair;
-  z-index: 3;
+  /* Sopra i testi (z-index 3), che altrimenti coprono il pallino. */
+  z-index: 4;
   opacity: 0;
   transition: opacity 0.1s;
 }
@@ -1311,3 +1312,18 @@ ul.changelog-body { padding-left: 20px; }
 .gantt-link-menu-title { padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gantt-link-menu-item { display: block; width: 100%; padding: 8px 12px; border: none; background: none; text-align: left; font: inherit; font-size: 13px; color: #b91c1c; cursor: pointer; }
 .gantt-link-menu-item:hover { background: var(--bg); }
+.milestone-mark { margin-right: 4px; color: #dc2626; cursor: help; }
+.milestone-mark--done { color: #16a34a; }
+.milestone-mismatch { margin-top: 4px; max-width: 260px; white-space: normal; font-size: 11px; color: #b45309; }
+.milestone-mismatch .link-btn { margin-left: 4px; font-size: 11px; }
+/* Testi del Gantt sopra le frecce e le linee: su un fondo chiaro semitrasparente,
+   piu' scuri del testo secondario, cosi' restano leggibili anche dove passa una linea. */
+.gantt-label {
+  color: #3f4752;
+  padding: 0 4px;
+  margin-left: -4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+.gantt-timeline-row:hover .gantt-label { background: rgba(245, 246, 248, 0.92); box-shadow: none; }

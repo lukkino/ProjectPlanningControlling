@@ -655,6 +655,31 @@ def is_cve_bug(issue_type: str | None, summary: str | None) -> bool:
     return (issue_type or "").lower() == "bug" and bool(CVE_PATTERN.search(summary or ""))
 
 
+# Milestone: item Jira (di solito un'Activity) con la label "Milestone". Nel
+# Gantt e' un rombo su un giorno solo, fuori dal code freeze; si puo'
+# collegare a una fase dell'increment (milestone_phase_id) e ne prende la
+# data. Stessa regola di isMilestone in frontend/src/lib/milestone.ts.
+MILESTONE_LABEL = "milestone"
+
+
+def is_milestone(labels: list[str] | str | None) -> bool:
+    values = labels.split(";") if isinstance(labels, str) else (labels or [])
+    return any(value.strip().lower() == MILESTONE_LABEL for value in values)
+
+
+def align_milestone(item: "BacklogItem", phase: "Phase") -> None:
+    """Data di una milestone collegata a una fase (Start = Fine pian.): la
+    data aggiornata della fase finche' la milestone non e' chiusa, poi quella
+    effettiva (della fase, se no la chiusura su Jira)."""
+    if item.status == "Done":
+        day = phase.actual_date or item.actual_finish or phase.planned_date
+    else:
+        day = phase.planned_date
+    if day is not None:
+        item.planned_start = day
+        item.expected_finish = day
+
+
 class BacklogItem(Base):
     __tablename__ = "backlog_items"
 
@@ -729,6 +754,12 @@ class BacklogItem(Base):
     # un item normale. is_activity e' True se e solo se e' valorizzata
     # (allineati da routers/backlog.py::_apply_update).
     activity_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Milestone (vedi is_milestone) collegata a una fase dell'increment:
+    # Start e Fine pian. sono la data della fase (vedi align_milestone),
+    # riallineate quando cambia la fase o lo stato su Jira. Una per fase.
+    milestone_phase_id: Mapped[int | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="SET NULL"), nullable=True
+    )
     # Presentazione degli scenari collegata a mano (Story gia' fatte prima
     # della cartella Scenarios, o file altrove): percorso di un file o URL
     # (es. SharePoint). Se manca vale il pptx trovato nella cartella

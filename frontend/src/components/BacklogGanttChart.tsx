@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type C
 import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
+import { isMilestone } from '../lib/milestone'
 import { ACTIVITY_PHASES, activityPhaseInfo } from '../lib/activityPhases'
 import { computeCriticalPath } from '../lib/criticalPath'
 import { daysOffSet, parsePredecessors, type BacklogPatch } from '../lib/scheduling'
@@ -46,6 +47,14 @@ const COLOR_LINK = '#5b6472'
 const COLOR_LINK_HOVER = '#2563eb'
 // Collegamento in creazione agganciato a un PBI: si puo' fare / non si puo'.
 const COLOR_LINK_VALID = '#16a34a'
+// Milestone: rombo centrato sulla fine del giorno (come le linee delle fasi);
+// meta' della sua larghezza, per agganciare frecce ed etichette.
+// Rossa finche' non e' Done, poi verde.
+const COLOR_MILESTONE = '#dc2626'
+const COLOR_MILESTONE_BORDER = '#991b1b'
+const COLOR_MILESTONE_DONE = '#16a34a'
+const COLOR_MILESTONE_DONE_BORDER = '#15803d'
+const MILESTONE_HALF = 8
 const COLOR_LINK_INVALID = '#dc2626'
 // Percorso critico: barre e legami evidenziati, il resto attenuato.
 const COLOR_CRITICAL = '#d3402f'
@@ -283,7 +292,9 @@ type Props = {
   // Fasi dell'increment (es. Release to Market) con la loro data ISO: una
   // linea verticale ciascuna, e il calendario arriva fino all'ultima anche
   // senza item che ci arrivano.
-  phases?: { name: string; date: string | null }[]
+  // milestone: la fase ha una milestone collegata, che nel Gantt sta sulla
+  // sua data: niente linea tratteggiata, un rombo nel calendario.
+  phases?: { name: string; date: string | null; milestone?: boolean; milestoneDone?: boolean }[]
   // Giorni non lavorativi del team: una fascia per periodo.
   nonWorkingDays?: NonWorkingDay[]
   // Prefisso del nome del PNG esportato (es. "Gantt_PTBSYS-123"), seguito
@@ -304,12 +315,15 @@ type Props = {
   onAddPredecessor?: (predecessor: BacklogItem, successor: BacklogItem) => void
   onRemovePredecessor?: (predecessor: BacklogItem, successor: BacklogItem) => void
   linkError?: (predecessor: BacklogItem, successor: BacklogItem) => string | null
+  // Fase a cui e' collegata una milestone (ne prende la data, quindi nel
+  // Gantt non si sposta); null se non collegata.
+  milestonePhase?: (item: BacklogItem) => string | null
   // Riga trascinata sulla colonna delle chiavi: l'item prende il posto di
   // quello di destinazione, come nella tabella (assente = ordine fisso).
   onRowMove?: (itemId: number, targetId: number) => void
 }
 
-const NO_PHASES: { name: string; date: string | null }[] = []
+const NO_PHASES: { name: string; date: string | null; milestone?: boolean; milestoneDone?: boolean }[] = []
 const NO_NON_WORKING_DAYS: NonWorkingDay[] = []
 
 export function BacklogGanttChart({
@@ -327,6 +341,7 @@ export function BacklogGanttChart({
   onAddPredecessor,
   onRemovePredecessor,
   linkError,
+  milestonePhase,
   onRowMove,
 }: Props) {
   // Tre elementi da tenere sincronizzati in orizzontale: il calendario in
@@ -520,6 +535,17 @@ export function BacklogGanttChart({
   }
   addMark(codeFreezeDay, 'Code Freeze')
   for (const phase of phases) addMark(dateStrToEpochDays(phase.date), phase.name)
+  // Fasi con la milestone collegata: rombo nel calendario. La linea
+  // tratteggiata resta solo se nello stesso giorno c'e' altro (Code Freeze,
+  // fasi senza milestone).
+  const milestonePhaseNames = new Set(phases.filter((p) => p.milestone).map((p) => p.name.toLowerCase()))
+  const hasMilestone = (day: number) => namesByDay.get(day)!.some((n) => milestonePhaseNames.has(n.toLowerCase()))
+  const hasLine = (day: number) => namesByDay.get(day)!.some((n) => !milestonePhaseNames.has(n.toLowerCase()))
+  // Rombo verde se tutte le milestone di quel giorno sono Done.
+  const milestoneDoneOn = (day: number) =>
+    phases
+      .filter((p) => p.milestone && dateStrToEpochDays(p.date) === day)
+      .every((p) => p.milestoneDone)
   const markDays = [...namesByDay.keys()].sort((a, b) => a - b)
   const rangeDays = [...allDays, todayDay, ...markDays]
   const minDay = Math.min(...rangeDays) - 2
@@ -649,6 +675,12 @@ export function BacklogGanttChart({
   // Le linee verticali (Today, Code Freeze, fasi) cadono a fine giornata,
   // sul bordo destro del giorno, dove finiscono anche le barre.
   const lineX = (day: number) => dayToX(day) + dayWidth
+  // Dove esce una freccia (fine della barra, punta destra del rombo) e dove
+  // arriva (inizio della barra, punta sinistra del rombo).
+  const linkStartX = (item: BacklogItem, endDay: number) =>
+    isMilestone(item) ? lineX(endDay) + MILESTONE_HALF : dayToX(endDay) + dayWidth
+  const linkEndX = (item: BacklogItem, startDay: number) =>
+    isMilestone(item) ? lineX(startDay) - MILESTONE_HALF : dayToX(startDay)
 
   // Barre modificabili col mouse: cursore secondo la zona (bordi o centro),
   // trascinamento a giorni interi con anteprima, salvataggio al rilascio.
@@ -677,13 +709,14 @@ export function BacklogGanttChart({
     document.body.style.cursor = ''
     updateBarDrag(null)
   }
-  const barHandlers = (item: BacklogItem, start: number, end: number) =>
+  // fixedZone: il rombo di una milestone si sposta soltanto (niente bordi).
+  const barHandlers = (item: BacklogItem, start: number, end: number, fixedZone?: BarDragMode) =>
     editable
       ? {
           onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
             const drag = barDragRef.current
             if (!drag) {
-              const zone = barZone(e)
+              const zone = fixedZone ?? barZone(e)
               e.currentTarget.style.cursor = zone ? CURSOR_BY_MODE[zone] : ''
               return
             }
@@ -694,7 +727,7 @@ export function BacklogGanttChart({
           },
           onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
             if (e.pointerType !== 'mouse' || e.button !== 0) return
-            const zone = barZone(e)
+            const zone = fixedZone ?? barZone(e)
             // Fuori dalle zone modificabili il trascinamento sposta il Gantt.
             if (!zone) return
             e.stopPropagation()
@@ -781,15 +814,20 @@ export function BacklogGanttChart({
   const marks = markDays.map((day) => {
     const label = `${namesByDay.get(day)!.join(' · ')} ${formatEpochDaysAsDate(day)}`
     const width = markTextWidth(label, 600)
-    const alignRight = lineX(day) + 6 + width > chartWidth
+    // Con la milestone il testo si scosta dal rombo, centrato sulla data.
+    const milestone = hasMilestone(day)
+    const gap = milestone ? MILESTONE_HALF + 3 : 6
+    const alignRight = lineX(day) + gap + width > chartWidth
     return {
       day,
       label,
-      start: alignRight ? lineX(day) - 3 - width : lineX(day) + 6,
-      width,
+      milestone,
+      line: hasLine(day),
+      start: alignRight ? lineX(day) - (milestone ? gap : 3) - width : lineX(day) - (milestone ? MILESTONE_HALF : 0) + (milestone ? 0 : 6),
+      width: width + (milestone ? MILESTONE_HALF + gap : 0),
       lane: 0,
       color: day === codeFreezeDay ? 'var(--success)' : COLOR_PHASE,
-      position: alignRight ? { right: chartWidth - lineX(day) + 3 } : { left: lineX(day) + 6 },
+      position: alignRight ? { right: chartWidth - lineX(day) + (milestone ? gap : 3) } : { left: lineX(day) + gap },
     }
   })
   const laneEnds: number[] = []
@@ -817,9 +855,9 @@ export function BacklogGanttChart({
       const pStart = dateStrToEpochDays(predecessor.planned_start)
       const pEnd = dateStrToEpochDays(predecessor.expected_finish)
       if (pStart === null || pEnd === null) return null
-      const x1 = dayToX(Math.max(pStart, pEnd)) + dayWidth
+      const x1 = linkStartX(predecessor, Math.max(pStart, pEnd))
       const y1 = barCenterY(predecessorRow)
-      const x2 = dayToX(sStart)
+      const x2 = linkEndX(successor, sStart)
       const y2 = barCenterY(successorRow)
       // Esce a destra dalla fine del predecessore e arriva da sinistra
       // all'inizio del successore. Con spazio tra le due barre basta un
@@ -905,7 +943,7 @@ export function BacklogGanttChart({
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     setLinkMenu(null)
-    const x1 = dayToX(plannedEnd) + dayWidth
+    const x1 = linkStartX(item, plannedEnd)
     const y1 = barCenterY(row)
     setLinkDrag({ from: item, x1, y1, ...contentPoint(e), target: null, reason: null })
   }
@@ -947,7 +985,7 @@ export function BacklogGanttChart({
     const snapped = fromRow >= 0 && targetRow >= 0 ? linkPath(fromRow, targetRow) : null
     if (snapped) {
       const start = dateStrToEpochDays(shownItems[targetRow].planned_start)!
-      return { path: snapped, anchor: { x: dayToX(start), y: barCenterY(targetRow) } }
+      return { path: snapped, anchor: { x: linkEndX(shownItems[targetRow], start), y: barCenterY(targetRow) } }
     }
     return { path: `M${linkDrag.x1},${linkDrag.y1} L${linkDrag.x},${linkDrag.y}`, anchor: null }
   })()
@@ -955,10 +993,10 @@ export function BacklogGanttChart({
   // tratto d'uscita, cosi' la freccia scende prima del testo.
   const linkSourceIds = new Set(allLinks.map((link) => Number(link.id.split('-')[0])))
   const assigneeLabelLeft = (item: BacklogItem, barEnd: number) => {
-    const afterBar = dayToX(barEnd) + dayWidth + ASSIGNEE_LABEL_GAP
+    const afterBar = linkStartX(item, barEnd) + ASSIGNEE_LABEL_GAP
     const plannedEnd = dateStrToEpochDays(item.expected_finish)
     if (!linkSourceIds.has(item.id) || plannedEnd === null) return afterBar
-    return Math.max(afterBar, dayToX(plannedEnd) + dayWidth + LINK_STUB + ASSIGNEE_LABEL_GAP)
+    return Math.max(afterBar, linkStartX(item, plannedEnd) + LINK_STUB + ASSIGNEE_LABEL_GAP)
   }
 
   return (
@@ -1064,6 +1102,33 @@ export function BacklogGanttChart({
               style={{ width: 12, height: 12, borderRadius: 3, background: activityFill(COLOR_ACTUAL), display: 'inline-block' }}
             />
             Attività (fuori code freeze): effettivo
+          </span>
+        )}
+        {items.some(isMilestone) && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                margin: '0 2px',
+                transform: 'rotate(45deg)',
+                background: COLOR_MILESTONE,
+                border: `1.5px solid ${COLOR_MILESTONE_BORDER}`,
+                display: 'inline-block',
+              }}
+            />
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                margin: '0 2px',
+                transform: 'rotate(45deg)',
+                background: COLOR_MILESTONE_DONE,
+                border: `1.5px solid ${COLOR_MILESTONE_DONE_BORDER}`,
+                display: 'inline-block',
+              }}
+            />
+            Milestone (da fare / Done)
           </span>
         )}
         {links.length > 0 && (
@@ -1275,6 +1340,26 @@ export function BacklogGanttChart({
                   </div>
                 ))}
               </div>
+              {marks
+                .filter((mark) => mark.milestone)
+                .map((mark) => (
+                  <div
+                    key={`milestone-${mark.day}`}
+                    title={`Milestone · ${mark.label}`}
+                    style={{
+                      position: 'absolute',
+                      top: headerHeight + mark.lane * MARK_ROW_HEIGHT + MARK_ROW_HEIGHT / 2 - 5.5,
+                      left: lineX(mark.day) - 5.5,
+                      width: 11,
+                      height: 11,
+                      transform: 'rotate(45deg)',
+                      background: milestoneDoneOn(mark.day) ? COLOR_MILESTONE_DONE : COLOR_MILESTONE,
+                      border: `1.5px solid ${milestoneDoneOn(mark.day) ? COLOR_MILESTONE_DONE_BORDER : COLOR_MILESTONE_BORDER}`,
+                      borderRadius: 2,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                ))}
               {marks.map((mark) => (
                 <div
                   key={mark.day}
@@ -1444,7 +1529,9 @@ export function BacklogGanttChart({
                   style={{ height: ROW_HEIGHT, ...rowDragStyle(item), ...linkTargetStyle(item) }}
                   {...rowDropHandlers(item)}
                 >
-                  {marks.map((mark) => (
+                  {marks
+                    .filter((mark) => mark.line)
+                    .map((mark) => (
                     <div
                       key={mark.day}
                       title={mark.label}
@@ -1461,6 +1548,8 @@ export function BacklogGanttChart({
                   {/* Il contenitore copre le barre dell'item e il summary vi
                       resta agganciato scorrendo il Gantt: segue la barra fino
                       alla sua fine. Se e' piu' lungo della barra non si muove. */}
+                  {/* Testi sopra le frecce dei predecessori, con un alone del
+                      colore di sfondo (.gantt-label): le frecce passano sotto. */}
                   {labelAnchor !== null && (
                     <div
                       style={{
@@ -1468,11 +1557,14 @@ export function BacklogGanttChart({
                         left: dayToX(labelAnchor) + 2,
                         top: 2,
                         width: barEnd === null ? undefined : Math.max(0, dayToX(barEnd) + dayWidth - dayToX(labelAnchor) - 2),
+                        zIndex: 3,
+                        pointerEvents: 'none',
                       }}
                     >
                       <div
-                        className="muted"
+                        className="muted gantt-label"
                         style={{
+                          pointerEvents: 'auto',
                           position: 'sticky',
                           left: LABEL_STICKY_OFFSET,
                           width: 'max-content',
@@ -1489,7 +1581,65 @@ export function BacklogGanttChart({
                     </div>
                   )}
 
-                  {pStart !== null && pEnd !== null && (
+                  {pStart !== null && pEnd !== null && isMilestone(item) && (() => {
+                    const phaseName = milestonePhase?.(item) ?? null
+                    const done = item.status === 'Done'
+                    // Chiusa: sta sulla data effettiva, non si sposta piu'.
+                    const movable = !phaseName && !done
+                    const highlight = isLinkTarget(item)
+                      ? `0 0 0 2px ${linkTargetColor}`
+                      : previewById.has(item.id)
+                        ? `0 0 0 2px ${COLOR_LINK_HOVER}`
+                        : criticalPath?.critical.has(item.id)
+                          ? `0 0 0 2px ${COLOR_CRITICAL}`
+                          : undefined
+                    return (
+                      <div
+                        title={
+                          barDrag
+                            ? undefined
+                            : `Milestone${done ? ' chiusa' : ''}: ${formatEpochDaysAsDate(pEnd)}` +
+                              (done
+                                ? '\nData effettiva'
+                                : phaseName
+                                ? `\nData aggiornata della fase "${phaseName}": si cambia nelle Fasi increment della Dashboard`
+                                : editable
+                                  ? '\nTrascina per spostarla (o collegala a una fase nella Dashboard)'
+                                  : '') +
+                              (editable && movable && minStart?.(item)
+                                ? `\nPredecessori: non prima del ${formatIsoDate(minStart(item))}`
+                                : '')
+                        }
+                        {...(movable ? barHandlers(item, pStart, pEnd, 'move') : {})}
+                        style={{
+                          position: 'absolute',
+                          left: lineX(pEnd) - MILESTONE_HALF,
+                          top: PLANNED_BAR_TOP + BAR_HEIGHT / 2 - MILESTONE_HALF,
+                          width: MILESTONE_HALF * 2,
+                          height: MILESTONE_HALF * 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          zIndex: 2,
+                          opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 11,
+                            height: 11,
+                            transform: 'rotate(45deg)',
+                            background: done ? COLOR_MILESTONE_DONE : COLOR_MILESTONE,
+                            border: `1.5px solid ${done ? COLOR_MILESTONE_DONE_BORDER : COLOR_MILESTONE_BORDER}`,
+                            borderRadius: 2,
+                            boxShadow: highlight,
+                          }}
+                        />
+                      </div>
+                    )
+                  })()}
+
+                  {pStart !== null && pEnd !== null && !isMilestone(item) && (
                     <div
                       title={
                         barDrag
@@ -1561,7 +1711,7 @@ export function BacklogGanttChart({
                     </div>
                   )}
 
-                  {aStart !== null && aEnd !== null && (
+                  {aStart !== null && aEnd !== null && !isMilestone(item) && (
                     <div
                       title={`Eff.: ${formatEpochDaysAsDate(aStart)} → ${formatEpochDaysAsDate(aEnd)}`}
                       style={{
@@ -1583,7 +1733,7 @@ export function BacklogGanttChart({
                     <div
                       className={linkDrag?.from.id === item.id ? 'gantt-link-handle gantt-link-handle--active' : 'gantt-link-handle'}
                       title="Trascina su un altro PBI per farne il successore"
-                      style={{ left: dayToX(pEnd) + dayWidth + 3, top: PLANNED_BAR_TOP + BAR_HEIGHT / 2 - 6 }}
+                      style={{ left: linkStartX(item, pEnd) + 3, top: PLANNED_BAR_TOP + BAR_HEIGHT / 2 - 6 }}
                       onPointerDown={(e) => startLinkDrag(e, item, row, pEnd)}
                       onPointerMove={moveLinkDrag}
                       onPointerUp={endLinkDrag}
@@ -1595,11 +1745,12 @@ export function BacklogGanttChart({
                       non intralciare il trascinamento. */}
                   {item.assignee && barEnd !== null && (
                     <div
-                      className="muted"
+                      className="muted gantt-label"
                       style={{
                         position: 'absolute',
                         left: assigneeLabelLeft(item, barEnd),
                         top: 22,
+                        zIndex: 3,
                         fontSize: 11,
                         lineHeight: `${BAR_HEIGHT}px`,
                         whiteSpace: 'nowrap',
@@ -1617,7 +1768,7 @@ export function BacklogGanttChart({
                       no - barra fino a oggi (rossa per le attivita' di
                       servizio, del colore del tipo per le altre), sfumata in
                       coda per segnalare che non e' ancora conclusa. */}
-                  {aStart !== null && aEnd === null && item.status === 'In Progress' && (
+                  {aStart !== null && aEnd === null && item.status === 'In Progress' && !isMilestone(item) && (
                     <div
                       title={`In corso dal ${formatEpochDaysAsDate(aStart)} (nessuna Fine eff. impostata)`}
                       style={{

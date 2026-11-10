@@ -229,6 +229,8 @@ export type BacklogItem = {
   progetto_id: number | null
   // Chiavi Jira dei predecessori, separate da virgola (vedi lib/scheduling.ts).
   predecessors: string | null
+  // Fase dell'increment a cui e' collegata una milestone (ne prende la data).
+  milestone_phase_id: number | null
   status: 'To Do' | 'In Progress' | 'Done'
 }
 

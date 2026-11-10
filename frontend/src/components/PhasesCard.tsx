@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
-import type { Phase } from '../api/types'
+import { isMilestone } from '../lib/milestone'
+import type { BacklogItem, Phase } from '../api/types'
 import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 import { DateInput } from './DateInput'
 
@@ -43,6 +44,42 @@ function slipDays(p: Phase): number | null {
 // i punti delle frecce di scostamento non ce l'hanno e non hanno tooltip.
 type TimelinePoint = { x: number; y: string; kind: string }
 
+// Stato Jira della milestone e data effettiva della fase non d'accordo: il
+// colore del rombo segue Jira, la data definitiva si mette qui.
+function MilestoneMismatch({
+  phase,
+  milestone,
+  onUseDate,
+}: {
+  phase: Phase
+  milestone: BacklogItem | undefined
+  onUseDate: (date: string) => void
+}) {
+  if (!milestone) return null
+  const done = milestone.status === 'Done'
+  if (done && !phase.actual_date) {
+    return (
+      <div className="milestone-mismatch">
+        ⚠ Chiusa su Jira{milestone.actual_finish ? ` il ${formatIsoDate(milestone.actual_finish)}` : ''}: imposta la data
+        effettiva.
+        {milestone.actual_finish && (
+          <button type="button" className="link-btn" onClick={() => onUseDate(milestone.actual_finish!)}>
+            Usa {formatIsoDate(milestone.actual_finish)}
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (!done && phase.actual_date) {
+    return (
+      <div className="milestone-mismatch">
+        ⚠ Data effettiva impostata ma {milestone.jira_key} è ancora aperta su Jira.
+      </div>
+    )
+  }
+  return null
+}
+
 export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
   const { data: phases } = useQuery({ queryKey: ['phases', projectId], queryFn: () => api.phases.list(projectId) })
@@ -65,7 +102,23 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
 
   const update = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<Phase> }) => api.phases.update(id, data),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      // Le milestone collegate seguono la data della fase.
+      queryClient.invalidateQueries({ queryKey: ['backlog', projectId] })
+    },
+  })
+  // Milestone del backlog (label Milestone su Jira), collegabili a una fase:
+  // nel Gantt prendono la sua data.
+  const { data: backlog } = useQuery({ queryKey: ['backlog', projectId], queryFn: () => api.backlog.list(projectId) })
+  const milestones = (backlog ?? []).filter(isMilestone)
+  const linkMilestone = useMutation({
+    mutationFn: async ({ phaseId, itemId }: { phaseId: number; itemId: number | null }) => {
+      const current = milestones.find((m) => m.milestone_phase_id === phaseId)
+      if (itemId !== null) await api.backlog.update(itemId, { milestone_phase_id: phaseId })
+      else if (current) await api.backlog.update(current.id, { milestone_phase_id: null })
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backlog', projectId] }),
   })
   const addPhase = useMutation({
     mutationFn: () =>
@@ -77,7 +130,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     onSuccess: invalidate,
   })
 
-  const error = update.error ?? addPhase.error ?? removePhase.error
+  const error = update.error ?? addPhase.error ?? removePhase.error ?? linkMilestone.error
 
   // Fase corrente: quella il cui nome corrisponde allo Stato increment scelto
   // in Dashboard (il menu li' e' popolato proprio dai nomi di queste fasi).
@@ -124,6 +177,11 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                 </th>
                 <th>Effettiva</th>
                 <th title="Giorni di calendario tra l'originale e la data che vale ora (effettiva, se no aggiornata)">Scost.</th>
+                {milestones.length > 0 && (
+                  <th title="Activity Jira con la label Milestone: collegata alla fase, nel Gantt del Backlog sta sulla sua data">
+                    Milestone
+                  </th>
+                )}
                 <th>Note</th>
                 <th />
               </tr>
@@ -185,6 +243,31 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   <td className="text-right" style={{ whiteSpace: 'nowrap' }}>
                     <SlipCell phase={phase} />
                   </td>
+                  {milestones.length > 0 && (
+                    <td className="editable-cell" style={{ minWidth: 160 }}>
+                      <select
+                        value={milestones.find((m) => m.milestone_phase_id === phase.id)?.id ?? ''}
+                        disabled={linkMilestone.isPending}
+                        title={milestones.find((m) => m.milestone_phase_id === phase.id)?.summary ?? undefined}
+                        onChange={(e) =>
+                          linkMilestone.mutate({ phaseId: phase.id, itemId: e.target.value ? Number(e.target.value) : null })
+                        }
+                      >
+                        <option value="">—</option>
+                        {milestones.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            ◆ {m.jira_key}
+                            {m.summary ? ` – ${m.summary}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <MilestoneMismatch
+                        phase={phase}
+                        milestone={milestones.find((m) => m.milestone_phase_id === phase.id)}
+                        onUseDate={(date) => update.mutate({ id: phase.id, data: { actual_date: date } })}
+                      />
+                    </td>
+                  )}
                   <td className="editable-cell" style={{ minWidth: 240 }}>
                     <input
                       defaultValue={phase.notes ?? ''}
@@ -212,7 +295,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
               ))}
               {phases?.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={milestones.length > 0 ? 8 : 7} className="muted">
                     Nessuna fase definita.
                   </td>
                 </tr>

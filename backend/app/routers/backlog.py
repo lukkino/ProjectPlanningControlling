@@ -2,7 +2,7 @@ import datetime as dt
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app import models, schemas
 from app.database import get_db
@@ -94,10 +94,28 @@ def _normalize_activity(data: dict) -> None:
         data["activity_phase"] = None
 
 
+def _link_milestone(item: models.BacklogItem, phase_id: int) -> None:
+    """Collega la milestone a una fase dello stesso increment: ne prende la
+    data e la fase non resta collegata ad altre milestone."""
+    db = object_session(item)
+    phase = db.get(models.Phase, phase_id)
+    if phase is None or phase.project_id != item.project_id:
+        raise HTTPException(status_code=400, detail="Fase non trovata in questo increment")
+    if not models.is_milestone(item.labels):
+        raise HTTPException(status_code=400, detail=f"{item.jira_key} non ha la label Milestone")
+    for other in db.query(models.BacklogItem).filter(
+        models.BacklogItem.milestone_phase_id == phase_id, models.BacklogItem.id != item.id
+    ):
+        other.milestone_phase_id = None
+    models.align_milestone(item, phase)
+
+
 def _apply_update(item: models.BacklogItem, data: dict) -> None:
     _normalize_activity(data)
     for field, value in data.items():
         setattr(item, field, value)
+    if data.get("milestone_phase_id") is not None:
+        _link_milestone(item, data["milestone_phase_id"])
 
 
 @router.put("/api/projects/{project_id}/backlog/bulk", response_model=list[schemas.BacklogItem])
@@ -193,6 +211,49 @@ def get_sync_progress(project_id: int):
     return _sync_progress.get(project_id) or schemas.SyncProgress(phase="idle")
 
 
+def apply_default_planning(db: Session, project: models.Project) -> int:
+    """PBI in scope, ancora To Do e senza Start pian.: partono dall'inizio
+    dell'increment (primo giorno lavorativo da li') e durano il loro Sizing,
+    1 giorno se manca. Cosi' compaiono nel Gantt e si posizionano
+    trascinandoli. Restituisce quanti item ha pianificato."""
+    start = project.start_date
+    if start is None:
+        return 0
+    off = db.query(models.NonWorkingDay).filter(models.NonWorkingDay.project_id == project.id).all()
+
+    def working(day: dt.date) -> bool:
+        return day.weekday() < 5 and not any(r.start_date <= day <= r.end_date for r in off)
+
+    def add_working_days(first: dt.date, days: int) -> dt.date:
+        # Stessa regola di addWorkingDays (frontend/src/lib/scheduling.ts):
+        # days giorni lavorativi, estremi inclusi.
+        day, remaining = first, days - 1
+        while remaining > 0:
+            day += dt.timedelta(days=1)
+            if working(day):
+                remaining -= 1
+        return day
+
+    while not working(start):
+        start += dt.timedelta(days=1)
+    planned = 0
+    items = db.query(models.BacklogItem).filter(
+        models.BacklogItem.project_id == project.id,
+        models.BacklogItem.archived_at.is_(None),
+        models.BacklogItem.in_scope.is_(True),
+        models.BacklogItem.planned_start.is_(None),
+    )
+    for item in items:
+        if item.status != "To Do":
+            continue
+        if not item.planned_duration_days or item.planned_duration_days <= 0:
+            item.planned_duration_days = 1
+        item.planned_start = start
+        item.expected_finish = add_working_days(start, max(1, round(item.planned_duration_days)))
+        planned += 1
+    return planned
+
+
 def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -> schemas.SyncResult:
     """Allinea gli item del backlog alle issue lette da Jira: crea le nuove,
     aggiorna le esistenti (riportando nel backlog quelle archiviate), archivia
@@ -233,6 +294,9 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             item.actual_start = issue.actual_start
             item.actual_finish = issue.actual_finish
             item.last_synced_at = now
+            # Una milestone non e' lavoro del team: sempre fuori dal code freeze.
+            if models.is_milestone(issue.labels):
+                item.included_in_codefreeze = False
             if item.archived_at is not None:
                 item.archived_at = None
                 restored += 1
@@ -262,7 +326,9 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
                 actual_finish=issue.actual_finish,
                 last_synced_at=now,
                 # Solo alla creazione: dopo, il flag e' dell'utente.
-                included_in_codefreeze=not models.is_cve_bug(issue.issue_type, issue.summary),
+                included_in_codefreeze=not (
+                    models.is_cve_bug(issue.issue_type, issue.summary) or models.is_milestone(issue.labels)
+                ),
             )
             db.add(item)
             created += 1
@@ -277,6 +343,16 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             item.archived_at = now
             removed += 1
 
+    # Gli item da fare senza date compaiono nel Gantt dall'inizio dell'increment.
+    db.flush()
+    # Milestone collegate a una fase: chiuse su Jira passano alla data effettiva.
+    for item in db.query(models.BacklogItem).filter(
+        models.BacklogItem.project_id == project_id, models.BacklogItem.milestone_phase_id.is_not(None)
+    ):
+        phase = db.get(models.Phase, item.milestone_phase_id)
+        if phase is not None:
+            models.align_milestone(item, phase)
+    apply_default_planning(db, db.get(models.Project, project_id))
     db.commit()
     return schemas.SyncResult(
         created=created, updated=updated, removed=removed, restored=restored, total_matched=len(issues)

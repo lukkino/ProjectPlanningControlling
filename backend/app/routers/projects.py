@@ -236,6 +236,9 @@ def update_phase(phase_id: int, payload: schemas.PhaseUpdate, db: Session = Depe
         setattr(phase, field, value)
     if planned_changed:
         _set_phase_planned_date(phase, new_planned)
+    # Le milestone collegate seguono la fase (vedi models.align_milestone).
+    for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
+        models.align_milestone(item, phase)
     sync_phase_dates(phase.project)
     db.commit()
     db.refresh(phase)
@@ -252,6 +255,8 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"La fase {standard} porta una data dell'increment: non si può eliminare")
     if phase is _first_phase(phase.project):
         raise HTTPException(status_code=400, detail="La prima fase porta il Project start dell'increment: non si può eliminare")
+    for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
+        item.milestone_phase_id = None
     db.delete(phase)
     db.commit()
 

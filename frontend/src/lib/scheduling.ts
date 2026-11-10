@@ -1,4 +1,5 @@
 import type { BacklogItem, NonWorkingDay } from '../api/types'
+import { isMilestone } from './milestone'
 
 export function toIsoLocal(d: Date): string {
   const yyyy = d.getFullYear()
@@ -165,9 +166,14 @@ export function scheduleFromPredecessors(
     const finishes = predecessors.map((p) => p.expected_finish).filter((f): f is string => !!f)
     if (finishes.length > 0) {
       const planned_start = nextWorkingDay(finishes.reduce((a, b) => (a > b ? a : b)), off)
-      if (!item.planned_start || item.planned_start < planned_start) {
+      // Una milestone collegata a una fase sta sulla data della fase: non la
+      // sposta nessuno. Le altre milestone durano un giorno solo.
+      const pinned = isMilestone(item) && item.milestone_phase_id != null
+      if (!pinned && (!item.planned_start || item.planned_start < planned_start)) {
         const change: Partial<BacklogItem> = { planned_start }
-        const expected_finish = addWorkingDays(planned_start, item.planned_duration_days, off)
+        const expected_finish = isMilestone(item)
+          ? planned_start
+          : addWorkingDays(planned_start, item.planned_duration_days, off)
         if (expected_finish) change.expected_finish = expected_finish
         Object.assign(item, change)
         changes.set(item.id, { ...changes.get(item.id), ...change })

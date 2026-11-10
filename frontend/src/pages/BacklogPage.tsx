@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
+import { isMilestone } from '../lib/milestone'
 import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
 import { ACTIVITY_PHASES } from '../lib/activityPhases'
 import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
@@ -235,7 +236,20 @@ export function BacklogPage() {
     queryKey: ['phases', project.id],
     queryFn: () => api.phases.list(project.id),
   })
-  const ganttPhases = (phases ?? []).map((p) => ({ name: p.name, date: p.actual_date ?? p.planned_date }))
+  // Fasi con una milestone collegata: nel Gantt un rombo nel calendario al
+  // posto della linea tratteggiata (la milestone sta gia' sulla sua data).
+  // La fase con la milestone sta dove sta la milestone: data aggiornata finche'
+  // non e' chiusa, poi effettiva (il backend la tiene allineata, vedi
+  // models.align_milestone).
+  const ganttPhases = (phases ?? []).map((p) => {
+    const milestone = (items ?? []).find((i) => i.milestone_phase_id === p.id && isMilestone(i))
+    return {
+      name: p.name,
+      date: milestone ? (milestone.planned_start ?? p.planned_date) : (p.actual_date ?? p.planned_date),
+      milestone: !!milestone,
+      milestoneDone: milestone?.status === 'Done',
+    }
+  })
 
   // Giorni non lavorativi del team (ferie, malattia, chiusure): tutti i
   // calcoli delle date pianificate qui sotto li saltano come i weekend.
@@ -320,7 +334,7 @@ export function BacklogPage() {
   const itemsByKey = indexByKey(items ?? [])
   const cascadeChain = () =>
     [...(items ?? [])]
-      .filter((i) => i.in_scope && !i.is_activity && resolvePredecessors(i, itemsByKey).length === 0)
+      .filter((i) => i.in_scope && !i.is_activity && !isMilestone(i) && resolvePredecessors(i, itemsByKey).length === 0)
       .sort((a, b) => a.priority_order - b.priority_order)
 
   // Ripianifica in cascata gli item che seguono chain[fromIndex], la cui
@@ -476,6 +490,14 @@ export function BacklogPage() {
       if (queryClient.isMutating({ mutationKey: ganttMutationKey }) === 1) invalidate()
     },
   })
+  // Milestone non collegata a una fase e chiusa: nel Gantt sta sulla data
+  // effettiva (chiusura su Jira); prima su quella pianificata. Quelle
+  // collegate hanno gia' la data giusta dal backend.
+  const milestoneOnGantt = (item: BacklogItem): BacklogItem =>
+    isMilestone(item) && !item.milestone_phase_id && item.status === 'Done' && item.actual_finish
+      ? { ...item, planned_start: item.actual_finish, expected_finish: item.actual_finish }
+      : item
+
   // Primo Start possibile per i predecessori (limite minimo nel Gantt e in tabella).
   const minStartOf = (item: BacklogItem) => earliestStart(item, itemsByKey, offDays)
 
@@ -552,14 +574,29 @@ export function BacklogPage() {
     {
       key: 'jira_key',
       label: 'Jira Key',
-      render: (item) =>
-        project.jira_jql ? (
-          <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
-            {item.jira_key}
-          </a>
-        ) : (
-          item.jira_key
-        ),
+      render: (item) => (
+        <>
+          {isMilestone(item) && (
+            <span
+              className={item.status === 'Done' ? 'milestone-mark milestone-mark--done' : 'milestone-mark'}
+              title={
+                item.milestone_phase_id
+                  ? `Milestone, data della fase "${phases?.find((p) => p.id === item.milestone_phase_id)?.name ?? '?'}"`
+                  : 'Milestone (label Milestone su Jira): collegala a una fase nelle Fasi increment della Dashboard'
+              }
+            >
+              ◆
+            </span>
+          )}
+          {project.jira_jql ? (
+            <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
+              {item.jira_key}
+            </a>
+          ) : (
+            item.jira_key
+          )}
+        </>
+      ),
     },
     {
       key: 'summary',
@@ -1212,7 +1249,7 @@ export function BacklogPage() {
   const hiddenBy = (i: BacklogItem): string[] => {
     const reasons: string[] = []
     if (onlyInScope && !i.in_scope) reasons.push('fuori scope')
-    if (onlyCodefreeze && !i.included_in_codefreeze && !i.is_activity) reasons.push('non in code freeze')
+    if (onlyCodefreeze && !i.included_in_codefreeze && !i.is_activity && !isMilestone(i)) reasons.push('non in code freeze')
     if (hideDone && i.status === 'Done') reasons.push('Done')
     if (hideCve && isCveBug(i)) reasons.push('bug CVE')
     if (onlyComplaints && !isComplaintBug(i, complaintKeys)) reasons.push('non è un complaint')
@@ -1716,9 +1753,10 @@ export function BacklogPage() {
       {view === 'gantt' && (
         <BacklogGanttChart
           items={
-            ganttOnlyForecast && forecastTarget != null
+            (ganttOnlyForecast && forecastTarget != null
               ? displayItems.filter((i) => forecastHighlightIds.has(i.id))
               : displayItems
+            ).map(milestoneOnGantt)
           }
           jiraBrowseUrl={project.jira_jql ? 'https://inpeco.atlassian.net/browse/' : null}
           forecastCutoffId={forecastCutoffId}
@@ -1733,6 +1771,9 @@ export function BacklogPage() {
           onAddPredecessor={addPredecessor}
           onRemovePredecessor={removePredecessor}
           linkError={linkError}
+          milestonePhase={(item) =>
+            item.milestone_phase_id ? (phases?.find((p) => p.id === item.milestone_phase_id)?.name ?? null) : null
+          }
           onRowMove={moveItem}
         />
       )}

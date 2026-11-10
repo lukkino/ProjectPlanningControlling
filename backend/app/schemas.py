@@ -413,6 +413,7 @@ class BacklogItemBase(BaseModel):
     notes: str | None = None
     progetto_id: int | None = None
     predecessors: str | None = None
+    milestone_phase_id: int | None = None
 
 
 class BacklogItemCreate(BacklogItemBase):
@@ -442,6 +443,7 @@ class BacklogItemUpdate(BaseModel):
     notes: str | None = None
     progetto_id: int | None = None
     predecessors: str | None = None
+    milestone_phase_id: int | None = None
 
 
 class BacklogItemBulkUpdate(BacklogItemUpdate):
