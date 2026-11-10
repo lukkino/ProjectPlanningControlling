@@ -581,6 +581,7 @@ class ProjectBase(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    co_software_involved: bool | None = None
     scenarios_folder: str | None = None
     review_documents_folder: str | None = None
     is_current: bool = False
@@ -610,6 +611,7 @@ class ProjectUpdate(BaseModel):
     jira_jql: str | None = None
     change_order_url: str | None = None
     change_order_label: str | None = None
+    co_software_involved: bool | None = None
     scenarios_folder: str | None = None
     review_documents_folder: str | None = None
     is_current: bool | None = None

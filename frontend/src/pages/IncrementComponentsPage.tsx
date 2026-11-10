@@ -231,14 +231,14 @@ export function IncrementComponentsPage() {
       )}
       {components && components.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="components-table">
             <thead>
               <tr>
                 <th>Componente</th>
                 <th>PN</th>
                 <th title="Sigla del componente nella Release Notice (es. PSDA → PSDA_6.0.0)">Sigla</th>
                 <th>Fix version</th>
-                <th title="Link all'artefatto del componente su Artifactory">Artifactory</th>
+                <th title="Link all'artefatto del componente su Artifactory ISP">Artifactory ISP</th>
                 <th>Dettaglio</th>
                 <th>Note</th>
                 <th />
@@ -267,14 +267,14 @@ export function IncrementComponentsPage() {
                     </td>
                     <td className="editable-cell" style={{ minWidth: 220 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <CellInput value={component.artifactory_url} label="Link Artifactory" onSave={save('artifactory_url')} />
+                        <CellInput value={component.artifactory_url} label="Link Artifactory ISP" onSave={save('artifactory_url')} />
                         {component.artifactory_url && (
                           <a
                             href={component.artifactory_url}
                             target="_blank"
                             rel="noreferrer"
-                            title="Apri l'artefatto su Artifactory"
-                            aria-label={`Apri ${component.name} su Artifactory`}
+                            title="Apri l'artefatto su Artifactory ISP"
+                            aria-label={`Apri ${component.name} su Artifactory ISP`}
                           >
                             ↗
                           </a>

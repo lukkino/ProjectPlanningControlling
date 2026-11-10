@@ -65,7 +65,7 @@ def open_change_order_software(project_id: int, db: Session = Depends(get_db)):
     Order dell'increment, sulla parte Software (vedi
     services/tools/change_order_browser.py)."""
     project = _project_with_co(db, project_id)
-    args = ["app.services.tools.change_order_browser", project.change_order_url]
+    args = ["app.services.tools.change_order_browser", project.change_order_url, "--project-id", str(project_id)]
     if project.change_order_label:
         args += ["--label", project.change_order_label]
     _start_browser(args, project_id, "open-software")

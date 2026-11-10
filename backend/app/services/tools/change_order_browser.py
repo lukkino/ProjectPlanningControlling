@@ -257,12 +257,32 @@ def wait_for_co_panel(page, url: str, label: str | None):
     return None, None
 
 
-def run(url: str, label: str | None) -> None:
+def save_software_involved(project_id: int | None, involved: bool) -> None:
+    """Registra sull'increment se l'impatto Software del CO e' gia'
+    dichiarato (vedi models.Project.co_software_involved)."""
+    if project_id is None:
+        return
+    from app import models
+    from app.database import SessionLocal
+
+    try:
+        with SessionLocal() as db:
+            project = db.get(models.Project, project_id)
+            if project is not None and project.co_software_involved != involved:
+                project.co_software_involved = involved
+                db.commit()
+    except Exception:
+        log.exception("Stato dell'impatto Software non salvato")
+
+
+def run(url: str, label: str | None, project_id: int | None = None) -> None:
     with sync_playwright() as p:
         context = launch(p)
         page = context.pages[0] if context.pages else context.new_page()
         write_status("Apro il Change Order (se chiede il login, fallo nella finestra di Chrome)", phase="Apertura CO")
         reached = open_software_section(page, url, label)
+        if reached in ("popup", "detail"):
+            save_software_involved(project_id, reached == "detail")
         if reached == "popup":
             write_status("Popup Software aperto: scegli Involved / Not Involved nella finestra", phase="Fatto")
         elif reached == "detail":
@@ -285,10 +305,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("--label")
+    parser.add_argument("--project-id", type=int)
     args = parser.parse_args()
     setup_logging()
     try:
-        run(args.url, args.label)
+        run(args.url, args.label, args.project_id)
     except Exception:
         log.exception("Errore")
         raise

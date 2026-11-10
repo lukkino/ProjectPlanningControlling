@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { api, saveBlob, type WorkbookDocument, type WorkbookExportResult } from '../api/client'
 import type {
   BacklogItem,
@@ -1655,11 +1655,18 @@ const CO_STATUS_KEY = ['change-order-status']
 // /api/change-order/status), qui si vede senza guardare il browser.
 // Interroga spesso mentre la finestra e' aperta, di rado altrimenti.
 function ChangeOrderProgress({ projectId }: { projectId: number }) {
+  const queryClient = useQueryClient()
   const { data: status } = useQuery({
     queryKey: CO_STATUS_KEY,
     queryFn: api.projects.changeOrderStatus,
     refetchInterval: (query) => (query.state.data?.running ? 1500 : 10000),
   })
+  // Lo script registra sull'increment se l'impatto Software e' dichiarato:
+  // a ogni cambio di fase si rilegge l'increment per aggiornare i passi.
+  const phase = status?.project_id === projectId ? status.phase : null
+  useEffect(() => {
+    if (phase) queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+  }, [phase, projectId, queryClient])
   if (!status || status.project_id !== projectId || !status.phase) return null
 
   const title = status.action === 'fill-target' ? `Compilazione target ${status.pn}` : 'Apertura parte Software'
@@ -1747,10 +1754,16 @@ function ChangeOrderTargets({ projectId }: { projectId: number }) {
   })
 
   if (error) return <div className="error-banner">{(error as Error).message}</div>
-  if (!targets || targets.length === 0) return null
+  if (!targets) return null
+  if (targets.length === 0) {
+    return (
+      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        Nessun PN: aggiungi i componenti rilasciati nella tab Components &amp; PN.
+      </p>
+    )
+  }
   return (
-    <div style={{ marginTop: 14 }}>
-      <h4 style={{ margin: '0 0 4px' }}>Target Software</h4>
+    <div>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
         Un target per PN, dalla tab Components &amp; PN. "Compila nel CO" apre il CO in una finestra di Chrome, crea il
         target se manca (Change Reason = PN) e compila le righe Data Collection mancanti: ogni Save lo premi tu, un banner
@@ -1829,6 +1842,7 @@ export function DocumentsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
   })
 
+  const coInvolved = project.co_software_involved === true
   const openCoSoftware = useMutation({
     mutationFn: () => api.projects.openChangeOrderSoftware(project.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CO_STATUS_KEY }),
@@ -1864,64 +1878,111 @@ export function DocumentsPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Change Order</h3>
-        {!editingChangeOrder && project.change_order_url ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <a href={project.change_order_url} target="_blank" rel="noreferrer" className="btn btn-primary">
-              {project.change_order_label || project.change_order_url}
-            </a>
-            <button
-              className="btn"
-              disabled={openCoSoftware.isPending}
-              onClick={() => openCoSoftware.mutate()}
-              title="Apre il Change Order in una finestra di Chrome dedicata e clicca il pulsante delle attività Software. La prima volta va fatto il login Microsoft in quella finestra."
-            >
-              {openCoSoftware.isPending ? 'Apertura…' : 'Apri attività Software'}
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                setCoUrl(project.change_order_url ?? '')
-                setCoLabel(project.change_order_label ?? '')
-                setEditingChangeOrder(true)
-              }}
-            >
-              Modifica
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="form-row" style={{ marginBottom: 0, minWidth: 260, flex: 1 }}>
-              <label>URL Change Order</label>
-              <input placeholder="https://..." value={coUrl} onChange={(e) => setCoUrl(e.target.value)} />
-            </div>
-            <div className="form-row" style={{ marginBottom: 0, minWidth: 200, flex: 1 }}>
-              <label>Nome Change Order</label>
-              <input placeholder="es. CO2026-0123" value={coLabel} onChange={(e) => setCoLabel(e.target.value)} />
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {project.change_order_url && (
-                <button className="btn" onClick={() => setEditingChangeOrder(false)} disabled={updateProject.isPending}>
-                  Annulla
+        <ol className="co-steps">
+          <li className={project.change_order_url && !editingChangeOrder ? 'co-step done' : 'co-step current'}>
+            <div className="co-step-title">Collega il Change Order</div>
+            {!editingChangeOrder && project.change_order_url ? (
+              <div className="co-step-body">
+                <a href={project.change_order_url} target="_blank" rel="noreferrer" className="btn btn-primary">
+                  {project.change_order_label || project.change_order_url}
+                </a>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setCoUrl(project.change_order_url ?? '')
+                    setCoLabel(project.change_order_label ?? '')
+                    setEditingChangeOrder(true)
+                  }}
+                >
+                  Modifica
                 </button>
-              )}
-              <button
-                className="btn btn-primary"
-                disabled={!coUrl.trim() || updateProject.isPending}
-                onClick={() =>
-                  updateProject.mutate(
-                    { change_order_url: coUrl.trim() || null, change_order_label: coLabel.trim() || null },
-                    { onSuccess: () => setEditingChangeOrder(false) },
-                  )
-                }
-              >
-                {updateProject.isPending ? 'Salvataggio…' : 'Salva'}
-              </button>
-            </div>
-          </div>
-        )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="form-row" style={{ marginBottom: 0, minWidth: 260, flex: 1 }}>
+                  <label>URL Change Order</label>
+                  <input placeholder="https://..." value={coUrl} onChange={(e) => setCoUrl(e.target.value)} />
+                </div>
+                <div className="form-row" style={{ marginBottom: 0, minWidth: 200, flex: 1 }}>
+                  <label>Nome Change Order</label>
+                  <input placeholder="es. CO2026-0123" value={coLabel} onChange={(e) => setCoLabel(e.target.value)} />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {project.change_order_url && (
+                    <button className="btn" onClick={() => setEditingChangeOrder(false)} disabled={updateProject.isPending}>
+                      Annulla
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-primary"
+                    disabled={!coUrl.trim() || updateProject.isPending}
+                    onClick={() =>
+                      updateProject.mutate(
+                        {
+                          change_order_url: coUrl.trim() || null,
+                          change_order_label: coLabel.trim() || null,
+                          // Altro CO: l'impatto Software va riverificato.
+                          ...(coUrl.trim() !== (project.change_order_url ?? '') ? { co_software_involved: null } : {}),
+                        },
+                        { onSuccess: () => setEditingChangeOrder(false) },
+                      )
+                    }
+                  >
+                    {updateProject.isPending ? 'Salvataggio…' : 'Salva'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </li>
+
+          <li className={!project.change_order_url ? 'co-step' : coInvolved ? 'co-step done' : 'co-step current'}>
+            <div className="co-step-title">Dichiara l'impatto Software (Involved)</div>
+            {project.change_order_url && (
+              <>
+                <p className="muted co-step-help">
+                  {coInvolved
+                    ? 'Impatto già dichiarato. "Apri parte Software" apre il dettaglio della riga Software (Department Targets e Data Collection) per controllare o correggere a mano.'
+                    : 'Su un CO nuovo il team Software deve prima dichiararsi Involved: il pulsante apre il CO in una finestra di Chrome e clicca "Software" nel pannello; nel popup scegli Involved e salva. Senza questo passo la compilazione dei target non parte.'}
+                  {project.co_software_involved === false &&
+                    ' L’ultima apertura del CO ha trovato l’impatto ancora da dichiarare.'}
+                </p>
+                <div className="co-step-body">
+                  <button
+                    className={coInvolved ? 'btn' : 'btn btn-primary'}
+                    disabled={openCoSoftware.isPending}
+                    onClick={() => openCoSoftware.mutate()}
+                    title="La prima volta va fatto il login Microsoft nella finestra di Chrome"
+                  >
+                    {openCoSoftware.isPending ? 'Apertura…' : coInvolved ? 'Apri parte Software' : 'Imposta impatto Software'}
+                  </button>
+                  <label className="co-step-check" title="Si aggiorna anche da solo quando l'automazione apre il CO">
+                    <input
+                      type="checkbox"
+                      checked={coInvolved}
+                      disabled={updateProject.isPending}
+                      onChange={(e) => updateProject.mutate({ co_software_involved: e.target.checked })}
+                    />
+                    Impatto dichiarato
+                  </label>
+                </div>
+              </>
+            )}
+          </li>
+
+          <li className={!project.change_order_url ? 'co-step' : coInvolved ? 'co-step current' : 'co-step'}>
+            <div className="co-step-title">Compila i target per PN</div>
+            {project.change_order_url && !editingChangeOrder && (
+              <>
+                {!coInvolved && (
+                  <p className="co-step-warning">Prima completa il passo 2: senza impatto dichiarato la compilazione si ferma.</p>
+                )}
+                <ChangeOrderTargets projectId={project.id} />
+              </>
+            )}
+          </li>
+        </ol>
         {updateProject.isError && <div className="error-banner">{(updateProject.error as Error).message}</div>}
         {openCoSoftware.isError && <div className="error-banner">{(openCoSoftware.error as Error).message}</div>}
-        {!editingChangeOrder && project.change_order_url && <ChangeOrderTargets projectId={project.id} />}
         {project.change_order_url && <ChangeOrderProgress projectId={project.id} />}
       </div>
 

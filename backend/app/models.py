@@ -161,6 +161,11 @@ class Project(Base):
     # testo alternativo opzionale da mostrare al posto dell'URL.
     change_order_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     change_order_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Impatto Software del CO gia' dichiarato (Involved): True/False quando
+    # l'automazione del CO lo ha visto (pulsante Software nel pannello =
+    # ancora da dichiarare) o l'utente lo ha segnato; None = non si sa.
+    # Decide il passo mostrato in Documents.
+    co_software_involved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Cartelle su file system (create a mano dall'utente, qui solo il
     # percorso): presentazioni degli scenari delle Story (colonna Scenarios
     # del Backlog) e documenti delle review.

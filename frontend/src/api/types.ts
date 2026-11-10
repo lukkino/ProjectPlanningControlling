@@ -320,6 +320,8 @@ export type Project = {
   jira_jql: string | null
   change_order_url: string | null
   change_order_label: string | null
+  // Impatto Software del CO gia' dichiarato (Involved); null = non si sa.
+  co_software_involved: boolean | null
   // Percorsi delle cartelle (create a mano su file system) per gli scenari
   // delle Story e per i documenti delle review.
   scenarios_folder: string | null

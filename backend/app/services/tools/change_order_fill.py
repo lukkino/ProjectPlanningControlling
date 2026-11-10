@@ -32,6 +32,7 @@ from app.services.tools.change_order_browser import (
     launch,
     log,
     open_target_row,
+    save_software_involved,
     setup_logging,
     wait_for_co_panel,
     write_status,
@@ -401,6 +402,8 @@ def run(project_id: int, pn: str) -> None:
         try:
             write_status("Apro il Change Order (se chiede il login, fallo nella finestra di Chrome)", phase="Apertura CO")
             kind, _ = wait_for_co_panel(page, project.change_order_url, label)
+            if kind in ("popup", "targets"):
+                save_software_involved(project_id, kind == "targets")
             if kind != "targets":
                 raise FillError("Impatto Software non ancora impostato a Involved: fallo prima dal popup")
             # Due controlli a distanza: appena caricato il pannello la griglia
