@@ -152,7 +152,12 @@ export function BacklogPage() {
   const { project } = useProjectContext()
   const queryClient = useQueryClient()
   const [onlyInScope, setOnlyInScope] = useState(true)
-  const [onlyCodefreeze, setOnlyCodefreeze] = useState(true)
+  // Perimetro mostrato, per categoria: un item compare se appartiene ad
+  // almeno una categoria spuntata (un'attivita' per Release puo' essere anche
+  // "Incluso in codefreeze"). Le milestone si vedono sempre.
+  const [showCodefreeze, setShowCodefreeze] = useState(true)
+  const [showActivities, setShowActivities] = useState(true)
+  const [showOutsideCodefreeze, setShowOutsideCodefreeze] = useState(false)
   const [hideDone, setHideDone] = useState(true)
   const [hideCve, setHideCve] = useState(true)
   const [onlyComplaints, setOnlyComplaints] = useState(false)
@@ -1332,7 +1337,16 @@ export function BacklogPage() {
   const hiddenBy = (i: BacklogItem): string[] => {
     const reasons: string[] = []
     if (onlyInScope && !i.in_scope) reasons.push('fuori scope')
-    if (onlyCodefreeze && !i.included_in_codefreeze && !i.is_activity && !isMilestone(i)) reasons.push('non in code freeze')
+    if (!isMilestone(i)) {
+      const shown =
+        (showCodefreeze && i.included_in_codefreeze) ||
+        (showActivities && i.is_activity) ||
+        (showOutsideCodefreeze && !i.included_in_codefreeze && !i.is_activity)
+      if (!shown)
+        reasons.push(
+          i.is_activity ? 'attività per Release' : i.included_in_codefreeze ? 'in code freeze' : 'fuori dal code freeze',
+        )
+    }
     if (hideDone && i.status === 'Done') reasons.push('Done')
     if (hideCve && isCveBug(i)) reasons.push('bug CVE')
     if (onlyComplaints && !isComplaintBug(i, complaintKeys)) reasons.push('non è un complaint')
@@ -1684,9 +1698,32 @@ export function BacklogPage() {
           Mostra solo item "In Scope"
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="checkbox" checked={onlyCodefreeze} onChange={(e) => setOnlyCodefreeze(e.target.checked)} />
-          Mostra solo item "Incluso in codefreeze" e attività per Release
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title={'Item con "Incluso in codefreeze" (anche se attività per Release)'}
+        >
+          <input type="checkbox" checked={showCodefreeze} onChange={(e) => setShowCodefreeze(e.target.checked)} />
+          Mostra item "Incluso in codefreeze"
+        </label>
+
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title={'Attività per Release (anche se "Incluso in codefreeze")'}
+        >
+          <input type="checkbox" checked={showActivities} onChange={(e) => setShowActivities(e.target.checked)} />
+          Mostra attività per Release
+        </label>
+
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          title={'Item né "Incluso in codefreeze" né attività per Release (es. story senza sviluppi)'}
+        >
+          <input
+            type="checkbox"
+            checked={showOutsideCodefreeze}
+            onChange={(e) => setShowOutsideCodefreeze(e.target.checked)}
+          />
+          Mostra altri item fuori dal code freeze
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
