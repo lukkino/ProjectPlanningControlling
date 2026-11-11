@@ -1332,3 +1332,59 @@ class Suggestions(BaseModel):
     complaints_base_jql: str | None = None
     # Con "{code}" al posto del codice dell'increment.
     increment_jql_template: str | None = None
+
+
+class EarnedValueItem(BaseModel):
+    id: int
+    jira_key: str
+    summary: str | None
+    issue_type: str | None
+    status: str
+    assignee: str | None
+    # Budget in ore: stima dev + test, altrimenti Sizing x 8 h ("stima"/"sizing").
+    budget: float | None
+    budget_source: str | None
+    completion: float | None
+    pv: float
+    ev: float
+    ac: float
+    sv: float
+    cpi: float | None
+    plan_start: dt.date | None
+    plan_finish: dt.date | None
+    # "baseline", "aggiornata" o "effettiva": da dove vengono le date del PV.
+    plan_source: str | None
+
+
+class EarnedValuePoint(BaseModel):
+    day: dt.date
+    pv: float
+    ev: float | None
+    ac: float | None
+
+
+class EarnedValue(BaseModel):
+    today: dt.date
+    has_baseline: bool
+    bac: float
+    pv: float
+    ev: float
+    ac: float
+    sv: float
+    cv: float
+    spi: float | None
+    cpi: float | None
+    eac: float | None
+    etc: float | None
+    vac: float | None
+    plan_start: dt.date | None
+    plan_finish: dt.date | None
+    earned_schedule: dt.date | None
+    schedule_delay_days: float | None
+    forecast_finish: dt.date | None
+    items_without_budget: int
+    items_without_plan: int
+    done_without_hours: int
+    unbudgeted_logged_hours: float
+    items: list[EarnedValueItem]
+    curve: list[EarnedValuePoint]

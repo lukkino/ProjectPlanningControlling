@@ -813,3 +813,58 @@ export type ChangelogEntry = {
   insertions: number
   deletions: number
 }
+
+// Earned Value dell'increment (backend/app/services/earned_value.py): ore.
+export interface EarnedValueItem {
+  id: number
+  jira_key: string
+  summary: string | null
+  issue_type: string | null
+  status: string
+  assignee: string | null
+  budget: number | null
+  budget_source: 'stima' | 'sizing' | null
+  completion: number | null
+  pv: number
+  ev: number
+  ac: number
+  sv: number
+  cpi: number | null
+  plan_start: string | null
+  plan_finish: string | null
+  plan_source: 'baseline' | 'aggiornata' | 'effettiva' | null
+}
+
+export interface EarnedValuePoint {
+  day: string
+  pv: number
+  ev: number | null
+  ac: number | null
+}
+
+export interface EarnedValue {
+  today: string
+  has_baseline: boolean
+  bac: number
+  pv: number
+  ev: number
+  ac: number
+  sv: number
+  cv: number
+  spi: number | null
+  cpi: number | null
+  eac: number | null
+  etc: number | null
+  vac: number | null
+  plan_start: string | null
+  plan_finish: string | null
+  earned_schedule: string | null
+  schedule_delay_days: number | null
+  forecast_finish: string | null
+  items_without_budget: number
+  items_without_plan: number
+  done_without_hours: number
+  unbudgeted_logged_hours: number
+  items: EarnedValueItem[]
+  curve: EarnedValuePoint[]
+}

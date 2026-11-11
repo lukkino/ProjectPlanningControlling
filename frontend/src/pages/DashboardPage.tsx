@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { api, saveBlob } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
+import { EarnedValueCard } from '../components/EarnedValue'
 import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
@@ -705,6 +706,8 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <EarnedValueCard projectId={project.id} />
 
       <RecentlyClosedCard items={backlogItems} phases={phases} period={closedPeriod} setPeriod={setClosedPeriod} />
 

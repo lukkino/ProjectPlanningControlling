@@ -3,6 +3,7 @@ import { toPng } from 'html-to-image'
 import type { BacklogItem, NonWorkingDay } from '../api/types'
 import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 import { isMilestone } from '../lib/milestone'
+import { itemCompletion } from '../lib/earnedValue'
 import { ACTIVITY_PHASES, activityPhaseInfo } from '../lib/activityPhases'
 import { computeCriticalPath } from '../lib/criticalPath'
 import { daysOffSet, parsePredecessors, workingDaysShift, type BacklogPatch } from '../lib/scheduling'
@@ -1700,6 +1701,8 @@ export function BacklogGanttChart({
                           ? undefined
                           : `Agg.: ${formatEpochDaysAsDate(pStart)} → ${formatEpochDaysAsDate(pEnd)}` +
                             baselineNote(item) +
+                            (itemCompletion(item) !== null ? `
+Completamento: ${Math.round(itemCompletion(item)! * 100)}%` : '') +
                             (criticalPath?.float.has(item.id)
                               ? criticalPath.critical.has(item.id)
                                 ? '\nCritico: nessun margine, uno slittamento sposta la fine del progetto'
@@ -1737,7 +1740,29 @@ export function BacklogGanttChart({
                         boxShadow: isLinkTarget(item) ? `0 0 0 5px ${linkTargetColor}33` : undefined,
                         opacity: isDimmed(item) ? DIMMED_OPACITY : undefined,
                       }}
-                    />
+                    >
+                      {/* % di completamento (come l'Earned Value): la parte
+                          gia' fatta della barra, piu' scura. */}
+                      {(() => {
+                        const completion = itemCompletion(item)
+                        if (!completion) return null
+                        return (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: `${Math.round(completion * 100)}%`,
+                              background: item.is_activity ? activityPhaseInfo(item)!.color : color,
+                              opacity: 0.8,
+                              borderRadius: 2,
+                              pointerEvents: 'none',
+                            }}
+                          />
+                        )
+                      })()}
+                    </div>
                   )}
 
                   {/* Baseline: barra grigia sottile tra la pianificata e

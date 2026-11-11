@@ -4,6 +4,7 @@ import type { Snapshot } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
+import { EarnedValueSection } from '../components/EarnedValue'
 
 export function SnapshotsPage() {
   const { project } = useProjectContext()
@@ -59,94 +60,97 @@ export function SnapshotsPage() {
   })
 
   return (
-    <div className="card">
-      <h3>Storico avanzamento</h3>
-      <p className="muted">
-        Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
-        nel grafico della Dashboard).
-        {progettiHours !== null &&
-          ` Un nuovo snapshot prende le Ore usate dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th title="Ore consuntivate (controlling): con progetti collegati, la somma dei loro Actual ore">Ore usate</th>
-              <th title="Ore loggate dagli sviluppatori sulle issue Jira del backlog">Ore Jira</th>
-              <th>PBI totali</th>
-              <th>PBI completati</th>
-              <th title="PBI totali meno PBI completati: si aggiorna da solo modificando le due colonne">PBI rimanenti</th>
-              <th>Note</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {snapshots?.map((s) => (
-              <tr key={s.id}>
-                <td className="editable-cell">
-                  <DateInput
-                    value={s.snapshot_date}
-                    onChange={(value) => value && update.mutate({ id: s.id, data: { snapshot_date: value } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={s.actual_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { actual_hours: e.target.value ? Number(e.target.value) : null } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={s.logged_hours ?? ''}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { logged_hours: e.target.value ? Number(e.target.value) : null } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={s.pbi_total ?? ''}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { pbi_total: e.target.value ? Number(e.target.value) : null } })}
-                  />
-                </td>
-                <td className="editable-cell">
-                  <input
-                    type="number"
-                    defaultValue={s.pbi_done ?? ''}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { pbi_done: e.target.value ? Number(e.target.value) : null } })}
-                  />
-                </td>
-                <td>{s.pbi_total == null ? <span className="muted">-</span> : s.pbi_total - (s.pbi_done ?? 0)}</td>
-                <td className="editable-cell">
-                  <input
-                    defaultValue={s.note ?? ''}
-                    onBlur={(e) => update.mutate({ id: s.id, data: { note: e.target.value || null } })}
-                  />
-                </td>
-                <td>
-                  <button className="btn btn-danger" onClick={() => remove.mutate(s.id)}>
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {snapshots?.length === 0 && (
+    <>
+      <EarnedValueSection projectId={project.id} />
+      <div className="card">
+        <h3>Storico avanzamento</h3>
+        <p className="muted">
+          Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
+          nel grafico della Dashboard).
+          {progettiHours !== null &&
+            ` Un nuovo snapshot prende le Ore usate dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={8} className="muted">
-                  Nessuno snapshot registrato.
-                </td>
+                <th>Data</th>
+                <th title="Ore consuntivate (controlling): con progetti collegati, la somma dei loro Actual ore">Ore usate</th>
+                <th title="Ore loggate dagli sviluppatori sulle issue Jira del backlog">Ore Jira</th>
+                <th>PBI totali</th>
+                <th>PBI completati</th>
+                <th title="PBI totali meno PBI completati: si aggiorna da solo modificando le due colonne">PBI rimanenti</th>
+                <th>Note</th>
+                <th />
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {snapshots?.map((s) => (
+                <tr key={s.id}>
+                  <td className="editable-cell">
+                    <DateInput
+                      value={s.snapshot_date}
+                      onChange={(value) => value && update.mutate({ id: s.id, data: { snapshot_date: value } })}
+                    />
+                  </td>
+                  <td className="editable-cell">
+                    <input
+                      type="number"
+                      defaultValue={s.actual_hours ?? ''}
+                      onBlur={(e) => update.mutate({ id: s.id, data: { actual_hours: e.target.value ? Number(e.target.value) : null } })}
+                    />
+                  </td>
+                  <td className="editable-cell">
+                    <input
+                      type="number"
+                      defaultValue={s.logged_hours ?? ''}
+                      onBlur={(e) => update.mutate({ id: s.id, data: { logged_hours: e.target.value ? Number(e.target.value) : null } })}
+                    />
+                  </td>
+                  <td className="editable-cell">
+                    <input
+                      type="number"
+                      defaultValue={s.pbi_total ?? ''}
+                      onBlur={(e) => update.mutate({ id: s.id, data: { pbi_total: e.target.value ? Number(e.target.value) : null } })}
+                    />
+                  </td>
+                  <td className="editable-cell">
+                    <input
+                      type="number"
+                      defaultValue={s.pbi_done ?? ''}
+                      onBlur={(e) => update.mutate({ id: s.id, data: { pbi_done: e.target.value ? Number(e.target.value) : null } })}
+                    />
+                  </td>
+                  <td>{s.pbi_total == null ? <span className="muted">-</span> : s.pbi_total - (s.pbi_done ?? 0)}</td>
+                  <td className="editable-cell">
+                    <input
+                      defaultValue={s.note ?? ''}
+                      onBlur={(e) => update.mutate({ id: s.id, data: { note: e.target.value || null } })}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn btn-danger" onClick={() => remove.mutate(s.id)}>
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {snapshots?.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    Nessuno snapshot registrato.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <button className="btn btn-primary" onClick={() => add.mutate()}>
+            + Nuovo snapshot
+          </button>
+        </div>
       </div>
-      <div style={{ marginTop: 10 }}>
-        <button className="btn btn-primary" onClick={() => add.mutate()}>
-          + Nuovo snapshot
-        </button>
-      </div>
-    </div>
+    </>
   )
 }

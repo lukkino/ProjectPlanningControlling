@@ -12,6 +12,7 @@ import {
 import { api } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
 import { isMilestone } from '../lib/milestone'
+import { itemBudget, itemCompletion } from '../lib/earnedValue'
 import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
 import { ACTIVITY_PHASES } from '../lib/activityPhases'
 import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
@@ -115,6 +116,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   actual_finish: 90,
   duration: 70,
   logged_hours: 75,
+  completion: 80,
   dev_effort_hours: 90,
   progetto_id: 130,
   notes: 160,
@@ -935,6 +937,32 @@ export function BacklogPage() {
           onBlur={(e) => update.mutate({ id: item.id, data: { logged_hours: num(e.target.value) } })}
         />
       ),
+    },
+    {
+      key: 'completion',
+      label: '% compl.',
+      className: 'text-right',
+      // Come l'Earned Value (lib/earnedValue.ts): Done 100%, altrimenti ore
+      // loggate / budget (stima dev + test o Sizing x 8 h), max 95%.
+      render: (item) => {
+        const completion = itemCompletion(item)
+        if (completion === null || isMilestone(item)) return <span className="muted">—</span>
+        const budget = itemBudget(item)
+        return (
+          <span
+            title={
+              item.status === 'Done'
+                ? 'Done'
+                : `${item.logged_hours ?? 0} h loggate su ${budget} h di budget (max 95% finché non è Done)`
+            }
+          >
+            <span className="ev-bar">
+              <span style={{ width: `${Math.round(completion * 100)}%` }} />
+            </span>
+            {Math.round(completion * 100)}%
+          </span>
+        )
+      },
     },
     {
       key: 'dev_effort_hours',

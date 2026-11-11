@@ -1327,3 +1327,35 @@ ul.changelog-body { padding-left: 20px; }
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
 }
 .gantt-timeline-row:hover .gantt-label { background: rgba(245, 246, 248, 0.92); box-shadow: none; }
+
+/* Earned Value (components/EarnedValue.tsx): semaforo di SPI/CPI. */
+.ev-good { color: var(--success); }
+.ev-warn { color: var(--warning); }
+.ev-bad { color: var(--danger); }
+.ev-kpis { margin-bottom: 12px; }
+.ev-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.ev-warnings { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: var(--warning); }
+.ev-table td.num, .ev-table th { text-align: right; white-space: nowrap; }
+.ev-table th:nth-child(-n+3), .ev-table th:last-child { text-align: left; }
+.ev-table .ev-summary { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-sortable { cursor: pointer; user-select: none; }
+.ev-sortable.active { color: var(--primary); }
+.ev-bar {
+  display: inline-block;
+  width: 44px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ev-bar > span { display: block; height: 100%; background: var(--success); }

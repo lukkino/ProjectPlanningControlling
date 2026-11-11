@@ -36,6 +36,7 @@ from pptx.util import Emu, Inches, Pt
 
 from app import models
 from app.services.document_generator import TEMPLATES_DIR
+from app.services.earned_value import compute_earned_value
 from app.services.metrics import compute_dashboard_metrics
 
 # Template con la grafica aziendale: facoltativo, basta copiare qui un .pptx
@@ -1453,6 +1454,133 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
         series.format.line.width = Pt(2.25)
 
 
+def _ev_tone(index: float | None) -> RGBColor:
+    """Semaforo di SPI/CPI come nella card Earned Value: verde da 0,95,
+    arancione da 0,85, rosso sotto."""
+    if index is None:
+        return COLOR_TEXT
+    if index >= 0.95:
+        return COLOR_SUCCESS
+    if index >= 0.85:
+        return COLOR_WARNING
+    return COLOR_DANGER
+
+
+def _hours(value: float | None) -> str:
+    return "—" if value is None else f"{_num(round(value))} h"
+
+
+def _signed_hours(value: float) -> str:
+    sign = "+" if value > 0.5 else "−" if value < -0.5 else ""
+    return f"{sign}{_num(abs(round(value)))} h"
+
+
+def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
+    """Indicatori e curve PV / EV / AC, come la sezione Earned Value della
+    tab Andamento (services/earned_value.py)."""
+    ev = compute_earned_value(project)
+    slide, box = deck.add_slide("Earned Value")
+    if ev.bac == 0:
+        _text(slide, box, "Nessun PBI con stima (dev + test) o Sizing: serve almeno uno dei due per il budget.", color=COLOR_MUTED)
+        return
+
+    delay = ev.schedule_delay_days
+    delay_note = (
+        []
+        if delay is None
+        else [("in linea col piano" if round(delay) == 0 else f"{abs(round(delay))} gg lav. di {'ritardo' if delay > 0 else 'anticipo'}", COLOR_MUTED)]
+    )
+    late = ev.forecast_finish is not None and ev.plan_finish is not None and ev.forecast_finish > ev.plan_finish
+    tiles: list[tuple[str, RGBColor, str, list[tuple[str, RGBColor]]]] = [
+        (f"{ev.spi:.2f}".replace(".", ",") if ev.spi is not None else "—", _ev_tone(ev.spi), "SPI (tempi)", delay_note),
+        (
+            f"{ev.cpi:.2f}".replace(".", ",") if ev.cpi is not None else "—",
+            _ev_tone(ev.cpi),
+            "CPI (ore)",
+            [(f"CV {_signed_hours(ev.cv)}" if ev.cpi is not None else "nessuna ora loggata", COLOR_MUTED)],
+        ),
+        (
+            _date(ev.forecast_finish) if ev.forecast_finish else "—",
+            COLOR_DANGER if late else COLOR_SUCCESS if ev.forecast_finish else COLOR_TEXT,
+            "Fine prevista",
+            [(f"piano: {_date(ev.plan_finish)}" if ev.forecast_finish else "non ancora significativa", COLOR_MUTED)],
+        ),
+        (
+            _hours(ev.eac),
+            COLOR_TEXT if ev.vac is None else COLOR_DANGER if ev.vac < 0 else COLOR_SUCCESS,
+            "Stima a finire (EAC)",
+            [(f"budget {_hours(ev.bac)}" + (f" · VAC {_signed_hours(ev.vac)}" if ev.vac is not None else ""), COLOR_MUTED)],
+        ),
+    ]
+    gap = Inches(0.2)
+    tile_width = int((box.width - gap * (len(tiles) - 1)) / len(tiles))
+    tile_height = Inches(1.25)
+    for index, (value, value_color, label, notes) in enumerate(tiles):
+        tile = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, box.left + index * (tile_width + gap), box.top, tile_width, tile_height
+        )
+        tile.adjustments[0] = 0.06
+        tile.fill.solid()
+        tile.fill.fore_color.rgb = COLOR_TILE
+        tile.line.fill.background()
+        tile.shadow.inherit = False
+        frame = tile.text_frame
+        frame.word_wrap = True
+        frame.vertical_anchor = MSO_ANCHOR.TOP
+        frame.margin_left = frame.margin_right = Inches(0.15)
+        frame.margin_top = Inches(0.1)
+        _run(frame.paragraphs[0], value, size=22, bold=True, color=value_color)
+        _run(frame.add_paragraph(), label, size=11, color=COLOR_MUTED)
+        for note, note_color in notes:
+            _run(frame.add_paragraph(), note, size=10, color=note_color)
+        for paragraph in frame.paragraphs:
+            paragraph.alignment = PP_ALIGN.LEFT
+
+    summary = (
+        f"Completamento pianificato {_pct(ev.pv / ev.bac)}, guadagnato {_pct(ev.ev / ev.bac)}   ·   "
+        f"PV {_hours(ev.pv)} · EV {_hours(ev.ev)} · AC {_hours(ev.ac)}   ·   SV {_signed_hours(ev.sv)}"
+    )
+    warnings = []
+    if not ev.has_baseline:
+        warnings.append("baseline non fissata: PV sulle date aggiornate")
+    if ev.done_without_hours:
+        warnings.append(f"{ev.done_without_hours} PBI Done senza ore loggate (CPI ottimistico)")
+    if ev.items_without_budget:
+        warnings.append(f"{ev.items_without_budget} PBI senza stima né Sizing esclusi")
+    text_top = box.top + tile_height + Inches(0.1)
+    frame = _text(slide, _Box(box.left, text_top, box.width, Inches(0.5)), summary, size=12)
+    if warnings:
+        _run(frame.add_paragraph(), "Note: " + "; ".join(warnings) + ".", size=10, color=COLOR_WARNING)
+    chart_top = text_top + Inches(0.6)
+    chart_height = box.top + box.height - chart_top
+    if len(ev.curve) < 2 or chart_height < Inches(1.5):
+        return
+
+    chart_data = XyChartData()
+    for name, attribute in (("PV pianificato", "pv"), ("EV guadagnato", "ev"), ("AC ore loggate", "ac")):
+        series = chart_data.add_series(name)
+        for point in ev.curve:
+            value = getattr(point, attribute)
+            if value is not None:
+                series.add_data_point(_date_serial(point.day), round(value))
+    chart = slide.shapes.add_chart(
+        XL_CHART_TYPE.XY_SCATTER_LINES_NO_MARKERS, box.left, chart_top, box.width, chart_height, chart_data
+    ).chart
+    _date_x_axis(chart, [p.day for p in ev.curve])
+    _style_chart(chart, value_axis_title="Ore")
+    chart.value_axis.minimum_scale = 0
+    for series, color, dash in zip(
+        chart.plots[0].series,
+        (COLOR_PLANNED, COLOR_SUCCESS, COLOR_PHASE_ACTUAL),
+        (MSO_LINE_DASH_STYLE.DASH, None, None),
+    ):
+        series.smooth = False
+        series.format.line.width = Pt(2.25)
+        series.format.line.color.rgb = color
+        if dash:
+            series.format.line.dash_style = dash
+
+
 def _completion_slide(deck: _Deck, project: models.Project) -> None:
     slide, box = deck.add_slide("Andamento % completamento nel tempo")
     snapshots = list(project.snapshots)
@@ -1666,6 +1794,7 @@ def generate_dashboard_presentation(project: models.Project, closed_days: int = 
     _backlog_gantt_slides(deck, project)
     _hours_slide(deck, project)
     _completion_slide(deck, project)
+    _earned_value_slide(deck, project)
     _plan_vs_actual_slides(
         deck,
         project,

@@ -15,6 +15,7 @@ from app.services.metrics import (
     compute_dashboard_metrics,
     compute_overview_metrics,
 )
+from app.services.earned_value import compute_earned_value
 from app.services.presentation import generate_dashboard_presentation
 
 router = APIRouter(tags=["dashboard"])
@@ -33,6 +34,22 @@ def get_dashboard(project_id: int, db: Session = Depends(get_db)):
     if project is None:
         raise HTTPException(status_code=404, detail="Progetto non trovato")
     return compute_dashboard_metrics(project)
+
+
+@router.get("/api/projects/{project_id}/earned-value", response_model=schemas.EarnedValue)
+def get_earned_value(project_id: int, db: Session = Depends(get_db)):
+    """Earned Value dell'increment (regole in services/earned_value.py)."""
+    project = db.get(models.Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Progetto non trovato")
+    ev = compute_earned_value(project)
+    return schemas.EarnedValue(
+        **{k: v for k, v in ev.__dict__.items() if k not in ("items", "curve")},
+        sv=ev.sv,
+        cv=ev.cv,
+        items=[schemas.EarnedValueItem(**i.__dict__, sv=i.sv, cpi=i.cpi) for i in ev.items],
+        curve=[schemas.EarnedValuePoint(**p.__dict__) for p in ev.curve],
+    )
 
 
 @router.get("/api/projects/{project_id}/dashboard/presentation")
