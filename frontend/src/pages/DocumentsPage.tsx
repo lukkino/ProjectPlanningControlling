@@ -18,7 +18,7 @@ import type {
   RequirementsCheck,
 } from '../api/types'
 import { useReviewDelivery } from '../components/ReviewDelivery'
-import { formatDateTime } from '../lib/dates'
+import { formatDateTime, parseBackendDateTime } from '../lib/dates'
 import { StatusBadge } from '../components/StatusBadge'
 import { useProjectContext } from './useProjectContext'
 
@@ -1654,6 +1654,78 @@ const CO_STATUS_KEY = ['change-order-status']
 // scrive passo per passo cosa sta facendo (backend: GET
 // /api/change-order/status), qui si vede senza guardare il browser.
 // Interroga spesso mentre la finestra e' aperta, di rado altrimenti.
+// Status del CO sul portale (es. "02-Draft"), letto senza finestra dal
+// backend (services/tools/change_order_status.py). Si aggiorna da solo
+// aprendo la pagina se l'ultima lettura ha piu' di STATUS_MAX_AGE_H ore, o
+// col pulsante.
+const CO_STATUS_MAX_AGE_H = 6
+
+// Prima dell'Execution (01/02, es. "02-Draft") sul CO non si valuta ancora
+// l'impatto: i passi 2 e 3 aspettano. Stato non letto = non si blocca.
+function coBeforeExecution(status: string | null): boolean {
+  if (!status) return false
+  const phase = parseInt(status, 10)
+  return /draft/i.test(status) || (!Number.isNaN(phase) && phase < 3)
+}
+
+function coStatusTone(status: string): string {
+  const s = status.toLowerCase()
+  if (/clos|complet|done|releas/.test(s)) return 'done'
+  if (/cancel|reject/.test(s)) return 'todo'
+  if (/draft|new/.test(s)) return 'ready'
+  return 'progress'
+}
+
+function ChangeOrderPortalStatus({ project }: { project: Project }) {
+  const queryClient = useQueryClient()
+  const refresh = useMutation({
+    mutationFn: () => api.projects.refreshChangeOrderStatus(project.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+  })
+  const [manual, setManual] = useState(false)
+  const autoDone = useRef(false)
+  useEffect(() => {
+    if (autoDone.current || !project.change_order_url) return
+    autoDone.current = true
+    const checked = project.co_status_checked_at ? parseBackendDateTime(project.co_status_checked_at).getTime() : 0
+    if (Date.now() - checked > CO_STATUS_MAX_AGE_H * 3600_000) refresh.mutate()
+  }, [project.change_order_url, project.co_status_checked_at, refresh])
+
+  return (
+    <span className="co-portal-status">
+      <span className="muted">Stato sul portale:</span>
+      {project.co_status ? (
+        <span className={`badge ${coStatusTone(project.co_status)}`}>{project.co_status}</span>
+      ) : (
+        <span className="muted">{refresh.isPending ? '' : 'non letto'}</span>
+      )}
+      {refresh.isPending ? (
+        <span className="muted">lettura dal portale…</span>
+      ) : (
+        <>
+          {project.co_status_checked_at && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              letto {formatDateTime(project.co_status_checked_at)}
+            </span>
+          )}
+          <button
+            className="btn"
+            style={{ padding: '2px 10px', fontSize: 12 }}
+            title="Rilegge lo stato dal portale dei Change Order (senza aprire finestre, circa 10 secondi)"
+            onClick={() => {
+              setManual(true)
+              refresh.mutate()
+            }}
+          >
+            ⟳ Aggiorna
+          </button>
+        </>
+      )}
+      {refresh.isError && manual && <span className="co-portal-error">{(refresh.error as Error).message}</span>}
+    </span>
+  )
+}
+
 function ChangeOrderProgress({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient()
   const { data: status } = useQuery({
@@ -1742,7 +1814,7 @@ function ChangeOrderProgress({ projectId }: { projectId: number }) {
 // con le righe Data Collection da inserire. "Compila nel CO" apre il CO nel
 // browser della macchina del backend, crea il target se manca e compila le
 // righe mancanti: ogni Save lo preme l'utente.
-function ChangeOrderTargets({ projectId }: { projectId: number }) {
+function ChangeOrderTargets({ projectId, blocked = false }: { projectId: number; blocked?: boolean }) {
   const { data: targets, error } = useQuery({
     queryKey: ['change-order-targets', projectId],
     queryFn: () => api.projects.changeOrderTargets(projectId),
@@ -1804,7 +1876,12 @@ function ChangeOrderTargets({ projectId }: { projectId: number }) {
                   <td>{row.code_description ?? <span style={{ color: '#b45309' }}>—</span>}</td>
                   {rowIndex === 0 && (
                     <td rowSpan={target.rows.length} style={{ verticalAlign: 'top' }}>
-                      <button className="btn" disabled={fill.isPending} onClick={() => fill.mutate(target.pn)}>
+                      <button
+                        className="btn"
+                        disabled={fill.isPending || blocked}
+                        title={blocked ? 'Il CO non è ancora in Execution' : undefined}
+                        onClick={() => fill.mutate(target.pn)}
+                      >
                         Compila nel CO
                       </button>
                     </td>
@@ -1843,6 +1920,7 @@ export function DocumentsPage() {
   })
 
   const coInvolved = project.co_software_involved === true
+  const coWaiting = coBeforeExecution(project.co_status)
   const openCoSoftware = useMutation({
     mutationFn: () => api.projects.openChangeOrderSoftware(project.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CO_STATUS_KEY }),
@@ -1896,6 +1974,7 @@ export function DocumentsPage() {
                 >
                   Modifica
                 </button>
+                <ChangeOrderPortalStatus project={project} />
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -1922,7 +2001,9 @@ export function DocumentsPage() {
                           change_order_url: coUrl.trim() || null,
                           change_order_label: coLabel.trim() || null,
                           // Altro CO: l'impatto Software va riverificato.
-                          ...(coUrl.trim() !== (project.change_order_url ?? '') ? { co_software_involved: null } : {}),
+                          ...(coUrl.trim() !== (project.change_order_url ?? '')
+                            ? { co_software_involved: null, co_status: null, co_status_checked_at: null }
+                            : {}),
                         },
                         { onSuccess: () => setEditingChangeOrder(false) },
                       )
@@ -1935,8 +2016,18 @@ export function DocumentsPage() {
             )}
           </li>
 
-          <li className={!project.change_order_url ? 'co-step' : coInvolved ? 'co-step done' : 'co-step current'}>
+          <li
+            className={
+              !project.change_order_url || coWaiting ? 'co-step' : coInvolved ? 'co-step done' : 'co-step current'
+            }
+          >
             <div className="co-step-title">Dichiara l'impatto Software (Involved)</div>
+            {project.change_order_url && coWaiting && (
+              <p className="co-step-warning">
+                Il CO è in <strong>{project.co_status}</strong>: la valutazione d'impatto si fa quando passa in
+                Execution. Aggiorna lo stato dal passo 1 quando è stato avanzato.
+              </p>
+            )}
             {project.change_order_url && (
               <>
                 <p className="muted co-step-help">
@@ -1948,8 +2039,8 @@ export function DocumentsPage() {
                 </p>
                 <div className="co-step-body">
                   <button
-                    className={coInvolved ? 'btn' : 'btn btn-primary'}
-                    disabled={openCoSoftware.isPending}
+                    className={coInvolved || coWaiting ? 'btn' : 'btn btn-primary'}
+                    disabled={openCoSoftware.isPending || coWaiting}
                     onClick={() => openCoSoftware.mutate()}
                     title="La prima volta va fatto il login Microsoft nella finestra di Chrome"
                   >
@@ -1959,7 +2050,7 @@ export function DocumentsPage() {
                     <input
                       type="checkbox"
                       checked={coInvolved}
-                      disabled={updateProject.isPending}
+                      disabled={updateProject.isPending || coWaiting}
                       onChange={(e) => updateProject.mutate({ co_software_involved: e.target.checked })}
                     />
                     Impatto dichiarato
@@ -1969,14 +2060,20 @@ export function DocumentsPage() {
             )}
           </li>
 
-          <li className={!project.change_order_url ? 'co-step' : coInvolved ? 'co-step current' : 'co-step'}>
+          <li className={!project.change_order_url || coWaiting ? 'co-step' : coInvolved ? 'co-step current' : 'co-step'}>
             <div className="co-step-title">Compila i target per PN</div>
             {project.change_order_url && !editingChangeOrder && (
               <>
-                {!coInvolved && (
-                  <p className="co-step-warning">Prima completa il passo 2: senza impatto dichiarato la compilazione si ferma.</p>
+                {coWaiting ? (
+                  <p className="co-step-warning">
+                    La data collection si fa dopo la valutazione d'impatto, con il CO in Execution.
+                  </p>
+                ) : (
+                  !coInvolved && (
+                    <p className="co-step-warning">Prima completa il passo 2: senza impatto dichiarato la compilazione si ferma.</p>
+                  )
                 )}
-                <ChangeOrderTargets projectId={project.id} />
+                <ChangeOrderTargets projectId={project.id} blocked={coWaiting} />
               </>
             )}
           </li>

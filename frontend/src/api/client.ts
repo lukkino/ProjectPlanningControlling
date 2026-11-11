@@ -251,6 +251,8 @@ export const api = {
     // Apre sulla macchina del backend una finestra del browser sul Change
     // Order, gia' sul popup delle attivita' Software.
     openChangeOrderSoftware: (id: number) => post<void>(`/projects/${id}/change-order/open-software`),
+    refreshChangeOrderStatus: (id: number) =>
+      post<{ co_status: string | null; co_status_checked_at: string | null }>(`/projects/${id}/change-order/refresh-status`),
     // Target Software del CO ricavati da Components & PN, e compilazione di
     // uno di essi nel browser (i Save li preme l'utente).
     changeOrderTargets: (id: number) => request<ChangeOrderTarget[]>(`/projects/${id}/change-order/targets`),

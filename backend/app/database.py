@@ -298,6 +298,10 @@ def run_lightweight_migrations() -> None:
         if "scope_narrative" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN scope_narrative TEXT"))
+        if "co_status" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN co_status VARCHAR(64)"))
+                conn.execute(text("ALTER TABLE projects ADD COLUMN co_status_checked_at DATETIME"))
         if "co_software_involved" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_software_involved BOOLEAN"))

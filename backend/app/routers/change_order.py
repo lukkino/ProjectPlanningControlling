@@ -1,5 +1,7 @@
+import json
 import subprocess
 import sys
+import threading
 from dataclasses import asdict
 from pathlib import Path
 
@@ -18,6 +20,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 # Una sola finestra alla volta: il profilo del browser non si puo' aprire
 # due volte insieme.
 _browser_process: subprocess.Popen | None = None
+# Lettura dello Status in corso (stesso profilo: una alla volta).
+_status_lock = threading.Lock()
+STATUS_READ_TIMEOUT_S = 150
 
 
 def _project_with_co(db: Session, project_id: int) -> models.Project:
@@ -91,3 +96,42 @@ def fill_change_order_target(project_id: int, pn: str = Query(...), db: Session 
         raise HTTPException(status_code=400, detail=f"{pn} non è tra i PN dell'increment")
     _start_browser(["app.services.tools.change_order_fill", str(project_id), pn], project_id, "fill-target", pn)
     return {"status": "opening"}
+
+
+@router.post("/api/projects/{project_id}/change-order/refresh-status")
+def refresh_change_order_status(project_id: int, db: Session = Depends(get_db)):
+    """Legge lo Status del CO dal portale, senza finestra (vedi
+    services/tools/change_order_status.py), e lo salva sull'increment."""
+    _project_with_co(db, project_id)
+    if _running():
+        raise HTTPException(
+            status_code=409, detail="La finestra del Change Order è aperta: chiudila per aggiornare lo stato."
+        )
+    if not _status_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Lettura dello stato del CO già in corso.")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "app.services.tools.change_order_status", "--project-id", str(project_id)],
+            cwd=BACKEND_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=STATUS_READ_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Il portale del CO non ha risposto in tempo.")
+    finally:
+        _status_lock.release()
+    lines = [line for line in result.stdout.splitlines() if line.strip().startswith("{")]
+    outcome = json.loads(lines[-1]) if lines else {"status": None, "error": "Nessuna risposta dalla lettura"}
+    if outcome.get("error") == "login":
+        raise HTTPException(
+            status_code=409,
+            detail='Login Microsoft scaduto: apri il CO una volta con "Imposta impatto Software" e rifai il login.',
+        )
+    if not outcome.get("status"):
+        raise HTTPException(status_code=502, detail=f"Stato del CO non letto: {outcome.get('error')}")
+    db.expire_all()
+    project = db.get(models.Project, project_id)
+    return {"co_status": project.co_status, "co_status_checked_at": project.co_status_checked_at}

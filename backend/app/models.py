@@ -166,6 +166,11 @@ class Project(Base):
     # ancora da dichiarare) o l'utente lo ha segnato; None = non si sa.
     # Decide il passo mostrato in Documents.
     co_software_involved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Status del CO sul portale (es. "02-Draft") e quando e' stato letto:
+    # dal pannello del CO, in headless (services/tools/change_order_status.py)
+    # o di passaggio quando l'automazione apre il CO.
+    co_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    co_status_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     # Cartelle su file system (create a mano dall'utente, qui solo il
     # percorso): presentazioni degli scenari delle Story (colonna Scenarios
     # del Backlog) e documenti delle review.

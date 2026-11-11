@@ -327,6 +327,8 @@ export type Project = {
   change_order_label: string | null
   // Impatto Software del CO gia' dichiarato (Involved); null = non si sa.
   co_software_involved: boolean | null
+  co_status: string | null
+  co_status_checked_at: string | null
   // Percorsi delle cartelle (create a mano su file system) per gli scenari
   // delle Story e per i documenti delle review.
   scenarios_folder: string | null

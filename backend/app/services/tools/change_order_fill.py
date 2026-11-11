@@ -32,6 +32,8 @@ from app.services.tools.change_order_browser import (
     launch,
     log,
     open_target_row,
+    read_co_status,
+    save_co_status,
     save_software_involved,
     setup_logging,
     wait_for_co_panel,
@@ -402,6 +404,7 @@ def run(project_id: int, pn: str) -> None:
         try:
             write_status("Apro il Change Order (se chiede il login, fallo nella finestra di Chrome)", phase="Apertura CO")
             kind, _ = wait_for_co_panel(page, project.change_order_url, label)
+            save_co_status(project_id, read_co_status(page))
             if kind in ("popup", "targets"):
                 save_software_involved(project_id, kind == "targets")
             if kind != "targets":

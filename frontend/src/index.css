@@ -1359,3 +1359,7 @@ ul.changelog-body { padding-left: 20px; }
   overflow: hidden;
 }
 .ev-bar > span { display: block; height: 100%; background: var(--success); }
+
+/* Stato del CO sul portale, nel passo 1 del box Change Order (Documents). */
+.co-portal-status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.co-portal-error { color: var(--danger); font-size: 12px; flex-basis: 100%; }

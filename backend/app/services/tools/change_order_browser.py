@@ -257,6 +257,44 @@ def wait_for_co_panel(page, url: str, label: str | None):
     return None, None
 
 
+# Campo Status nell'intestazione del pannello del CO (es. "02-Draft").
+CO_STATUS_SELECTOR = ".ard-FormField-fieldGroup.Status .ard-textfield-display"
+
+
+def read_co_status(page) -> str | None:
+    """Status del CO letto dal pannello aperto, None se non e' visibile."""
+    for frame in page.frames:
+        try:
+            field = frame.locator(CO_STATUS_SELECTOR)
+            for index in range(field.count()):
+                if field.nth(index).is_visible():
+                    value = field.nth(index).inner_text().strip()
+                    if value:
+                        return value
+        except PlaywrightError:
+            continue
+    return None
+
+
+def save_co_status(project_id: int | None, status: str | None) -> None:
+    """Registra sull'increment lo Status del CO appena letto."""
+    if project_id is None or not status:
+        return
+    from app import models
+    from app.database import SessionLocal
+
+    try:
+        with SessionLocal() as db:
+            project = db.get(models.Project, project_id)
+            if project is not None:
+                project.co_status = status
+                project.co_status_checked_at = models._utcnow()
+                db.commit()
+                log.info("Status del CO: %s", status)
+    except Exception:
+        log.exception("Status del CO non salvato")
+
+
 def save_software_involved(project_id: int | None, involved: bool) -> None:
     """Registra sull'increment se l'impatto Software del CO e' gia'
     dichiarato (vedi models.Project.co_software_involved)."""
@@ -281,6 +319,7 @@ def run(url: str, label: str | None, project_id: int | None = None) -> None:
         page = context.pages[0] if context.pages else context.new_page()
         write_status("Apro il Change Order (se chiede il login, fallo nella finestra di Chrome)", phase="Apertura CO")
         reached = open_software_section(page, url, label)
+        save_co_status(project_id, read_co_status(page))
         if reached in ("popup", "detail"):
             save_software_involved(project_id, reached == "detail")
         if reached == "popup":
