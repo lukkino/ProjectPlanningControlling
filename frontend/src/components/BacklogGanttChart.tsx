@@ -323,6 +323,10 @@ type Props = {
   // Fase a cui e' collegata una milestone (ne prende la data, quindi nel
   // Gantt non si sposta); null se non collegata.
   milestonePhase?: (item: BacklogItem) => string | null
+  // Baseline di una milestone collegata a una fase: la data originale della
+  // fase (come nelle Fasi increment della Dashboard); null = la baseline
+  // della milestone stessa.
+  milestoneBaseline?: (item: BacklogItem) => string | null
   // Riga trascinata sulla colonna delle chiavi: l'item prende il posto di
   // quello di destinazione, come nella tabella (assente = ordine fisso).
   onRowMove?: (itemId: number, targetId: number) => void
@@ -347,6 +351,7 @@ export function BacklogGanttChart({
   onRemovePredecessor,
   linkError,
   milestonePhase,
+  milestoneBaseline,
   onRowMove,
 }: Props) {
   // Esporta PNG: l'immagine mostra solo il lavoro ancora da fare (gli item
@@ -481,12 +486,27 @@ export function BacklogGanttChart({
   // nascosta di default.
   const [showBaseline, setShowBaseline] = useState(false)
   const daysOff = useMemo(() => daysOffSet(nonWorkingDays), [nonWorkingDays])
+  // Data di baseline di una milestone: quella originale della fase se e'
+  // collegata a una fase che ce l'ha, se no la sua.
+  const milestoneBaselineOf = (item: BacklogItem) => milestoneBaseline?.(item) || item.baseline_finish
   const baselineNote = (item: BacklogItem) => {
+    if (isMilestone(item)) {
+      const day = milestoneBaselineOf(item)
+      if (!day) return ''
+      const shift = workingDaysShift(day, item.expected_finish, daysOff)
+      const parts = [
+        milestoneBaseline?.(item) ? 'data originale della fase' : null,
+        shift ? `${shift > 0 ? '+' : ''}${shift} gg lavorativi` : 'in linea',
+      ].filter(Boolean)
+      return `\nBaseline: ${formatIsoDate(day)} (${parts.join(', ')})`
+    }
     if (!item.baseline_start || !item.baseline_finish) return ''
     const shift = workingDaysShift(item.baseline_finish, item.expected_finish, daysOff)
     return (
-      `\nBaseline: ${formatIsoDate(item.baseline_start)} → ${formatIsoDate(item.baseline_finish)}` +
-      (shift ? ` (fine ${shift > 0 ? '+' : ''}${shift} gg lavorativi)` : ' (in linea)')
+      (isMilestone(item)
+        ? `\nBaseline: ${formatIsoDate(item.baseline_finish)}`
+        : `\nBaseline: ${formatIsoDate(item.baseline_start)} → ${formatIsoDate(item.baseline_finish)}`) +
+      (shift ? ` (${isMilestone(item) ? '' : 'fine '}${shift > 0 ? '+' : ''}${shift} gg lavorativi)` : ' (in linea)')
     )
   }
   const [criticalByAssignee, setCriticalByAssignee] = useState(true)
@@ -1138,6 +1158,22 @@ export function BacklogGanttChart({
             Baseline (date originali)
           </span>
         )}
+        {showBaseline && items.some((i) => isMilestone(i) && milestoneBaselineOf(i)) && (
+          <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                margin: '0 2px',
+                transform: 'rotate(45deg)',
+                background: 'var(--surface, #fff)',
+                border: `1.5px solid ${COLOR_BASELINE}`,
+                display: 'inline-block',
+              }}
+            />
+            Milestone in baseline
+          </span>
+        )}
         {items.some(isMilestone) && (
           <span className="muted" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span
@@ -1654,6 +1690,7 @@ export function BacklogGanttChart({
                           barDrag
                             ? undefined
                             : `Milestone${done ? ' chiusa' : ''}: ${formatEpochDaysAsDate(pEnd)}` +
+                              baselineNote(item) +
                               (done
                                 ? '\nData effettiva'
                                 : phaseName
@@ -1764,6 +1801,63 @@ Completamento: ${Math.round(itemCompletion(item)! * 100)}%` : '') +
                       })()}
                     </div>
                   )}
+
+                  {/* Milestone in baseline: rombo vuoto grigio sulla data
+                      originale e, se si e' spostata, linea tratteggiata fino
+                      alla posizione attuale. */}
+                  {showBaseline &&
+                    isMilestone(item) &&
+                    (() => {
+                      const bDay = dateStrToEpochDays(milestoneBaselineOf(item))
+                      if (bDay === null) return null
+                      const centerY = PLANNED_BAR_TOP + BAR_HEIGHT / 2
+                      const from = lineX(bDay)
+                      const to = pEnd !== null ? lineX(pEnd) : from
+                      const opacity = isDimmed(item) ? DIMMED_OPACITY : undefined
+                      return (
+                        <>
+                          {Math.abs(to - from) > MILESTONE_HALF && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                left: Math.min(from, to) + (from < to ? MILESTONE_HALF - 2 : MILESTONE_HALF),
+                                width: Math.abs(to - from) - MILESTONE_HALF * 2 + 2,
+                                top: centerY - 0.5,
+                                borderTop: `1.5px dashed ${COLOR_BASELINE}`,
+                                opacity,
+                                pointerEvents: 'none',
+                              }}
+                            />
+                          )}
+                          <div
+                            title={'Milestone in baseline' + baselineNote(item).replace(/^\nBaseline/, '')}
+                            style={{
+                              position: 'absolute',
+                              left: from - MILESTONE_HALF,
+                              top: centerY - MILESTONE_HALF,
+                              width: MILESTONE_HALF * 2,
+                              height: MILESTONE_HALF * 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              zIndex: 1,
+                              opacity,
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 10,
+                                height: 10,
+                                transform: 'rotate(45deg)',
+                                background: 'var(--surface, #fff)',
+                                border: `1.5px solid ${COLOR_BASELINE}`,
+                                borderRadius: 2,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )
+                    })()}
 
                   {/* Baseline: barra grigia sottile tra la pianificata e
                       l'effettiva, con le date originali. */}

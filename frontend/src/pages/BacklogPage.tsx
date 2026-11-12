@@ -256,6 +256,14 @@ export function BacklogPage() {
   // La fase con la milestone sta dove sta la milestone: data aggiornata finche'
   // non e' chiusa, poi effettiva (il backend la tiene allineata, vedi
   // models.align_milestone).
+  // Baseline di una milestone collegata a una fase: la data originale della
+  // fase, come nelle Fasi increment della Dashboard (null se non collegata o
+  // se la fase non ce l'ha: vale la baseline della milestone).
+  const phaseBaselineOf = (item: BacklogItem): string | null =>
+    isMilestone(item) && item.milestone_phase_id
+      ? (phases?.find((p) => p.id === item.milestone_phase_id)?.original_date ?? null)
+      : null
+
   const ganttPhases = (phases ?? []).map((p) => {
     const milestone = (items ?? []).find((i) => i.milestone_phase_id === p.id && isMilestone(i))
     return {
@@ -881,18 +889,23 @@ export function BacklogPage() {
       // qui. Lo scostamento e' quello della Fine pian. in giorni lavorativi.
       key: 'baseline_start',
       label: 'Start orig.',
-      render: (item) => formatIsoDate(item.baseline_start) ?? <span className="muted">—</span>,
+      render: (item) =>
+        formatIsoDate(phaseBaselineOf(item) ?? item.baseline_start) ?? <span className="muted">—</span>,
     },
     {
       key: 'baseline_finish',
       label: 'Fine orig.',
-      render: (item) => formatIsoDate(item.baseline_finish) ?? <span className="muted">—</span>,
+      render: (item) => {
+        const phaseDay = phaseBaselineOf(item)
+        if (phaseDay) return <span title="Data originale della fase collegata">{formatIsoDate(phaseDay)}</span>
+        return formatIsoDate(item.baseline_finish) ?? <span className="muted">—</span>
+      },
     },
     {
       key: 'baseline_shift',
       label: 'Scost.',
       render: (item) => {
-        const shift = workingDaysShift(item.baseline_finish, item.expected_finish, offDays)
+        const shift = workingDaysShift(phaseBaselineOf(item) ?? item.baseline_finish, item.expected_finish, offDays)
         if (shift === null) return <span className="muted">—</span>
         return (
           <span
@@ -1915,6 +1928,7 @@ export function BacklogPage() {
           milestonePhase={(item) =>
             item.milestone_phase_id ? (phases?.find((p) => p.id === item.milestone_phase_id)?.name ?? null) : null
           }
+          milestoneBaseline={phaseBaselineOf}
           onRowMove={moveItem}
         />
       )}

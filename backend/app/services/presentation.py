@@ -1220,6 +1220,17 @@ def _backlog_gantt_slides(deck: _Deck, project: models.Project) -> None:
             shape.line.color.rgb = COLOR_MILESTONE_DONE_BORDER if done else COLOR_MILESTONE_BORDER
             shape.line.width = Pt(0.75)
             shape.shadow.inherit = False
+            # Baseline (come "Mostra baseline" nel Gantt): rombo vuoto grigio
+            # sulla data originale, se diversa.
+            original = models.milestone_baseline(item)
+            if original and original != day and original >= axis_start:
+                ghost = slide.shapes.add_shape(
+                    MSO_SHAPE.DIAMOND, x_of(original) - size // 2, top + (row_height - size) // 2, size, size
+                )
+                ghost.fill.background()
+                ghost.line.color.rgb = COLOR_BASELINE
+                ghost.line.width = Pt(0.75)
+                ghost.shadow.inherit = False
             continue
 
         def bar(start: dt.date, end: dt.date, y: int):

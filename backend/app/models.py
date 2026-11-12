@@ -685,6 +685,16 @@ def align_milestone(item: "BacklogItem", phase: "Phase") -> None:
         item.expected_finish = day
 
 
+def milestone_baseline(item: "BacklogItem") -> dt.date | None:
+    """Baseline di una milestone: la data originale della fase collegata
+    (come nelle Fasi increment), se no la baseline della milestone."""
+    if item.milestone_phase_id is not None:
+        phase = next((p for p in item.project.phases if p.id == item.milestone_phase_id), None)
+        if phase is not None and phase.original_date is not None:
+            return phase.original_date
+    return item.baseline_finish
+
+
 class BacklogItem(Base):
     __tablename__ = "backlog_items"
 
