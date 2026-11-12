@@ -19,7 +19,10 @@ export function ComplaintsLayout() {
 
   const sync = useMutation({
     mutationFn: api.complaints.sync,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['complaints'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['complaints'] })
+      queryClient.invalidateQueries({ queryKey: ['complaint-mismatches'] })
+    },
   })
 
   // La sync valorizza lo stesso timestamp su ogni complaint.
@@ -48,6 +51,9 @@ export function ComplaintsLayout() {
         </NavLink>
         <NavLink to="/complaints/kpi" className={({ isActive }) => (isActive ? 'active' : '')}>
           KPI
+        </NavLink>
+        <NavLink to="/complaints/disallineamenti" className={({ isActive }) => (isActive ? 'active' : '')}>
+          Disallineamenti
         </NavLink>
       </div>
 

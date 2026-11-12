@@ -5,6 +5,7 @@ import type { AbsenceKind, Company, HoursCalculator, IncrementResourceType, Memb
 import { formatIsoDate, workingDaysBetween } from '../lib/dates'
 import { DateInput } from './DateInput'
 import { useBudgetCatalog } from '../lib/budget'
+import { teamKey } from '../lib/team'
 
 type Props = {
   incrementId: number
@@ -28,7 +29,7 @@ const isoOf = (d: Date) =>
 
 // Giorni lavorativi (lun-ven) di ferie di una persona dentro il periodo:
 // intervalli sovrapposti contano una volta sola.
-function absenceDaysInPeriod(absences: MemberAbsence[], start: string | null, end: string | null): number {
+function absenceDaysInPeriod(absences: AbsenceLike[], start: string | null, end: string | null): number {
   if (!start || !end) return 0
   const days = new Set<string>()
   for (const a of absences) {
@@ -45,7 +46,10 @@ function absenceDaysInPeriod(absences: MemberAbsence[], start: string | null, en
   return days.size
 }
 
-const absenceLabel = (a: MemberAbsence) =>
+// Assenza senza il riferimento alla persona (anche quelle del Team).
+export type AbsenceLike = Omit<MemberAbsence, 'member_id'>
+
+const absenceLabel = (a: AbsenceLike) =>
   a.start_date === a.end_date
     ? formatIsoDate(a.start_date)
     : `${formatIsoDate(a.start_date)} – ${formatIsoDate(a.end_date)}`
@@ -54,15 +58,19 @@ const ABSENCE_KINDS: AbsenceKind[] = ['Ferie', 'Malattia', 'Altro']
 
 // Assenze di una persona (ferie, malattia...): un'etichetta per intervallo
 // (✕ per toglierlo) e un piccolo form con tipo e due date (la fine parte
-// uguale all'inizio: un giorno).
-function AbsencesCell({
-  member,
+// uguale all'inizio: un giorno). Usata anche dal Team del Carico team.
+export function AbsencesCell({
+  absences,
   periodStart,
   periodEnd,
   onAdd,
   onRemove,
+  inherited = [],
 }: {
-  member: TeamMember
+  absences: AbsenceLike[]
+  // Assenze inserite nel Team del Carico team: si vedono e tolgono ore, ma
+  // si modificano solo li'.
+  inherited?: AbsenceLike[]
   periodStart: string | null
   periodEnd: string | null
   onAdd: (start: string, end: string, kind: AbsenceKind) => void
@@ -72,12 +80,23 @@ function AbsencesCell({
   const [kind, setKind] = useState<AbsenceKind>('Ferie')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const outside = (a: MemberAbsence) =>
+  const outside = (a: AbsenceLike) =>
     !!periodStart && !!periodEnd && (a.end_date < periodStart || a.start_date > periodEnd)
 
   return (
     <div className="member-list">
-      {member.absences.map((a) => (
+      {inherited.map((a) => (
+        <span
+          key={`team-${a.id}`}
+          className={`member-chip from-team kind-${a.kind.toLowerCase()}${outside(a) ? ' outside' : ''}`}
+          title={`${outside(a) ? 'Fuori dal periodo: non toglie ore. ' : ''}Inserita nel Team del Carico team: si modifica lì`}
+        >
+          {a.kind !== 'Ferie' && <strong>{a.kind}</strong>}
+          {absenceLabel(a)}
+          <span className="from-team-mark">Team</span>
+        </span>
+      ))}
+      {absences.map((a) => (
         <span
           key={a.id}
           className={`member-chip kind-${a.kind.toLowerCase()}${outside(a) ? ' outside' : ''}`}
@@ -248,7 +267,11 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
 
   // I giorni disponibili sono quelli lavorativi del periodo, uguali per
   // tutti; ferie e malattie di una persona tolgono solo le sue ore effettive.
-  const memberAbsenceDays = (m: TeamMember) => absenceDaysInPeriod(m.absences, startDate, endDate)
+  // Assenze della persona: quelle del progetto piu' quelle del Team del
+  // Carico team con lo stesso nome (i giorni in comune contano una volta).
+  const teamAbsencesOf = (m: TeamMember) => calc.team_absences?.[teamKey(m.name)] ?? []
+  const memberAbsenceDays = (m: TeamMember) =>
+    absenceDaysInPeriod([...m.absences, ...teamAbsencesOf(m)], startDate, endDate)
   const memberHours = (m: TeamMember) =>
     netDays === null ? null : Math.max(0, netDays - memberAbsenceDays(m)) * m.hours_per_day
 
@@ -321,6 +344,13 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
 
   return (
     <div className="card">
+      {/* Persone del Team del Carico team, proposte aggiungendo una persona:
+          con lo stesso nome il progetto vede anche le loro ferie. */}
+      <datalist id="capacity-team-people">
+        {(calc.team_people ?? []).map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       <div className="page-header" style={{ marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>Capacity Planner</h3>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -601,7 +631,8 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                           <td className="text-right">{netDays === null ? '—' : fmt(netDays)}</td>
                           <td>
                             <AbsencesCell
-                              member={m}
+                              absences={m.absences}
+                              inherited={teamAbsencesOf(m)}
                               periodStart={startDate}
                               periodEnd={endDate}
                               onAdd={(start, end, kind) => addAbsence.mutate({ memberId: m.id, start, end, kind })}
@@ -634,6 +665,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                       <td className="editable-cell" style={{ paddingLeft: 32 }}>
                         <input
                           placeholder="+ Aggiungi persona (Invio)"
+                          list="capacity-team-people"
                           onKeyDown={(e) => {
                             const name = e.currentTarget.value.trim()
                             if (e.key === 'Enter' && name) {

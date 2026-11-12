@@ -106,6 +106,19 @@ _OWNER_RULES: list[tuple[re.Pattern, str]] = [
         (r"^/api/releases/components/(\d+)", _via("release_components", "release_id", _R)),
         (r"^/api/releases/(\d+)(/|$)", _R),
         (r"^/api/complaints/(\d+)", "select owner_id from complaints where id = :id"),
+        (r"^/api/team/roles/(\d+)", "select owner_id from workload_team_roles where id = :id"),
+        (
+            r"^/api/team/resources/(\d+)",
+            _via("workload_team_resources", "role_id", "select owner_id from workload_team_roles where id = :id"),
+        ),
+        (
+            r"^/api/team/absences/(\d+)",
+            _via(
+                "workload_team_absences",
+                "resource_id",
+                _via("workload_team_resources", "role_id", "select owner_id from workload_team_roles where id = :id"),
+            ),
+        ),
         (r"^/api/dashboard/snapshots/(\d+)", "select owner_id from dashboard_snapshots where id = :id"),
     )
 ]

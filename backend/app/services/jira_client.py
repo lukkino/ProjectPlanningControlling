@@ -202,6 +202,15 @@ def _adf_to_text(node: dict, depth: int = 0) -> str:
     return "".join(_adf_to_text(c, depth) for c in children)
 
 
+def _rich_text(value) -> str | None:
+    """Campo di testo Jira come testo semplice: ADF (Jira Cloud) o stringa."""
+    if isinstance(value, dict):
+        return _extract_description(value)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
 def _extract_description(description_adf: dict | None) -> str | None:
     if not description_adf:
         return None
@@ -610,6 +619,7 @@ class ComplaintIssue:
         severity: str | None,
         fix_versions: list[str],
         tsb_activities: list[dict],
+        rejection_reason: str | None = None,
     ):
         self.key = key
         self.summary = summary
@@ -635,6 +645,9 @@ class ComplaintIssue:
         # risolve il bug (vedi _extract_tsb_activities): [{key, summary,
         # status}].
         self.tsb_activities = tsb_activities
+        # Campo custom Jira "Rejection Reason" (customfield_10196, testo
+        # ricco): perche' il bug e' stato rifiutato, in testo semplice.
+        self.rejection_reason = rejection_reason
 
 
 # Le activity con i dettagli di un TSB (Technical Service Bulletin) hanno
@@ -694,6 +707,7 @@ def fetch_complaints(
     SOURCE_NOTE_FIELD = "customfield_10189"
     SALESFORCE_CASE_ID_FIELD = "customfield_10286"
     SEVERITY_FIELD = "customfield_10185"
+    REJECTION_REASON_FIELD = "customfield_10196"
     fields = [
         "summary",
         "status",
@@ -706,6 +720,7 @@ def fetch_complaints(
         SOURCE_NOTE_FIELD,
         SALESFORCE_CASE_ID_FIELD,
         SEVERITY_FIELD,
+        REJECTION_REASON_FIELD,
     ]
     results: list[ComplaintIssue] = []
     next_page_token: str | None = None
@@ -752,6 +767,7 @@ def fetch_complaints(
                             severity=(f.get(SEVERITY_FIELD) or {}).get("value"),
                             fix_versions=[v["name"] for v in (f.get("fixVersions") or []) if v.get("name")],
                             tsb_activities=_extract_tsb_activities(f.get("issuelinks") or []),
+                            rejection_reason=_rich_text(f.get(REJECTION_REASON_FIELD)),
                         )
                     )
                 # Il conteggio e' approssimato: il totale non scende mai

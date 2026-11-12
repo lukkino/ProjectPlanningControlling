@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { WorkloadAssignee, WorkloadItem } from '../api/types'
+import { WorkloadTeam } from '../components/WorkloadTeam'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { useAuth } from '../components/authContext'
 import { formatDateTime, formatIsoDate } from '../lib/dates'
@@ -95,10 +96,16 @@ function WorkloadInfoModal({ onClose }: { onClose: () => void }) {
 
         <h4>Capacità</h4>
         <p>
-          <b>giorni lavorativi della settimana × ore al giorno</b>. Le ore al giorno si impostano in alto (8 di default):
-          abbassale se le persone non sono dedicate al 100% a questi increment.
+          <b>(giorni lavorativi della settimana − assenze) × ore al giorno della persona</b>, per chi è nella scheda{' '}
+          <b>Team</b> (ruoli, persone, ore al giorno e ferie). Per chi non c'è valgono i giorni lavorativi × le ore al
+          giorno impostate in alto (8 di default): abbassale se le persone non sono dedicate al 100% a questi increment.
         </p>
         <ul>
+          <li>
+            le ore degli item di una persona del Team vanno solo sui giorni in cui c'è: le ferie spostano le ore sugli
+            altri giorni dell'item (se l'item cade tutto nelle ferie, restano lì e la settimana risulta oltre la
+            capacità: va ripianificato);
+          </li>
           <li>la settimana in corso conta solo i giorni da oggi in poi;</li>
           <li>
             un giorno è libero per una persona solo se è non lavorativo in tutti gli increment su cui ha item.
@@ -162,6 +169,7 @@ export function WorkloadPage() {
   const [hidden, setHidden] = useState<number[]>(() => readStored(HIDDEN_KEY, []))
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [showInfo, setShowInfo] = useState(false)
+  const [tab, setTab] = useState<'load' | 'team'>('load')
   const { can } = useAuth()
   const queryClient = useQueryClient()
   // Sync in corso: l'increment che si sta sincronizzando (per il popup di
@@ -238,9 +246,14 @@ export function WorkloadPage() {
     setOpen(next)
   }
 
+  // Ore disponibili della settimana: dal Team se la persona c'e', se no
+  // giorni lavorativi x le ore/giorno impostate qui.
+  const capacityOf = (r: WorkloadAssignee, w: number) => r.capacity_hours?.[w] ?? r.capacity_days[w] * hoursPerDay
   const overloaded = rows.filter(
-    (r) => r.name !== 'Non assegnato' && r.weeks.some((hrs, w) => hrs >= 0.5 && hrs > r.capacity_days[w] * hoursPerDay * 1.05),
+    (r) => r.name !== 'Non assegnato' && r.weeks.some((hrs, w) => hrs >= 0.5 && hrs > capacityOf(r, w) * 1.05),
   ).length
+  const assigneeNames = (data?.assignees ?? []).map((a) => a.name).filter((n) => n !== 'Non assegnato')
+  const outsideTeam = rows.filter((r) => r.name !== 'Non assegnato' && !r.role).length
 
   return (
     <div>
@@ -293,6 +306,19 @@ export function WorkloadPage() {
         </div>
       )}
 
+      <div className="tabs">
+        <button type="button" className={tab === 'load' ? 'active' : ''} onClick={() => setTab('load')}>
+          Carico
+        </button>
+        <button type="button" className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}>
+          Team (ruoli, ore e ferie)
+        </button>
+      </div>
+
+      {tab === 'team' && <WorkloadTeam assignees={assigneeNames} />}
+
+      {tab === 'load' && (
+      <>
       <div className="card wl-toolbar">
         <label>
           Settimane{' '}
@@ -311,8 +337,8 @@ export function WorkloadPage() {
             ))}
           </select>
         </label>
-        <label title="Ore al giorno che una persona può dedicare a questi increment">
-          Ore/giorno disponibili{' '}
+        <label title="Ore al giorno di chi non è nella scheda Team (per le persone del Team valgono le loro)">
+          Ore/giorno (fuori dal Team){' '}
           <input
             type="number"
             min={1}
@@ -356,6 +382,15 @@ export function WorkloadPage() {
               ⚠ {overloaded} {overloaded === 1 ? 'persona ha' : 'persone hanno'} almeno una settimana oltre la capacità.
             </p>
           )}
+          {outsideTeam > 0 && (
+            <p className="muted wl-team-hint">
+              {outsideTeam} {outsideTeam === 1 ? 'persona non è' : 'persone non sono'} nel Team: per{' '}
+              {outsideTeam === 1 ? 'lei' : 'loro'} la capacità usa {hoursPerDay} h/giorno e nessuna ferie.{' '}
+              <button type="button" className="link-btn" onClick={() => setTab('team')}>
+                Apri il Team
+              </button>
+            </p>
+          )}
           <div className="table-wrap wl-table">
             <table>
               <thead>
@@ -384,6 +419,11 @@ export function WorkloadPage() {
                           <span className="wl-caret">{isOpen ? '▾' : '▸'}</span>
                           {unassigned ? <em>{r.name}</em> : r.name}
                           <span className="muted"> · {r.visibleItems.length}</span>
+                          {r.role && (
+                            <span className="wl-role" title={`Team: ${r.role}, ${r.hours_per_day} h/giorno`}>
+                              {r.role}
+                            </span>
+                          )}
                           {r.undated_items > 0 && (
                             <span className="wl-flag" title="Item senza Fine pian.: le loro ore non sono nelle settimane">
                               {r.undated_items} senza date
@@ -400,19 +440,22 @@ export function WorkloadPage() {
                           {h(r.overdue_hours)}
                         </td>
                         {r.weeks.map((hrs, w) => {
-                          const capacity = r.capacity_days[w] * hoursPerDay
+                          const capacity = Math.round(capacityOf(r, w) * 10) / 10
+                          const away = r.absence_days[w] ?? 0
+                          const awayText = away > 0 ? `, ${away} gg di assenza` : ''
                           return (
                             <td
                               key={w}
-                              className={`num wl-cell ${unassigned ? '' : loadTone(hrs, capacity)}`}
+                              className={`num wl-cell ${unassigned ? '' : loadTone(hrs, capacity)}${away > 0 ? ' wl-away' : ''}`}
                               title={
                                 hrs >= 0.5
-                                  ? `${Math.round(hrs)} h su ${capacity} h disponibili (${r.capacity_days[w]} gg)` +
+                                  ? `${Math.round(hrs)} h su ${capacity} h disponibili (${r.capacity_days[w]} gg${awayText})` +
                                     (capacity > 0 ? ` = ${Math.round((hrs / capacity) * 100)}%` : '')
-                                  : `${capacity} h disponibili`
+                                  : `${capacity} h disponibili${awayText}`
                               }
                             >
                               {h(hrs)}
+                              {away > 0 && <span className="wl-away-mark">🏖</span>}
                             </td>
                           )
                         })}
@@ -457,9 +500,12 @@ export function WorkloadPage() {
             </table>
           </div>
           <p className="muted wl-footnote">
-            Clicca una persona per vedere i suoi item: la chiave apre il PBI in Jira, l'increment il suo Backlog. Come sono calcolate ore e capacità: pulsante ℹ Info.
+            Clicca una persona per vedere i suoi item: la chiave apre il PBI in Jira, l'increment il suo Backlog. 🏖 =
+            settimana con assenze. Come sono calcolate ore e capacità: pulsante ℹ Info.
           </p>
         </>
+      )}
+      </>
       )}
     </div>
   )

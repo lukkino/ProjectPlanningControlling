@@ -238,6 +238,18 @@ class HoursCalculatorUpdate(BaseModel):
     vacation_days: float | None = Field(default=None, ge=0)
 
 
+class TeamAbsenceRef(BaseModel):
+    """Assenza inserita nel Team del Carico team (vedi HoursCalculator)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    start_date: dt.date
+    end_date: dt.date
+    kind: str = "Ferie"
+    note: str | None = None
+
+
 class HoursCalculator(BaseModel):
     """start_date/end_date null = non impostate: la UI usa le date del
     progetto."""
@@ -246,6 +258,12 @@ class HoursCalculator(BaseModel):
     end_date: dt.date | None = None
     vacation_days: float = 0
     resource_types: list[IncrementResourceType] = []
+    # Assenze delle persone del Team del Carico team (stesso proprietario),
+    # per nome normalizzato (minuscolo, spazi singoli): valgono anche per le
+    # persone del progetto con lo stesso nome, senza reinserirle.
+    team_absences: dict[str, list[TeamAbsenceRef]] = {}
+    # Nomi delle persone del Team, da proporre aggiungendo una persona.
+    team_people: list[str] = []
 
 
 # ---------- Budget di progetto (vedi services/budget.py) ----------
@@ -1145,6 +1163,7 @@ class Complaint(BaseModel):
     jira_status: str | None = None
     fix_versions: str | None = None
     severity: str | None = None
+    rejection_reason: str | None = None
     jira_created: dt.date | None = None
     jira_resolved: dt.date | None = None
     labels: str | None = None
@@ -1173,6 +1192,54 @@ class Complaint(BaseModel):
         if isinstance(value, str):
             return json.loads(value)
         return value or []
+
+
+# Sezione Disallineamenti dei Complaints (GET /api/complaints/mismatches).
+class MismatchComplaint(BaseModel):
+    jira_key: str
+    summary: str | None
+    jira_status: str | None
+    jira_created: dt.date | None
+    salesforce_case_number: str | None
+    # Riferimento solo a un ticket del vecchio sistema AX (non in Salesforce).
+    legacy_ax: bool
+
+
+class MismatchLink(BaseModel):
+    """Complaint col suo Case: JiraID del Case diverso, o stati diversi."""
+
+    complaint: MismatchComplaint
+    sf_record_id: str
+    sf_case_number: str | None
+    sf_status: str | None
+    sf_jira_key: str | None
+    sf_closed: bool
+
+
+class MismatchCase(BaseModel):
+    """Case del perimetro senza complaint. reason: no_jira_key (JiraID
+    vuoto), other_project (JiraID di un altro progetto Jira), not_a_complaint
+    (issue PTBSYS fuori dalla JQL dei complaint), linked_elsewhere (il
+    complaint del JiraID e' collegato a un altro Case)."""
+
+    record_id: str
+    case_number: str | None
+    status: str | None
+    is_closed: bool | None
+    account: str | None
+    created: dt.date | None
+    jira_key: str | None
+    reason: Literal["no_jira_key", "other_project", "not_a_complaint", "linked_elsewhere"]
+
+
+class ComplaintMismatches(BaseModel):
+    synced_at: dt.datetime | None
+    scope: str
+    scope_cases: int
+    complaints_without_case: list[MismatchComplaint]
+    cases_without_complaint: list[MismatchCase]
+    wrong_jira_link: list[MismatchLink]
+    status_mismatch: list[MismatchLink]
 
 
 class ComplaintUpdate(BaseModel):
@@ -1424,6 +1491,13 @@ class WorkloadAssignee(BaseModel):
     name: str
     weeks: list[float]
     capacity_days: list[int]
+    # Dal Team del Carico team (None se la persona non c'e'): ruolo, ore al
+    # giorno, ore disponibili per settimana (giorni - assenze) x ore/giorno
+    # e giorni di assenza per settimana.
+    role: str | None = None
+    hours_per_day: float | None = None
+    capacity_hours: list[float] | None = None
+    absence_days: list[int] = []
     beyond_hours: float
     remaining_hours: float
     overdue_hours: float
@@ -1431,6 +1505,55 @@ class WorkloadAssignee(BaseModel):
     undated_items: int
     unbudgeted_items: int
     items: list[WorkloadItem]
+
+
+class TeamAbsence(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    start_date: dt.date
+    end_date: dt.date
+    kind: Literal["Ferie", "Malattia", "Altro"] = "Ferie"
+    note: str | None = None
+
+
+class TeamAbsenceCreate(BaseModel):
+    start_date: dt.date
+    end_date: dt.date
+    kind: Literal["Ferie", "Malattia", "Altro"] = "Ferie"
+    note: str | None = None
+
+
+class TeamResource(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    role_id: int
+    name: str
+    hours_per_day: float
+    order: int
+    absences: list[TeamAbsence] = []
+
+
+class TeamResourceUpdate(BaseModel):
+    name: str | None = None
+    hours_per_day: float | None = None
+    role_id: int | None = None
+    order: int | None = None
+
+
+class TeamRole(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    order: int
+    resources: list[TeamResource] = []
+
+
+class TeamRoleUpdate(BaseModel):
+    name: str | None = None
+    order: int | None = None
 
 
 class WorkloadProject(BaseModel):

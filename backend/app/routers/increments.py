@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app import models, schemas
 from app.database import get_db
 from app.ownership import scope_user_id
 from app.services.budget import apply_to_snapshot, default_department, ensure_category_lines
 from app.services.metrics import compute_increment_metrics
+from app.services.workload import team_key
 
 router = APIRouter(prefix="/api/increments", tags=["increments"])
 
@@ -59,11 +60,16 @@ def _get_resource_type_or_404(db: Session, resource_type_id: int) -> models.Incr
 
 
 def _hours_calculator(increment: models.Increment) -> schemas.HoursCalculator:
+    db = object_session(increment)
+    roles = db.query(models.TeamRole).filter(models.TeamRole.owner_id == increment.owner_id).all() if db else []
+    people = [r for role in roles for r in role.resources]
     return schemas.HoursCalculator(
         start_date=increment.calc_start_date,
         end_date=increment.calc_end_date,
         vacation_days=increment.calc_vacation_days or 0,
         resource_types=list(increment.resource_types),
+        team_absences={team_key(r.name): list(r.absences) for r in people if r.absences},
+        team_people=sorted(r.name for r in people),
     )
 
 

@@ -7,8 +7,11 @@ blocco di valori, non una pagina per Case).
     python -m app.services.tools.salesforce_cases < richiesta.json
 
 Legge da stdin un JSON {"ids": [...], "jira_keys": [...], "case_numbers":
-[...]} e stampa sull'ultima riga un JSON {"records": [...], "error": ...}
-letto da routers/complaints.py. Codici di uscita: 0 letto, 2 login da
+[...], "scope": {"product_line", "case_level", "since"}} e stampa sull'ultima
+riga un JSON {"records": [...], "scope_records": [...], "error": ...} letto
+da routers/complaints.py. "scope" (facoltativo) chiede anche tutti i Case di
+quella linea di prodotto e livello creati da "since" in poi, per trovare i
+Case senza complaint. Codici di uscita: 0 letto, 2 login da
 rifare, 1 altro errore. Non scrive nel database.
 """
 
@@ -36,6 +39,7 @@ FIELDS = [
     "Partner_Priority__c",
     "Safety__c",
     "Severity__c",
+    "CreatedDate",
 ]
 # Valori per query: la query va nell'URL, che non puo' essere troppo lungo.
 CHUNK = 80
@@ -77,7 +81,42 @@ def _quote(values: list[str]) -> str:
     return ",".join("'" + v.replace("\\", "").replace("'", "") + "'" for v in values)
 
 
-def fetch_cases(ids: list[str], jira_keys: list[str], case_numbers: list[str]) -> list[dict]:
+def _record(record: dict) -> dict:
+    return {
+        "id": record["Id"],
+        "case_number": record.get("CaseNumber"),
+        "jira_key": record.get("JiraID__c"),
+        "status": record.get("Status"),
+        "is_closed": record.get("IsClosed"),
+        "account": (record.get("Account") or {}).get("Name"),
+        "inpeco_priority": record.get("Inpeco_Priority__c"),
+        "customer_impact": record.get("Partner_Priority__c"),
+        "safety": record.get("Safety__c"),
+        "severity": record.get("Severity__c"),
+        "created": (record.get("CreatedDate") or "")[:10] or None,
+    }
+
+
+def _query(context, headers: dict, soql: str) -> list[dict]:
+    """Tutti i record della query (seguendo le pagine di Salesforce)."""
+    url = f"{SALESFORCE_URL}/services/data/{API_VERSION}/query?q={urllib.parse.quote(soql)}"
+    records: list[dict] = []
+    while url:
+        response = context.request.get(url, headers=headers)
+        if response.status == 401:
+            raise LoginRequired("sessione non valida")
+        if response.status != 200:
+            raise RuntimeError(f"Salesforce ha risposto {response.status}: {response.text()[:200]}")
+        body = response.json()
+        records.extend(_record(r) for r in body.get("records", []))
+        next_url = body.get("nextRecordsUrl")
+        url = f"{SALESFORCE_URL}{next_url}" if next_url else None
+    return records
+
+
+def fetch_cases(
+    ids: list[str], jira_keys: list[str], case_numbers: list[str], scope: dict | None = None
+) -> tuple[list[dict], list[dict]]:
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             str(PROFILE_DIR), channel=os.environ.get("CO_BROWSER_CHANNEL", "chrome"), headless=True
@@ -90,30 +129,19 @@ def fetch_cases(ids: list[str], jira_keys: list[str], case_numbers: list[str]) -
                 values = sorted({v for v in values if v})
                 for i in range(0, len(values), CHUNK):
                     soql = f"SELECT {', '.join(FIELDS)} FROM Case WHERE {field} IN ({_quote(values[i:i + CHUNK])})"
-                    url = f"{SALESFORCE_URL}/services/data/{API_VERSION}/query?q={urllib.parse.quote(soql)}"
-                    while url:
-                        response = context.request.get(url, headers=headers)
-                        if response.status == 401:
-                            raise LoginRequired("sessione non valida")
-                        if response.status != 200:
-                            raise RuntimeError(f"Salesforce ha risposto {response.status}: {response.text()[:200]}")
-                        body = response.json()
-                        for record in body.get("records", []):
-                            records[record["Id"]] = {
-                                "id": record["Id"],
-                                "case_number": record.get("CaseNumber"),
-                                "jira_key": record.get("JiraID__c"),
-                                "status": record.get("Status"),
-                                "is_closed": record.get("IsClosed"),
-                                "account": (record.get("Account") or {}).get("Name"),
-                                "inpeco_priority": record.get("Inpeco_Priority__c"),
-                                "customer_impact": record.get("Partner_Priority__c"),
-                                "safety": record.get("Safety__c"),
-                                "severity": record.get("Severity__c"),
-                            }
-                        next_url = body.get("nextRecordsUrl")
-                        url = f"{SALESFORCE_URL}{next_url}" if next_url else None
-            return list(records.values())
+                    for record in _query(context, headers, soql):
+                        records[record["id"]] = record
+            scope_records: list[dict] = []
+            if scope:
+                since = str(scope.get("since") or "2000-01-01")[:10]
+                soql = (
+                    f"SELECT {', '.join(FIELDS)} FROM Case"
+                    f" WHERE AffectedProductLine__c IN ({_quote([scope['product_line']])})"
+                    f" AND CaseLevel__c IN ({_quote([scope['case_level']])})"
+                    f" AND CreatedDate >= {since}T00:00:00Z"
+                )
+                scope_records = _query(context, headers, soql)
+            return list(records.values()), scope_records
         finally:
             context.close()
 
@@ -121,15 +149,17 @@ def fetch_cases(ids: list[str], jira_keys: list[str], case_numbers: list[str]) -
 def main() -> int:
     request = json.loads(sys.stdin.read() or "{}")
     try:
-        records = fetch_cases(request.get("ids", []), request.get("jira_keys", []), request.get("case_numbers", []))
+        records, scope_records = fetch_cases(
+            request.get("ids", []), request.get("jira_keys", []), request.get("case_numbers", []), request.get("scope")
+        )
     except LoginRequired:
-        print(json.dumps({"records": [], "error": "login"}))
+        print(json.dumps({"records": [], "scope_records": [], "error": "login"}))
         return 2
     except Exception as exc:
         message = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-        print(json.dumps({"records": [], "error": message}))
+        print(json.dumps({"records": [], "scope_records": [], "error": message}))
         return 1
-    print(json.dumps({"records": records, "error": None}))
+    print(json.dumps({"records": records, "scope_records": scope_records, "error": None}))
     return 0
 
 

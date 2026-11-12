@@ -13,7 +13,12 @@ Regole:
   ma nel totale "scadute", finche' non viene ripianificato;
 - capacita': giorni lavorativi della settimana (da oggi per la settimana in
   corso); un giorno e' libero per la persona se e' non lavorativo in tutti
-  gli increment su cui ha item.
+  gli increment su cui ha item;
+- Team (sezione del Carico team): per chi c'e' (nome = assegnatario Jira)
+  le sue assenze tolgono giorni alla capacita' e le ore disponibili sono
+  giorni x le sue ore al giorno; le ore degli item si distribuiscono solo
+  sui giorni in cui la persona c'e' (se nel periodo dell'item e' sempre
+  assente, su tutti i giorni lavorativi come prima).
 """
 
 from __future__ import annotations
@@ -46,6 +51,20 @@ class WorkloadItem:
 
 
 @dataclass
+class TeamPerson:
+    """Una persona del Team: ruolo, ore al giorno, assenze (da, a)."""
+
+    role: str
+    hours_per_day: float
+    absences: list[tuple[dt.date, dt.date]]
+
+
+def team_key(name: str) -> str:
+    """Chiave per collegare la persona del Team all'assegnatario Jira."""
+    return " ".join(name.split()).casefold()
+
+
+@dataclass
 class WorkloadAssignee:
     name: str
     weeks: list[float]
@@ -57,6 +76,10 @@ class WorkloadAssignee:
     undated_items: int
     unbudgeted_items: int
     items: list[WorkloadItem] = field(default_factory=list)
+    role: str | None = None
+    hours_per_day: float | None = None
+    capacity_hours: list[float] | None = None
+    absence_days: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -75,7 +98,13 @@ def _working(day: dt.date, off: list[tuple[dt.date, dt.date]]) -> bool:
     return day.weekday() < 5 and not _is_off(day, off)
 
 
-def compute_workload(projects: list[models.Project], weeks: int = 12, today: dt.date | None = None) -> Workload:
+def compute_workload(
+    projects: list[models.Project],
+    weeks: int = 12,
+    today: dt.date | None = None,
+    team: dict[str, TeamPerson] | None = None,
+) -> Workload:
+    team = team or {}
     today = today or dt.date.today()
     first_monday = today - dt.timedelta(days=today.weekday())
     week_starts = [first_monday + dt.timedelta(weeks=i) for i in range(weeks)]
@@ -98,6 +127,8 @@ def compute_workload(projects: list[models.Project], weeks: int = 12, today: dt.
                 continue
             name = (item.assignee or "").strip() or UNASSIGNED
             projects_of[name].add(project.id)
+            person = team.get(team_key(name)) if name != UNASSIGNED else None
+            away = person.absences if person else []
             budget, source = item_budget(item)
             completion = item_completion(item, budget)
             remaining = budget * (1 - (completion or 0)) if budget else None
@@ -115,7 +146,8 @@ def compute_workload(projects: list[models.Project], weeks: int = 12, today: dt.
                     if _working(day, off):
                         days.append(day)
                     day += dt.timedelta(days=1)
-                days = days or [finish]
+                # Solo i giorni in cui la persona c'e' (se ce ne sono).
+                days = [d for d in days if not _is_off(d, away)] or days or [finish]
                 per_day = remaining / len(days)
                 for day in days:
                     index = week_index(day)
@@ -144,17 +176,24 @@ def compute_workload(projects: list[models.Project], weeks: int = 12, today: dt.
     assignees = []
     for name, items in by_assignee.items():
         own_off = [calendars[pid] for pid in projects_of[name]]
+        person = team.get(team_key(name)) if name != UNASSIGNED else None
         capacity = []
+        absent = []
         for start in week_starts:
             count = 0
+            away = 0
             for offset in range(5):
                 day = start + dt.timedelta(days=offset)
                 if day < today or day > horizon_end:
                     continue
                 if own_off and all(_is_off(day, off) for off in own_off):
                     continue
+                if person and _is_off(day, person.absences):
+                    away += 1
+                    continue
                 count += 1
             capacity.append(count)
+            absent.append(away)
         items.sort(key=lambda i: (not i.overdue, i.finish or dt.date.max, i.jira_key))
         assignees.append(
             WorkloadAssignee(
@@ -168,6 +207,10 @@ def compute_workload(projects: list[models.Project], weeks: int = 12, today: dt.
                 undated_items=sum(1 for i in items if i.finish is None),
                 unbudgeted_items=sum(1 for i in items if i.remaining_hours is None),
                 items=items,
+                role=person.role if person else None,
+                hours_per_day=person.hours_per_day if person else None,
+                capacity_hours=[d * person.hours_per_day for d in capacity] if person else None,
+                absence_days=absent,
             )
         )
     assignees.sort(key=lambda a: (a.name == UNASSIGNED, -a.remaining_hours, a.name.lower()))

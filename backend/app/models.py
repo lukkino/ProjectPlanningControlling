@@ -1037,6 +1037,32 @@ class Complaint(Base):
     sf_safety: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sf_severity: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sf_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Campo Jira "Rejection Reason": perche' il bug e' stato rifiutato.
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Campo "JiraID" del Case trovato: se diverso da jira_key il collegamento
+    # in Salesforce e' sbagliato (vedi la sezione Disallineamenti). "" =
+    # letto e vuoto; None = non ancora letto.
+    sf_jira_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class SalesforceScopeCase(Base):
+    """Un Case Salesforce del perimetro dei complaint (linea di prodotto e
+    livello in routers/complaints.py, creato dal primo complaint in poi),
+    letto a ogni sync: serve alla sezione Disallineamenti per trovare i Case
+    senza un complaint su Jira. Sostituiti per intero a ogni lettura."""
+
+    __tablename__ = "complaint_sf_scope_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    record_id: Mapped[str] = mapped_column(String(32))
+    case_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    jira_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_closed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    account: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Release(Base):
@@ -1203,4 +1229,87 @@ class UserSettings(Base):
     team_sw_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     team_embedded_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     complaints_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tool RDA: link all'elenco "Richieste di acquisto preparate dall'utente"
+    # in Dynamics 365 (ambiente e societa'); None = quello predefinito.
+    d365_requisitions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+
+class PurchaseRequisition(Base):
+    """Tool RDA: una richiesta di acquisto preparata dall'utente in Dynamics
+    365 (vedi services/tools/purchase_requisitions.py). Le righe come JSON
+    [{line, status, product, quantity, price, amount, vendor_name...}]:
+    restano valide anche se si aggiungono campi."""
+
+    __tablename__ = "tool_purchase_requisitions"
+    __table_args__ = (UniqueConstraint("owner_id", "number", name="uq_purch_req_owner_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # Numero della RDA in Dynamics (es. "RDA123456").
+    number: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stato Dynamics: Draft, InReview, Approved, Rejected, Cancelled, Closed.
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    legal_entity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    purpose: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    justification_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Data contabile predefinita della RDA (= data di creazione/invio).
+    date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    requested_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    on_hold: Mapped[bool] = mapped_column(Boolean, default=False)
+    on_hold_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lines_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TeamRole(Base):
+    """Carico team: un ruolo del team dell'utente (Project Manager,
+    Developer...), con le sue persone. Il team vale per tutti gli increment:
+    serve a calcolare le ore davvero disponibili di ogni assegnatario."""
+
+    __tablename__ = "workload_team_roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    resources: Mapped[list["TeamResource"]] = relationship(
+        back_populates="role", cascade="all, delete-orphan", order_by="TeamResource.order"
+    )
+
+
+class TeamResource(Base):
+    """Una persona del team: il nome e' quello dell'assegnatario in Jira (cosi'
+    si collega ai suoi item), con le ore lavorative al giorno e le assenze."""
+
+    __tablename__ = "workload_team_resources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("workload_team_roles.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(128))
+    hours_per_day: Mapped[float] = mapped_column(Float, default=8)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    role: Mapped["TeamRole"] = relationship(back_populates="resources")
+    absences: Mapped[list["TeamResourceAbsence"]] = relationship(
+        back_populates="resource", cascade="all, delete-orphan", order_by="TeamResourceAbsence.start_date"
+    )
+
+
+class TeamResourceAbsence(Base):
+    """Assenza di una persona del team (come IncrementMemberAbsence): dal
+    primo all'ultimo giorno compresi; tolgono ore solo i lun-ven."""
+
+    __tablename__ = "workload_team_absences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_id: Mapped[int] = mapped_column(ForeignKey("workload_team_resources.id", ondelete="CASCADE"))
+    start_date: Mapped[dt.date] = mapped_column(Date)
+    end_date: Mapped[dt.date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(32), default="Ferie")
+    note: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    resource: Mapped["TeamResource"] = relationship(back_populates="absences")

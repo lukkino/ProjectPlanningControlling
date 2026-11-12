@@ -128,6 +128,12 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE increment_member_absences ADD COLUMN kind VARCHAR(32) DEFAULT 'Ferie'"))
 
+    if "user_settings" in table_names:
+        settings_columns = {col["name"] for col in inspector.get_columns("user_settings")}
+        if "d365_requisitions_url" not in settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_settings ADD COLUMN d365_requisitions_url TEXT"))
+
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
         if "sf_status" not in complaint_columns:
@@ -146,6 +152,12 @@ def run_lightweight_migrations() -> None:
         if "architecture_manual" not in complaint_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE complaints ADD COLUMN architecture_manual BOOLEAN DEFAULT 0"))
+        if "rejection_reason" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN rejection_reason TEXT"))
+        if "sf_jira_key" not in complaint_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE complaints ADD COLUMN sf_jira_key VARCHAR(64)"))
         if "jira_resolved" not in complaint_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE complaints ADD COLUMN jira_resolved DATE"))

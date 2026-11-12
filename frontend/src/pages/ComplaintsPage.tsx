@@ -106,6 +106,16 @@ function mergeColumnOrder(stored: string[] | null, defaults: string[]): string[]
   return order
 }
 
+// Legenda del campo Salesforce "Customer Impact" (Partner_Priority__c):
+// punteggio e significato di ogni valore. Default in Salesforce: P5.
+const CUSTOMER_IMPACT: Record<string, { score: number; description: string }> = {
+  P1: { score: 5, description: 'System/module down or major slowdown' },
+  P2: { score: 4, description: 'Limited functionality' },
+  P3: { score: 3, description: 'Reduced functionality' },
+  P4: { score: 2, description: 'Full functionality with redundancy ≤50%' },
+  P5: { score: 1, description: 'Full functionality with redundancy >50%' },
+}
+
 // Voce del menu Architettura che annulla la correzione manuale.
 const RESET_TO_JIRA = '__jira__'
 const SALESFORCE_STATUSES: SalesforceStatus[] = ['Aperto', 'Chiuso']
@@ -155,6 +165,7 @@ const searchableText = (c: Complaint) =>
     c.sf_account,
     c.sf_status,
     c.fix_versions,
+    c.rejection_reason,
     ...c.tsb_activities.map((a) => a.key),
     c.labels,
   ]
@@ -415,6 +426,9 @@ export function ComplaintsPage() {
   )
   const ariaSortOf = (key: SortKey) => (sort.key !== key ? undefined : sort.desc ? 'descending' : 'ascending')
 
+  // Legenda del Customer Impact (pulsante ⓘ nell'intestazione).
+  const [impactLegendOpen, setImpactLegendOpen] = useState(false)
+
   const columns: ComplaintColumn[] = [
     { key: 'salesforce_case', label: 'ID Salesforce', width: 95, render: (c) => <SalesforceCaseLinks complaint={c} /> },
     { key: 'summary', label: 'Summary', render: (c) => c.summary },
@@ -463,8 +477,33 @@ export function ComplaintsPage() {
       label: 'Customer Impact',
       width: 80,
       title: 'Campo "Customer Impact" (P1–P5) del Case Salesforce',
+      header: (
+        <>
+          Customer Impact{' '}
+          <button
+            type="button"
+            className="link-btn"
+            title="Mostra la legenda del Customer Impact"
+            aria-expanded={impactLegendOpen}
+            onClick={(e) => {
+              e.stopPropagation()
+              setImpactLegendOpen((open) => !open)
+            }}
+          >
+            ⓘ
+          </button>
+        </>
+      ),
       style: (c) => (c.sf_customer_impact === 'P1' ? { color: 'var(--danger)', fontWeight: 600 } : undefined),
-      render: (c) => c.sf_customer_impact ?? <span className="muted">-</span>,
+      render: (c) => {
+        const impact = c.sf_customer_impact ? CUSTOMER_IMPACT[c.sf_customer_impact] : undefined
+        if (!c.sf_customer_impact) return <span className="muted">-</span>
+        return (
+          <span title={impact ? `${c.sf_customer_impact} (punteggio ${impact.score}) – ${impact.description}` : undefined}>
+            {c.sf_customer_impact}
+          </span>
+        )
+      },
     },
     {
       key: 'sf_safety',
@@ -497,6 +536,20 @@ export function ComplaintsPage() {
       width: 95,
       render: (c) =>
         c.jira_status && <span className={`badge ${JIRA_BADGE_CLASS[c.jira_status] ?? 'progress'}`}>{c.jira_status}</span>,
+    },
+    {
+      key: 'rejection_reason',
+      label: 'Rejection Reason',
+      width: 200,
+      title: 'Campo Jira "Rejection Reason": perché il bug è stato rifiutato',
+      render: (c) =>
+        c.rejection_reason ? (
+          <span className="cert-clamp" title={c.rejection_reason}>
+            {c.rejection_reason}
+          </span>
+        ) : (
+          <span className="muted">-</span>
+        ),
     },
     {
       key: 'fix_versions',
@@ -683,6 +736,25 @@ export function ComplaintsPage() {
   // scorre mai). Il "top" delle intestazioni (--thead-top) e' quindi quanto la
   // tabella e' gia' uscita dal bordo superiore della finestra.
   const tableWrapRef = useRef<HTMLDivElement>(null)
+  // Barra di scroll orizzontale "specchio" sopra la tabella (come nel
+  // Backlog): con tante colonne la tabella e' piu' larga della pagina e la
+  // barra vera, in fondo alla tabella, non si vede senza scorrere fino
+  // all'ultima riga - le colonne a destra sembrerebbero sparite.
+  const topScrollRef = useRef<HTMLDivElement>(null)
+  const [tableScrollWidth, setTableScrollWidth] = useState(0)
+  useEffect(() => {
+    const wrap = tableWrapRef.current
+    if (!wrap) return
+    const measure = () => setTableScrollWidth(wrap.scrollWidth > wrap.clientWidth + 1 ? wrap.scrollWidth : 0)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(wrap)
+    if (wrap.firstElementChild) observer.observe(wrap.firstElementChild)
+    return () => observer.disconnect()
+  }, [])
+  const mirrorScroll = (from: HTMLDivElement | null, to: HTMLDivElement | null) => {
+    if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft
+  }
   useEffect(() => {
     const updateTop = () => {
       const wrap = tableWrapRef.current
@@ -734,7 +806,7 @@ export function ComplaintsPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="ID Salesforce, ID Jira o testo…"
               aria-label="Cerca nei complaint"
-              title="Cerca nell'ID Salesforce, nell'ID Jira, nel Summary, nel Sito Cliente, nelle Fix Version e nelle label. Più parole: devono comparire tutte."
+              title="Cerca nell'ID Salesforce, nell'ID Jira, nel Summary, nel Sito Cliente, nelle Fix Version, nella Rejection Reason e nelle label. Più parole: devono comparire tutte."
               style={{ width: 280 }}
             />
           </div>
@@ -854,8 +926,54 @@ export function ComplaintsPage() {
         {exportExcel.isError && (
           <div className="error-banner">Esportazione non riuscita: {(exportExcel.error as Error).message}</div>
         )}
+        {impactLegendOpen && (
+          <div className="impact-legend">
+            <div className="impact-legend-head">
+              <span>
+                <b>Customer Impact</b> (campo del Case Salesforce) · valore predefinito: P5
+              </span>
+              <button className="link-btn" onClick={() => setImpactLegendOpen(false)}>
+                Chiudi
+              </button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Valore</th>
+                  <th>Punteggio</th>
+                  <th>Descrizione</th>
+                  <th className="num">Complaint</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(CUSTOMER_IMPACT).map(([value, { score, description }]) => (
+                  <tr key={value}>
+                    <td style={value === 'P1' ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>{value}</td>
+                    <td>{score}</td>
+                    <td>{description}</td>
+                    <td className="num">{all.filter((c) => c.sf_customer_impact === value).length}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        <div className="table-wrap" ref={tableWrapRef}>
+        {tableScrollWidth > 0 && (
+          <div
+            className="table-scroll-mirror"
+            ref={topScrollRef}
+            title="Scorri per vedere le altre colonne"
+            onScroll={() => mirrorScroll(topScrollRef.current, tableWrapRef.current)}
+          >
+            <div style={{ width: tableScrollWidth }} />
+          </div>
+        )}
+        <div
+          className="table-wrap"
+          ref={tableWrapRef}
+          onScroll={() => mirrorScroll(tableWrapRef.current, topScrollRef.current)}
+        >
           {/* Larghezza minima: le colonne a larghezza fissa piu' spazio per
               quelle senza (Summary); se non ci sta, la tabella scorre in
               orizzontale invece di schiacciare il Summary. */}

@@ -10,6 +10,13 @@ export type ToolInfo = {
 
 export const TOOLS: ToolInfo[] = [
   {
+    path: '/tools/rda',
+    icon: '🛒',
+    name: 'RDA',
+    description:
+      'Le tue richieste di acquisto in Dynamics 365: stato, progetto, righe, fornitori e importi, lette con un clic e filtrabili.',
+  },
+  {
     path: '/tools/certificazioni',
     icon: '🏷️',
     name: 'Ticket certificazioni',

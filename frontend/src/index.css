@@ -1415,3 +1415,63 @@ ul.changelog-body { padding-left: 20px; }
 .cert-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
 .cert-detail-note { grid-column: 1 / -1; font-size: 12px; margin: 4px 0 0; }
 .cert-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 260px; }
+
+/* Complaints, sezione Disallineamenti. */
+.mm-page .card { margin-bottom: 16px; }
+.mm-title { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 4px; }
+.mm-count { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: #eef0f3; color: var(--text-muted); }
+.mm-count--warn { background: #fff2df; color: var(--warning); }
+.mm-description { font-size: 13px; margin-top: 0; }
+.mm-sf-status { font-weight: 600; }
+.mm-sf-status--open { color: var(--warning); }
+.mm-sf-status--closed { color: var(--success); }
+.mm-hl { background: rgba(255, 170, 0, 0.12); }
+.mm-tag { margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 4px; background: #eef0f3; color: var(--text-muted); }
+
+/* Complaints: legenda del Customer Impact (pulsante ⓘ nell'intestazione). */
+.impact-legend { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; font-size: 13px; }
+.impact-legend-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+.impact-legend table { width: auto; }
+.impact-legend th, .impact-legend td { padding: 3px 14px 3px 0; }
+
+/* Tool RDA (richieste di acquisto da Dynamics 365). */
+.rda-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.rda-kpis .card + .card, .rda-kpi { margin: 0; }
+.rda-kpi-value { font-size: 22px; font-weight: 700; }
+.badge.rda-rejected { background: #fde8e8; color: var(--danger); }
+.cert-table td .badge + .badge { margin-left: 4px; }
+.rda-detail { display: grid; gap: 10px; padding: 4px 8px; }
+.rda-lines { font-size: 13px; }
+.rda-lines td { vertical-align: top; }
+.rda-lines .num, .cert-table th.num { text-align: right; }
+.rda-settings { margin-bottom: 16px; }
+
+/* Carico team: scheda Team (ruoli, persone, ore/giorno, assenze). */
+.team-card { margin-top: 0; }
+.team-role { margin: 14px 0 18px; }
+.team-role-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.team-role-head h3 { margin: 0; font-size: 15px; }
+.team-role-name { font-weight: 600; font-size: 15px; border: 1px solid transparent; background: transparent; padding: 2px 4px; }
+.team-role-name:hover, .team-role-name:focus { border-color: var(--border); background: var(--surface); }
+.team-remove { margin-left: auto; color: var(--text-muted); }
+.team-table { width: 100%; }
+.team-table th:first-child { width: 260px; }
+.team-table td { vertical-align: top; }
+.team-table td input:not(.team-hours) { width: 100%; }
+.team-hours { width: 56px; text-align: right; }
+.team-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; background: var(--bg); border-radius: var(--radius); font-size: 13px; }
+.team-add-label { font-weight: 600; }
+.team-add-name { width: 260px; }
+/* Capacity Planner: assenze che arrivano dal Team del Carico team. */
+.member-chip.from-team { border: 1px dashed var(--border); }
+.from-team-mark { font-size: 10px; margin-left: 4px; padding: 0 4px; border-radius: 6px; background: #e8efff; color: var(--primary); }
+.team-add-role { display: inline-flex; gap: 6px; margin-left: 8px; }
+.team-roles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.team-role-chip { display: inline-flex; align-items: center; gap: 0; }
+.team-role-chip .team-remove { margin-left: 2px; padding: 0 4px; }
+.team-role-rename { width: 160px; }
+.team-add-role input { width: 160px; }
+.team-missing { background: #fff8eb; border: 1px solid #f3dcae; border-radius: var(--radius); padding: 8px 10px; font-size: 13px; }
+.wl-role { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 8px; background: #e8efff; color: var(--primary); }
+.wl-away-mark { font-size: 10px; margin-left: 2px; }
+.wl-team-hint { font-size: 13px; margin: 4px 0 8px; }

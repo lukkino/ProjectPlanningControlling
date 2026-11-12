@@ -7,6 +7,13 @@ import type {
   BacklogItem,
   BugsOpenedMetrics,
   Complaint,
+  ComplaintMismatches,
+  PurchaseRequisition,
+  TeamAbsence,
+  TeamResource,
+  TeamRole,
+  RequisitionSettings,
+  RequisitionSyncResult,
   ComplaintsSettings,
   CycleTimeMetrics,
   DashboardMetrics,
@@ -429,6 +436,7 @@ export const api = {
     syncProgress: () => request<SyncProgress>('/complaints/sync/progress'),
     // Tutti i complaint in un file Excel, con le intestazioni filtrabili.
     exportExcel: () => downloadFile('/complaints/export'),
+    mismatches: () => request<ComplaintMismatches>('/complaints/mismatches'),
     getSettings: () => request<ComplaintsSettings>('/complaints/settings'),
     updateSettings: (data: ComplaintsSettings) => put<ComplaintsSettings>('/complaints/settings', data),
   },
@@ -438,6 +446,22 @@ export const api = {
       post<Snapshot>(`/projects/${projectId}/snapshots`, data),
     update: (id: number, data: Partial<Snapshot>) => put<Snapshot>(`/snapshots/${id}`, data),
     remove: (id: number) => del(`/snapshots/${id}`),
+  },
+  // Team del Carico team (ruoli, persone, assenze).
+  team: {
+    list: () => request<TeamRole[]>('/team'),
+    createDefaultRoles: () => post<TeamRole[]>('/team/roles/defaults'),
+    createRole: (name: string) => post<TeamRole>('/team/roles', { name }),
+    updateRole: (id: number, data: { name?: string; order?: number }) => put<TeamRole>(`/team/roles/${id}`, data),
+    removeRole: (id: number) => del(`/team/roles/${id}`),
+    addResource: (roleId: number, data: { name: string; hours_per_day?: number }) =>
+      post<TeamResource>(`/team/roles/${roleId}/resources`, data),
+    updateResource: (id: number, data: { name?: string; hours_per_day?: number; role_id?: number }) =>
+      put<TeamResource>(`/team/resources/${id}`, data),
+    removeResource: (id: number) => del(`/team/resources/${id}`),
+    addAbsence: (resourceId: number, data: { start_date: string; end_date: string; kind: AbsenceKind }) =>
+      post<TeamAbsence>(`/team/resources/${resourceId}/absences`, data),
+    removeAbsence: (id: number) => del(`/team/absences/${id}`),
   },
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
@@ -578,6 +602,14 @@ export const api = {
   },
   // Tools: utility indipendenti dai progetti.
   tools: {
+    requisitions: {
+      list: () => request<PurchaseRequisition[]>('/tools/purchase-requisitions'),
+      sync: () => post<RequisitionSyncResult>('/tools/purchase-requisitions/sync'),
+      getSettings: () => request<RequisitionSettings>('/tools/purchase-requisitions/settings'),
+      updateSettings: (data: RequisitionSettings) =>
+        put<RequisitionSettings>('/tools/purchase-requisitions/settings', data),
+      syncProgress: () => request<SyncProgress>('/tools/purchase-requisitions/sync/progress'),
+    },
     certifications: {
       list: () => request<CertificationTicket[]>('/tools/certification-tickets'),
       sync: () => post<CertificationSyncResult>('/tools/certification-tickets/sync'),

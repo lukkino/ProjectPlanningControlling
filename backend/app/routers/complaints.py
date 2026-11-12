@@ -78,6 +78,7 @@ EXPORT_COLUMNS = [
     ("Customer Impact", 15),
     ("Safety", 10),
     ("Severity SF", 24),
+    ("Rejection Reason", 60),
 ]
 
 # Il numero del case Salesforce e' anche in testa al summary ("[76665]...").
@@ -86,6 +87,17 @@ _SUMMARY_CASE_RE = re.compile(r"^\s*\[(\d+)\]")
 # Lettura dei Case da Salesforce dopo la sync Jira (vedi
 # services/tools/salesforce_cases.py): login e query di solito in 10-20 s.
 SALESFORCE_TIMEOUT_S = 150
+
+# Perimetro dei Case Salesforce che dovrebbero avere un complaint su Jira
+# (sezione Disallineamenti): linea di prodotto ProTube, Case di terzo livello
+# (passati a R&D), creati dal primo complaint in poi.
+SALESFORCE_SCOPE_PRODUCT_LINE = "ProTube"
+SALESFORCE_SCOPE_CASE_LEVEL = "Third"
+# Stati Jira "chiusi" per il confronto con lo Status del Case.
+JIRA_CLOSED_STATUSES = {"Done", "Rejected", "Closed", "Resolved"}
+# Status del Case ancora aperti ma gia' oltre R&D (fix rilasciata, in attesa
+# dell'installazione dal cliente): con Jira chiuso non sono un disallineamento.
+SALESFORCE_AFTER_RD_STATUSES = {"Released", "Waiting to be Installed"}
 
 
 def _salesforce_case_numbers(value: str | None) -> list[str]:
@@ -189,6 +201,7 @@ def export_complaints(db: Session = Depends(get_db)):
                 c.sf_customer_impact,
                 c.sf_safety,
                 c.sf_severity,
+                c.rejection_reason,
             ]
         )
 
@@ -200,7 +213,7 @@ def export_complaints(db: Session = Depends(get_db)):
         header.alignment = Alignment(vertical="center")
     for row in sheet.iter_rows(min_row=2):
         for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=cell.column == 2)
+            cell.alignment = Alignment(vertical="top", wrap_text=cell.column in (2, len(EXPORT_COLUMNS)))
         key = row[3]
         key.hyperlink = f"{JIRA_BROWSE_URL}{key.value}"
         key.font = Font(color="0563C1", underline="single")
@@ -304,6 +317,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
         complaint.jira_status = issue.status
         complaint.fix_versions = ", ".join(issue.fix_versions) or None
         complaint.severity = issue.severity
+        complaint.rejection_reason = issue.rejection_reason
         complaint.jira_created = issue.created
         complaint.jira_resolved = issue.resolved
         complaint.labels = ";".join(issue.labels)
@@ -358,10 +372,16 @@ def _read_salesforce(db: Session, complaints: list[models.Complaint]) -> int:
     if not change_order._status_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="il browser dell'app è occupato da un'altra lettura.")
     numbers_of = {c.id: _salesforce_case_numbers(c.salesforce_case_number) for c in complaints}
+    first_created = min((c.jira_created for c in complaints if c.jira_created), default=None)
     request = {
         "ids": [c.salesforce_case_id for c in complaints if c.salesforce_case_id],
         "jira_keys": [c.jira_key for c in complaints],
         "case_numbers": [n for numbers in numbers_of.values() for n in numbers],
+        "scope": {
+            "product_line": SALESFORCE_SCOPE_PRODUCT_LINE,
+            "case_level": SALESFORCE_SCOPE_CASE_LEVEL,
+            "since": first_created.isoformat() if first_created else None,
+        },
     }
     try:
         result = subprocess.run(
@@ -406,11 +426,12 @@ def _read_salesforce(db: Session, complaints: list[models.Complaint]) -> int:
             candidates = sorted(by_jira.get(c.jira_key, []), key=lambda r: bool(r.get("is_closed")))
             record = candidates[0] if candidates else None
         if record is None:
-            c.sf_record_id = c.sf_status = c.sf_account = None
+            c.sf_record_id = c.sf_status = c.sf_account = c.sf_jira_key = None
             c.sf_inpeco_priority = c.sf_customer_impact = c.sf_safety = c.sf_severity = None
             continue
         matched += 1
         c.sf_record_id = record["id"]
+        c.sf_jira_key = (record.get("jira_key") or "").strip()
         c.sf_status = record.get("status")
         c.sf_account = record.get("account")
         c.sf_inpeco_priority = record.get("inpeco_priority")
@@ -423,8 +444,128 @@ def _read_salesforce(db: Session, complaints: list[models.Complaint]) -> int:
             c.salesforce_status = "Chiuso" if record["is_closed"] else "Aperto"
         if not c.customer_site_manual and c.sf_account:
             c.customer_site = c.sf_account
+
+    # Case del perimetro (vedi SALESFORCE_SCOPE_*), sostituiti per intero.
+    owner_id = scope_user_id()
+    db.query(models.SalesforceScopeCase).filter(models.SalesforceScopeCase.owner_id == owner_id).delete()
+    for r in outcome.get("scope_records") or []:
+        db.add(
+            models.SalesforceScopeCase(
+                owner_id=owner_id,
+                record_id=r["id"],
+                case_number=r.get("case_number"),
+                jira_key=(r.get("jira_key") or "").strip() or None,
+                status=r.get("status"),
+                is_closed=r.get("is_closed"),
+                account=r.get("account"),
+                created=dt.date.fromisoformat(r["created"]) if r.get("created") else None,
+                synced_at=now,
+            )
+        )
     db.commit()
     return matched
+
+
+# Chiavi Jira nel campo JiraID del Case: a volte e' un URL
+# (".../browse/PTBSYS-911") o ne contiene piu' d'una ("DAS-3522; DAS-9299").
+_JIRA_KEY_RE = re.compile(r"[A-Z][A-Z0-9]+-\d+", re.IGNORECASE)
+
+
+def _jira_keys(value: str | None) -> list[str]:
+    return [k.upper() for k in _JIRA_KEY_RE.findall(value or "")]
+
+
+def _same_key(sf_value: str | None, jira_key: str) -> bool:
+    return jira_key.upper() in _jira_keys(sf_value)
+
+
+@router.get("/mismatches", response_model=schemas.ComplaintMismatches)
+def get_mismatches(db: Session = Depends(get_db)):
+    """Disallineamenti tra i complaint Jira e i Case Salesforce, dai dati
+    dell'ultima sync (nessuna lettura da Salesforce qui)."""
+    complaints = list(_owned(db))
+    scope_cases = (
+        db.query(models.SalesforceScopeCase)
+        .filter(models.SalesforceScopeCase.owner_id == scope_user_id())
+        .order_by(models.SalesforceScopeCase.created.desc())
+        .all()
+    )
+    synced = [c.sf_synced_at for c in complaints if c.sf_synced_at] + [s.synced_at for s in scope_cases if s.synced_at]
+    by_key = {c.jira_key.upper(): c for c in complaints}
+    matched_ids = {c.sf_record_id for c in complaints if c.sf_record_id}
+    numbers = {s.record_id: s.case_number for s in scope_cases}
+
+    def ref(c: models.Complaint) -> schemas.MismatchComplaint:
+        return schemas.MismatchComplaint(
+            jira_key=c.jira_key,
+            summary=c.summary,
+            jira_status=c.jira_status,
+            jira_created=c.jira_created,
+            salesforce_case_number=c.salesforce_case_number,
+            legacy_ax=bool(c.salesforce_case_number) and not _salesforce_case_numbers(c.salesforce_case_number),
+        )
+
+    without_case = [ref(c) for c in complaints if not c.sf_record_id]
+
+    wrong_link: list[schemas.MismatchLink] = []
+    status_mismatch: list[schemas.MismatchLink] = []
+    for c in complaints:
+        if not c.sf_record_id:
+            continue
+        link = schemas.MismatchLink(
+            complaint=ref(c),
+            sf_record_id=c.sf_record_id,
+            sf_case_number=numbers.get(c.sf_record_id),
+            sf_status=c.sf_status,
+            sf_jira_key=c.sf_jira_key,
+            sf_closed=c.salesforce_status == "Chiuso",
+        )
+        # sf_jira_key None: Case letto prima che si salvasse il JiraID.
+        if c.sf_jira_key is not None and not _same_key(c.sf_jira_key, c.jira_key):
+            wrong_link.append(link)
+        jira_closed = (c.jira_status or "") in JIRA_CLOSED_STATUSES
+        if jira_closed and not link.sf_closed and c.sf_status not in SALESFORCE_AFTER_RD_STATUSES:
+            status_mismatch.append(link)
+        elif link.sf_closed and not jira_closed:
+            status_mismatch.append(link)
+
+    cases_without_complaint: list[schemas.MismatchCase] = []
+    for s in scope_cases:
+        if s.record_id in matched_ids:
+            continue
+        keys = _jira_keys(s.jira_key)
+        key = next((k for k in keys if k in by_key), keys[0] if keys else "")
+        if not key:
+            reason = "no_jira_key"
+        elif key in by_key:
+            # Punta a un complaint che pero' e' collegato a un altro Case.
+            reason = "linked_elsewhere"
+        elif key.startswith("PTBSYS-"):
+            reason = "not_a_complaint"
+        else:
+            reason = "other_project"
+        cases_without_complaint.append(
+            schemas.MismatchCase(
+                record_id=s.record_id,
+                case_number=s.case_number,
+                status=s.status,
+                is_closed=s.is_closed,
+                account=s.account,
+                created=s.created,
+                jira_key=s.jira_key,
+                reason=reason,
+            )
+        )
+
+    return schemas.ComplaintMismatches(
+        synced_at=max(synced) if synced else None,
+        scope=f"{SALESFORCE_SCOPE_PRODUCT_LINE}, Case di livello {SALESFORCE_SCOPE_CASE_LEVEL}",
+        scope_cases=len(scope_cases),
+        complaints_without_case=without_case,
+        cases_without_complaint=cases_without_complaint,
+        wrong_jira_link=wrong_link,
+        status_mismatch=status_mismatch,
+    )
 
 
 @router.put("/{complaint_id}", response_model=schemas.Complaint)

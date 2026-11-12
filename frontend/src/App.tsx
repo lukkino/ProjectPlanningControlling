@@ -5,6 +5,7 @@ import { TopBar } from './components/TopBar'
 import { BacklogPage } from './pages/BacklogPage'
 import { ChangelogPage } from './pages/ChangelogPage'
 import { ComplaintsKpiPage } from './pages/ComplaintsKpiPage'
+import { ComplaintsMismatchPage } from './pages/ComplaintsMismatchPage'
 import { ComplaintsLayout } from './pages/ComplaintsLayout'
 import { ComplaintsPage } from './pages/ComplaintsPage'
 import { ConfigurationPage } from './pages/ConfigurationPage'
@@ -25,11 +26,12 @@ import { SnapshotsPage } from './pages/SnapshotsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { CertificationTicketsPage } from './pages/tools/CertificationTicketsPage'
+import { PurchaseRequisitionsPage } from './pages/tools/PurchaseRequisitionsPage'
 import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/workload']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/rda', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -61,6 +63,7 @@ export default function App() {
           <Route path="/complaints" element={<ComplaintsLayout />}>
             <Route index element={<ComplaintsPage />} />
             <Route path="kpi" element={<ComplaintsKpiPage />} />
+            <Route path="disallineamenti" element={<ComplaintsMismatchPage />} />
           </Route>
           <Route path="/releases" element={<ReleasesPage />} />
           <Route path="/workload" element={<WorkloadPage />} />
@@ -73,6 +76,7 @@ export default function App() {
           <Route path="/changelog" element={<ChangelogPage />} />
           <Route path="/tools/spedizioni" element={<ShippingToolPage />} />
           <Route path="/tools/certificazioni" element={<CertificationTicketsPage />} />
+          <Route path="/tools/rda" element={<PurchaseRequisitionsPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />

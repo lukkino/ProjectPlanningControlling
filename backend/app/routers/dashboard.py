@@ -16,7 +16,7 @@ from app.services.metrics import (
     compute_overview_metrics,
 )
 from app.services.earned_value import compute_earned_value
-from app.services.workload import compute_workload
+from app.services.workload import TeamPerson, compute_workload, team_key
 from app.services.presentation import generate_dashboard_presentation
 
 router = APIRouter(tags=["dashboard"])
@@ -65,7 +65,17 @@ def get_workload(
     if project_ids:
         query = query.filter(models.Project.id.in_(project_ids))
     projects = sorted(query.all(), key=lambda p: (p.gantt_order is None, p.gantt_order or 0, p.name))
-    load = compute_workload(projects, weeks=weeks)
+    roles = db.query(models.TeamRole).filter(models.TeamRole.owner_id == scope_user_id()).all()
+    team = {
+        team_key(r.name): TeamPerson(
+            role=role.name,
+            hours_per_day=r.hours_per_day,
+            absences=[(a.start_date, a.end_date) for a in r.absences],
+        )
+        for role in roles
+        for r in role.resources
+    }
+    load = compute_workload(projects, weeks=weeks, team=team)
     return schemas.Workload(
         today=load.today,
         week_starts=load.week_starts,

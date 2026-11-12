@@ -97,6 +97,35 @@ export type Company = 'SpA' | 'SA' | 'TPM'
 
 export type AbsenceKind = 'Ferie' | 'Malattia' | 'Altro'
 
+// Team del Carico team: ruoli con le persone (nome = assegnatario Jira), le
+// loro ore al giorno e le assenze.
+export type TeamAbsence = {
+  id: number
+  start_date: string
+  end_date: string
+  kind: AbsenceKind
+  note: string | null
+}
+
+export type TeamResource = {
+  id: number
+  role_id: number
+  name: string
+  hours_per_day: number
+  order: number
+  absences: TeamAbsence[]
+}
+
+// Assenze del Team per nome normalizzato (vedi teamKey), nel Capacity Planner.
+export type TeamAbsencesByName = Record<string, TeamAbsence[]>
+
+export type TeamRole = {
+  id: number
+  name: string
+  order: number
+  resources: TeamResource[]
+}
+
 // Assenza di una persona: dal primo all'ultimo giorno compresi (ISO
 // yyyy-mm-dd). Il tipo e' solo informativo: tutte tolgono ore.
 export type MemberAbsence = {
@@ -114,6 +143,10 @@ export type HoursCalculator = {
   end_date: string | null
   vacation_days: number
   resource_types: IncrementResourceType[]
+  // Assenze delle persone del Team del Carico team, per nome (vedi teamKey).
+  team_absences?: TeamAbsencesByName
+  // Nomi delle persone del Team, proposti aggiungendo una persona.
+  team_people?: string[]
 }
 
 // Dettaglio budget ore progetto: le ore per tipologia di risorsa copiate dal
@@ -275,7 +308,7 @@ export type ScenariosStatus = {
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
 export type SyncProgress = {
-  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets'
+  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets' | 'requisitions'
   done: number
   total: number
 }
@@ -749,6 +782,48 @@ export type DashboardSnapshotDetail = DashboardSnapshotSummary & {
 export type SalesforceStatus = 'Aperto' | 'Chiuso'
 
 // Un complaint: Bug Jira nato da un case Salesforce (vedi models.Complaint).
+// Sezione Disallineamenti dei Complaints (Jira <-> Salesforce).
+export type MismatchComplaint = {
+  jira_key: string
+  summary: string | null
+  jira_status: string | null
+  jira_created: string | null
+  salesforce_case_number: string | null
+  legacy_ax: boolean
+}
+
+export type MismatchLink = {
+  complaint: MismatchComplaint
+  sf_record_id: string
+  sf_case_number: string | null
+  sf_status: string | null
+  sf_jira_key: string | null
+  sf_closed: boolean
+}
+
+export type MismatchCaseReason = 'no_jira_key' | 'other_project' | 'not_a_complaint' | 'linked_elsewhere'
+
+export type MismatchCase = {
+  record_id: string
+  case_number: string | null
+  status: string | null
+  is_closed: boolean | null
+  account: string | null
+  created: string | null
+  jira_key: string | null
+  reason: MismatchCaseReason
+}
+
+export type ComplaintMismatches = {
+  synced_at: string | null
+  scope: string
+  scope_cases: number
+  complaints_without_case: MismatchComplaint[]
+  cases_without_complaint: MismatchCase[]
+  wrong_jira_link: MismatchLink[]
+  status_mismatch: MismatchLink[]
+}
+
 export type Complaint = {
   id: number
   jira_key: string
@@ -759,6 +834,8 @@ export type Complaint = {
   fix_versions: string | null
   // Campo Jira "Severity" (High/Medium/Low); null se non valorizzato.
   severity: string | null
+  // Campo Jira "Rejection Reason" (perche' il bug e' stato rifiutato).
+  rejection_reason: string | null
   jira_created: string | null
   // Data di chiusura su Jira (stato Done, Rejected...); null se ancora aperto.
   jira_resolved: string | null
@@ -793,6 +870,48 @@ export type Complaint = {
 
 export type ComplaintsSettings = {
   base_jql: string
+}
+
+// Tool RDA: link (personale) all'elenco delle RDA in Dynamics 365.
+export type RequisitionSettings = { list_url: string; default_url?: string }
+export type RequisitionSyncResult = CertificationSyncResult & { account: string | null }
+
+// Tool RDA: una richiesta di acquisto preparata dall'utente in Dynamics 365.
+export type RequisitionLine = {
+  line: number | null
+  status: string | null
+  product: string | null
+  description: string | null
+  item_number: string | null
+  category: string | null
+  quantity: number | null
+  unit: string | null
+  price: number | null
+  amount: number | null
+  currency: string | null
+  vendor_account: string | null
+  vendor_name: string | null
+  project_id: string | null
+  requested_date: string | null
+}
+
+export type PurchaseRequisition = {
+  id: number
+  number: string
+  name: string | null
+  // Draft, InReview, Approved, Rejected, Cancelled, Closed.
+  status: string | null
+  project_id: string | null
+  legal_entity: string | null
+  purpose: string | null
+  justification_code: string | null
+  justification: string | null
+  date: string | null
+  requested_date: string | null
+  on_hold: boolean
+  on_hold_explanation: string | null
+  lines: RequisitionLine[]
+  synced_at: string | null
 }
 
 // Tool Ticket certificazioni: un ticket del portale Product Certification.
@@ -897,6 +1016,12 @@ export interface WorkloadAssignee {
   name: string
   weeks: number[]
   capacity_days: number[]
+  // Dal Team (null se la persona non c'e'): ruolo, ore al giorno, ore
+  // disponibili per settimana e giorni di assenza per settimana.
+  role: string | null
+  hours_per_day: number | null
+  capacity_hours: number[] | null
+  absence_days: number[]
   beyond_hours: number
   remaining_hours: number
   overdue_hours: number
