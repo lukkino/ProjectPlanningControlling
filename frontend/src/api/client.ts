@@ -11,6 +11,7 @@ import type {
   CycleTimeMetrics,
   DashboardMetrics,
   EarnedValue,
+  Workload,
   DashboardSnapshotDetail,
   DashboardSnapshotSummary,
   DocumentRevisionMeta,
@@ -439,6 +440,7 @@ export const api = {
   dashboard: {
     get: (projectId: number) => request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
     earnedValue: (projectId: number) => request<EarnedValue>(`/projects/${projectId}/earned-value`),
+    workload: (weeks: number) => request<Workload>(`/workload?weeks=${weeks}`),
     // Presentazione .pptx della Dashboard increment; closedDays e' il periodo
     // selezionato nella card delle issue chiuse.
     presentation: (projectId: number, closedDays: number) =>

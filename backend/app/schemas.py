@@ -1392,3 +1392,48 @@ class EarnedValue(BaseModel):
     unbudgeted_logged_hours: float
     items: list[EarnedValueItem]
     curve: list[EarnedValuePoint]
+
+
+class WorkloadItem(BaseModel):
+    project_id: int
+    project_name: str
+    project_code: str
+    jira_key: str
+    summary: str | None
+    status: str
+    start: dt.date | None
+    finish: dt.date | None
+    remaining_hours: float | None
+    budget_source: str | None
+    overdue: bool
+    weeks: list[float]
+    beyond_hours: float
+
+
+class WorkloadAssignee(BaseModel):
+    name: str
+    weeks: list[float]
+    capacity_days: list[int]
+    beyond_hours: float
+    remaining_hours: float
+    overdue_hours: float
+    overdue_items: int
+    undated_items: int
+    unbudgeted_items: int
+    items: list[WorkloadItem]
+
+
+class WorkloadProject(BaseModel):
+    id: int
+    name: str
+    code: str
+    has_jql: bool
+    # Ultima sync da Jira del backlog (l'item sincronizzato piu' di recente).
+    last_synced_at: dt.datetime | None
+
+
+class Workload(BaseModel):
+    today: dt.date
+    week_starts: list[dt.date]
+    projects: list[WorkloadProject]
+    assignees: list[WorkloadAssignee]

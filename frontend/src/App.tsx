@@ -26,8 +26,9 @@ import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
+import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases', '/tools/spedizioni']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/releases', '/tools/spedizioni', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -61,6 +62,7 @@ export default function App() {
             <Route path="kpi" element={<ComplaintsKpiPage />} />
           </Route>
           <Route path="/releases" element={<ReleasesPage />} />
+          <Route path="/workload" element={<WorkloadPage />} />
           <Route path="/settings" element={can('editor') ? <ConfigurationPage /> : <Navigate to="/" replace />} />
           <Route path="/users" element={can('admin') ? <UsersPage /> : <Navigate to="/" replace />} />
           <Route path="/projects-dashboard" element={<ProjectsDashboardPage />} />

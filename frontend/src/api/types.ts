@@ -844,6 +844,42 @@ export interface EarnedValuePoint {
   ac: number | null
 }
 
+export interface WorkloadItem {
+  project_id: number
+  project_name: string
+  project_code: string
+  jira_key: string
+  summary: string | null
+  status: string
+  start: string | null
+  finish: string | null
+  remaining_hours: number | null
+  budget_source: string | null
+  overdue: boolean
+  weeks: number[]
+  beyond_hours: number
+}
+
+export interface WorkloadAssignee {
+  name: string
+  weeks: number[]
+  capacity_days: number[]
+  beyond_hours: number
+  remaining_hours: number
+  overdue_hours: number
+  overdue_items: number
+  undated_items: number
+  unbudgeted_items: number
+  items: WorkloadItem[]
+}
+
+export interface Workload {
+  today: string
+  week_starts: string[]
+  projects: { id: number; name: string; code: string; has_jql: boolean; last_synced_at: string | null }[]
+  assignees: WorkloadAssignee[]
+}
+
 export interface EarnedValue {
   today: string
   has_baseline: boolean

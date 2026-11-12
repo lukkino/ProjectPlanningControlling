@@ -16,6 +16,7 @@ from app.services.metrics import (
     compute_overview_metrics,
 )
 from app.services.earned_value import compute_earned_value
+from app.services.workload import compute_workload
 from app.services.presentation import generate_dashboard_presentation
 
 router = APIRouter(tags=["dashboard"])
@@ -49,6 +50,42 @@ def get_earned_value(project_id: int, db: Session = Depends(get_db)):
         cv=ev.cv,
         items=[schemas.EarnedValueItem(**i.__dict__, sv=i.sv, cpi=i.cpi) for i in ev.items],
         curve=[schemas.EarnedValuePoint(**p.__dict__) for p in ev.curve],
+    )
+
+
+@router.get("/api/workload", response_model=schemas.Workload)
+def get_workload(
+    weeks: int = Query(12, ge=1, le=52),
+    project_ids: list[int] | None = Query(None, description="Solo questi increment (default: tutti)"),
+    db: Session = Depends(get_db),
+):
+    """Carico per assegnatario su tutti gli increment dell'utente (regole in
+    services/workload.py)."""
+    query = db.query(models.Project).filter(models.Project.owner_id == scope_user_id())
+    if project_ids:
+        query = query.filter(models.Project.id.in_(project_ids))
+    projects = sorted(query.all(), key=lambda p: (p.gantt_order is None, p.gantt_order or 0, p.name))
+    load = compute_workload(projects, weeks=weeks)
+    return schemas.Workload(
+        today=load.today,
+        week_starts=load.week_starts,
+        projects=[
+            schemas.WorkloadProject(
+                id=p.id,
+                name=p.name,
+                code=p.code,
+                has_jql=bool(p.jira_jql),
+                last_synced_at=max((i.last_synced_at for i in p.backlog_items if i.last_synced_at), default=None),
+            )
+            for p in projects
+        ],
+        assignees=[
+            schemas.WorkloadAssignee(
+                **{k: v for k, v in a.__dict__.items() if k != "items"},
+                items=[schemas.WorkloadItem(**i.__dict__) for i in a.items],
+            )
+            for a in load.assignees
+        ],
     )
 
 

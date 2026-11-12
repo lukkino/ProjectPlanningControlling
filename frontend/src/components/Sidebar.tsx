@@ -51,6 +51,10 @@ export function Sidebar() {
         📦 Releases
       </NavLink>
 
+      <NavLink to="/workload" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
+        👥 Carico team
+      </NavLink>
+
       <NavLink to="/tools" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
         🧰 Tools
       </NavLink>
