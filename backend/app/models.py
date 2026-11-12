@@ -978,9 +978,12 @@ class Complaint(Base):
 
     Da Jira (sovrascritti a ogni sync): summary, stato, fix version, severity,
     label, numero e id del case Salesforce. Architettura e Sito Cliente non hanno un campo Jira
-    dedicato: sono ricavati dalle label (vedi routers/complaints.py). Lo
-    stato Salesforce non esiste in Jira: e' gestito a mano qui e la sync non
-    lo tocca."""
+    dedicato: sono ricavati dalle label (vedi routers/complaints.py).
+
+    Da Salesforce (letti dopo la sync Jira, vedi services/tools/
+    salesforce_cases.py): Status, cliente (Account), priorita' e impatto del
+    Case. Per i complaint il cui Case non si trova, lo stato Salesforce resta
+    gestito a mano."""
 
     __tablename__ = "complaints"
     # Lo stesso complaint Jira puo' essere sincronizzato da piu' utenti.
@@ -1023,6 +1026,17 @@ class Complaint(Base):
     # None se non ce ne sono.
     tsb_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Case Salesforce trovato (per id, chiave Jira o numero del case): id del
+    # record e campi letti; None se non trovato. sf_synced_at = ultima lettura
+    # riuscita.
+    sf_record_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sf_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sf_account: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sf_inpeco_priority: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sf_customer_impact: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    sf_safety: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sf_severity: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sf_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Release(Base):

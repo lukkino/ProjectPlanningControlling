@@ -245,6 +245,8 @@ export type SyncResult = {
   restored: number
   total_matched: number
   errors: string[]
+  // Complaints: Case trovati in Salesforce (null = lettura non fatta).
+  salesforce_matched?: number | null
 }
 
 // Una cartella dell'increment (es. quella dei documenti delle review): null
@@ -273,7 +275,7 @@ export type ScenariosStatus = {
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
 export type SyncProgress = {
-  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving'
+  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce'
   done: number
   total: number
 }
@@ -767,7 +769,8 @@ export type Complaint = {
   architecture_manual: boolean
   salesforce_case_number: string | null
   salesforce_case_id: string | null
-  // Non esiste in Jira: gestito a mano, la sync non lo tocca.
+  // Aperto/Chiuso: segue il Case Salesforce se trovato (IsClosed), se no
+  // gestito a mano.
   salesforce_status: SalesforceStatus
   customer_site: string | null
   // true = corretto a mano, la sync non lo ricalcola dalle label Jira.
@@ -776,6 +779,16 @@ export type Complaint = {
   // to" con TSB nel summary).
   tsb_activities: { key: string; summary: string; status: string | null }[]
   last_synced_at: string | null
+  // Dal Case Salesforce (letti dopo la sync Jira); null se il Case non e'
+  // stato trovato.
+  sf_record_id: string | null
+  sf_status: string | null
+  sf_account: string | null
+  sf_inpeco_priority: string | null
+  sf_customer_impact: string | null
+  sf_safety: string | null
+  sf_severity: string | null
+  sf_synced_at: string | null
 }
 
 export type ComplaintsSettings = {

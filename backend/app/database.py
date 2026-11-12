@@ -130,6 +130,19 @@ def run_lightweight_migrations() -> None:
 
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
+        if "sf_status" not in complaint_columns:
+            with engine.begin() as conn:
+                for column, kind in (
+                    ("sf_record_id", "VARCHAR(32)"),
+                    ("sf_status", "VARCHAR(64)"),
+                    ("sf_account", "VARCHAR(255)"),
+                    ("sf_inpeco_priority", "VARCHAR(32)"),
+                    ("sf_customer_impact", "VARCHAR(16)"),
+                    ("sf_safety", "VARCHAR(32)"),
+                    ("sf_severity", "VARCHAR(64)"),
+                    ("sf_synced_at", "DATETIME"),
+                ):
+                    conn.execute(text(f"ALTER TABLE complaints ADD COLUMN {column} {kind}"))
         if "architecture_manual" not in complaint_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE complaints ADD COLUMN architecture_manual BOOLEAN DEFAULT 0"))

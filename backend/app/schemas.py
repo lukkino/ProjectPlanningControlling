@@ -492,6 +492,8 @@ class SyncResult(BaseModel):
     restored: int = 0
     total_matched: int
     errors: list[str] = []
+    # Complaints: Case trovati in Salesforce (None = lettura non fatta).
+    salesforce_matched: int | None = None
 
 
 class SyncProgress(BaseModel):
@@ -1155,6 +1157,14 @@ class Complaint(BaseModel):
     customer_site_manual: bool = False
     tsb_activities: list[TsbActivity] = []
     last_synced_at: dt.datetime | None = None
+    sf_record_id: str | None = None
+    sf_status: str | None = None
+    sf_account: str | None = None
+    sf_inpeco_priority: str | None = None
+    sf_customer_impact: str | None = None
+    sf_safety: str | None = None
+    sf_severity: str | None = None
+    sf_synced_at: dt.datetime | None = None
 
     # Nel database e' JSON (vedi models.Complaint.tsb_activities).
     @field_validator("tsb_activities", mode="before")

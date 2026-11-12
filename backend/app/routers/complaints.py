@@ -1,6 +1,8 @@
 import datetime as dt
 import json
 import re
+import subprocess
+import sys
 from collections.abc import Callable
 from io import BytesIO
 
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.ownership import scope_user_id, user_settings, user_settings_for_update
+from app.routers import change_order
 from app.routers.settings import SETTINGS_ROW_ID
 from app.services.db_backup import DatabaseBackupError, backup_database
 from app.services.jira_client import JiraClientError, fetch_complaints, test_connection
@@ -71,10 +74,35 @@ EXPORT_COLUMNS = [
     ("Creato su Jira", 16),
     ("Architettura", 15),
     ("Sito Cliente", 28),
+    ("Inpeco Priority", 15),
+    ("Customer Impact", 15),
+    ("Safety", 10),
+    ("Severity SF", 24),
 ]
 
 # Il numero del case Salesforce e' anche in testa al summary ("[76665]...").
 _SUMMARY_CASE_RE = re.compile(r"^\s*\[(\d+)\]")
+
+# Lettura dei Case da Salesforce dopo la sync Jira (vedi
+# services/tools/salesforce_cases.py): login e query di solito in 10-20 s.
+SALESFORCE_TIMEOUT_S = 150
+
+
+def _salesforce_case_numbers(value: str | None) -> list[str]:
+    """Numeri di case Salesforce a 8 cifre dal campo "ID Salesforce" (come
+    salesforceCaseNumbers nel frontend): in Jira spesso mancano gli zeri
+    davanti; i ticket del vecchio sistema AX ("AX 034877", numeri a 6 cifre
+    con lo zero davanti) non sono in Salesforce; in "AX 032314, SF: 50889"
+    vale solo SF."""
+    if not value:
+        return []
+    sf_part = re.search(r"SF\s*:\s*(.*)$", value, re.IGNORECASE)
+    text = sf_part.group(1) if sf_part else re.sub(r"AX\s*\d+", "", value, flags=re.IGNORECASE)
+    return [
+        n.zfill(8)
+        for n in re.findall(r"\d+", text)
+        if len(n) <= 8 and not (len(n) == 6 and n.startswith("0"))
+    ]
 
 
 def _architecture(labels: list[str]) -> str | None:
@@ -147,7 +175,7 @@ def export_complaints(db: Session = Depends(get_db)):
             [
                 c.salesforce_case_number,
                 c.summary,
-                c.salesforce_status,
+                c.sf_status or c.salesforce_status,
                 c.jira_key,
                 c.jira_status,
                 c.fix_versions,
@@ -157,6 +185,10 @@ def export_complaints(db: Session = Depends(get_db)):
                 c.jira_created,
                 c.architecture,
                 c.customer_site,
+                c.sf_inpeco_priority,
+                c.sf_customer_impact,
+                c.sf_safety,
+                c.sf_severity,
             ]
         )
 
@@ -281,7 +313,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
         complaint.salesforce_case_id = issue.salesforce_case_id
         complaint.tsb_activities = json.dumps(issue.tsb_activities) if issue.tsb_activities else None
         if not complaint.customer_site_manual:
-            complaint.customer_site = _customer_site(issue.labels)
+            complaint.customer_site = complaint.sf_account or _customer_site(issue.labels)
         complaint.last_synced_at = now
 
     # Come per il Backlog: cio' che non e' piu' nel risultato della JQL (es.
@@ -293,7 +325,106 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
             removed += 1
 
     db.commit()
-    return schemas.SyncResult(created=created, updated=updated, removed=removed, total_matched=len(issues))
+
+    # Poi Salesforce: un errore qui non annulla la sync Jira, diventa un
+    # avviso nel risultato.
+    on_progress("salesforce", 0, 0)
+    errors: list[str] = []
+    try:
+        salesforce_matched = _read_salesforce(db, list(_owned(db)))
+    except HTTPException as exc:
+        salesforce_matched = None
+        errors.append(f"Salesforce non letto: {exc.detail}")
+    return schemas.SyncResult(
+        created=created,
+        updated=updated,
+        removed=removed,
+        total_matched=len(issues),
+        errors=errors,
+        salesforce_matched=salesforce_matched,
+    )
+
+
+def _read_salesforce(db: Session, complaints: list[models.Complaint]) -> int:
+    """Legge i Case dei complaint da Salesforce (processo separato, col
+    profilo del browser del CO) e ne salva Status, cliente, priorita' e
+    impatto. Il Case di un complaint si cerca per id del record (dal campo
+    Jira), poi per numero del case, poi per chiave Jira (campo JiraID del
+    Case). Restituisce quanti complaint hanno trovato il loro Case."""
+    if not complaints:
+        return 0
+    if change_order._running():
+        raise HTTPException(status_code=409, detail="è aperta la finestra del Change Order: chiudila e rifai la sync.")
+    if not change_order._status_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="il browser dell'app è occupato da un'altra lettura.")
+    numbers_of = {c.id: _salesforce_case_numbers(c.salesforce_case_number) for c in complaints}
+    request = {
+        "ids": [c.salesforce_case_id for c in complaints if c.salesforce_case_id],
+        "jira_keys": [c.jira_key for c in complaints],
+        "case_numbers": [n for numbers in numbers_of.values() for n in numbers],
+    }
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "app.services.tools.salesforce_cases"],
+            cwd=change_order.BACKEND_DIR,
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=SALESFORCE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Salesforce non ha risposto in tempo.")
+    finally:
+        change_order._status_lock.release()
+    lines = [line for line in result.stdout.splitlines() if line.strip().startswith("{")]
+    outcome = json.loads(lines[-1]) if lines else {"records": [], "error": "nessuna risposta dalla lettura"}
+    if outcome.get("error") == "login":
+        raise HTTPException(
+            status_code=409,
+            detail='login non riuscito: apri il CO una volta con "Imposta impatto Software" e rifai il login Microsoft.',
+        )
+    if outcome.get("error"):
+        raise HTTPException(status_code=502, detail=outcome["error"])
+
+    records = outcome["records"]
+    by_id = {r["id"]: r for r in records}
+    by_number = {r["case_number"]: r for r in records if r.get("case_number")}
+    by_jira: dict[str, list[dict]] = {}
+    for r in records:
+        if r.get("jira_key"):
+            by_jira.setdefault(r["jira_key"].strip(), []).append(r)
+    now = dt.datetime.utcnow()
+    matched = 0
+    for c in complaints:
+        record = by_id.get(c.salesforce_case_id or "")
+        if record is None:
+            record = next((by_number[n] for n in numbers_of[c.id] if n in by_number), None)
+        if record is None:
+            # Piu' Case sulla stessa chiave Jira: prima quelli aperti.
+            candidates = sorted(by_jira.get(c.jira_key, []), key=lambda r: bool(r.get("is_closed")))
+            record = candidates[0] if candidates else None
+        if record is None:
+            c.sf_record_id = c.sf_status = c.sf_account = None
+            c.sf_inpeco_priority = c.sf_customer_impact = c.sf_safety = c.sf_severity = None
+            continue
+        matched += 1
+        c.sf_record_id = record["id"]
+        c.sf_status = record.get("status")
+        c.sf_account = record.get("account")
+        c.sf_inpeco_priority = record.get("inpeco_priority")
+        c.sf_customer_impact = record.get("customer_impact")
+        c.sf_safety = record.get("safety")
+        c.sf_severity = record.get("severity")
+        c.sf_synced_at = now
+        # Lo stato Aperto/Chiuso (filtri, KPI, export) segue Salesforce.
+        if record.get("is_closed") is not None:
+            c.salesforce_status = "Chiuso" if record["is_closed"] else "Aperto"
+        if not c.customer_site_manual and c.sf_account:
+            c.customer_site = c.sf_account
+    db.commit()
+    return matched
 
 
 @router.put("/{complaint_id}", response_model=schemas.Complaint)

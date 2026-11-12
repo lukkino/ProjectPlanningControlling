@@ -8,6 +8,7 @@ const PHASE_LABEL: Record<SyncProgress['phase'], string> = {
   changelog: 'Lettura dello storico delle issue (date effettive)',
   details: 'Lettura dei Task collegati',
   saving: 'Salvataggio nel backlog',
+  salesforce: 'Lettura dei Case da Salesforce',
 }
 
 // Percentuale complessiva. Backlog: quasi tutto il tempo va nei changelog
@@ -24,6 +25,8 @@ function percentOf(progress: SyncProgress | undefined): number {
     case 'details':
       return 96
     case 'saving':
+      return 97
+    case 'salesforce':
       return 99
     default:
       return 0

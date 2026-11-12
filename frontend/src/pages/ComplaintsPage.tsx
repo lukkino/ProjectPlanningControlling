@@ -5,7 +5,7 @@ import { Suggestion } from '../components/Suggestion'
 import { useSuggestions } from '../lib/useSuggestions'
 import type { Complaint, SalesforceStatus } from '../api/types'
 import { ARCHITECTURES, NO_ARCHITECTURE, architecturesOf } from '../lib/complaints'
-import { formatIsoDate } from '../lib/dates'
+import { formatDateTime, formatIsoDate } from '../lib/dates'
 
 // Link ai case in Salesforce (Lightning). Con l'id tecnico del record
 // (campo Jira "Salesforce Case ID") si apre direttamente il case; senza, si
@@ -40,6 +40,8 @@ const HIDDEN_COLUMNS_STORAGE_KEY = 'complaints.hiddenColumns'
 // anche queste nel browser.
 const COLUMN_WIDTHS_STORAGE_KEY = 'complaints.columnWidths'
 const MIN_COLUMN_WIDTH = 40
+// Spazio minimo per una colonna senza larghezza (Summary).
+const MIN_FLEX_COLUMN_WIDTH = 320
 const ALWAYS_VISIBLE_COLUMN_KEYS = new Set(['jira_key'])
 
 type ComplaintColumn = {
@@ -150,6 +152,8 @@ const searchableText = (c: Complaint) =>
     c.jira_key,
     c.summary,
     c.customer_site,
+    c.sf_account,
+    c.sf_status,
     c.fix_versions,
     ...c.tsb_activities.map((a) => a.key),
     c.labels,
@@ -419,8 +423,19 @@ export function ComplaintsPage() {
       label: 'Stato Salesforce',
       width: 100,
       className: 'editable-cell',
-      render: (c) => (
+      // Case trovato in Salesforce: lo Status letto, non modificabile qui.
+      // Altrimenti Aperto/Chiuso a mano, come prima.
+      render: (c) =>
+        c.sf_status ? (
+          <span
+            className={`sf-status sf-status--${c.salesforce_status === 'Chiuso' ? 'closed' : 'open'}`}
+            title={`Status del Case in Salesforce, letto il ${formatDateTime(c.sf_synced_at) ?? '-'}`}
+          >
+            {c.sf_status}
+          </span>
+        ) : (
         <select
+          title="Case non trovato in Salesforce: stato impostato a mano"
           className={`sf-status sf-status--${c.salesforce_status === 'Chiuso' ? 'closed' : 'open'}`}
           value={c.salesforce_status}
           aria-label={`Stato Salesforce di ${c.jira_key}`}
@@ -430,7 +445,41 @@ export function ComplaintsPage() {
             <option key={s}>{s}</option>
           ))}
         </select>
-      ),
+        ),
+    },
+    {
+      key: 'sf_inpeco_priority',
+      label: 'Inpeco Priority',
+      width: 90,
+      title: 'Campo "Inpeco Priority" del Case Salesforce',
+      style: (c) =>
+        c.sf_inpeco_priority === 'Very High' || c.sf_inpeco_priority === 'High'
+          ? { color: 'var(--danger)', fontWeight: 600 }
+          : undefined,
+      render: (c) => c.sf_inpeco_priority ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'sf_customer_impact',
+      label: 'Customer Impact',
+      width: 80,
+      title: 'Campo "Customer Impact" (P1–P5) del Case Salesforce',
+      style: (c) => (c.sf_customer_impact === 'P1' ? { color: 'var(--danger)', fontWeight: 600 } : undefined),
+      render: (c) => c.sf_customer_impact ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'sf_safety',
+      label: 'Safety',
+      width: 70,
+      title: 'Campo "Safety" del Case Salesforce',
+      style: (c) => (c.sf_safety && c.sf_safety !== 'NO' ? { color: 'var(--danger)', fontWeight: 600 } : undefined),
+      render: (c) => c.sf_safety ?? <span className="muted">-</span>,
+    },
+    {
+      key: 'sf_severity',
+      label: 'Severity SF',
+      width: 110,
+      title: 'Campo "Severity" del Case Salesforce (diverso dalla Severity di Jira)',
+      render: (c) => c.sf_severity ?? <span className="muted">-</span>,
     },
     {
       key: 'jira_key',
@@ -567,8 +616,10 @@ export function ComplaintsPage() {
           placeholder="-"
           title={
             c.customer_site_manual
-              ? 'Inserito a mano: svuota il campo per tornare al valore ricavato dalle label Jira'
-              : 'Ricavato dalle label Jira: modificalo per correggerlo'
+              ? 'Inserito a mano: svuota il campo per tornare al cliente del Case Salesforce (o alle label Jira)'
+              : c.sf_account
+                ? 'Cliente (Account) del Case Salesforce: modificalo per correggerlo'
+                : 'Ricavato dalle label Jira: modificalo per correggerlo'
           }
           aria-label={`Sito Cliente di ${c.jira_key}`}
           onBlur={(e) => {
@@ -805,7 +856,15 @@ export function ComplaintsPage() {
         )}
 
         <div className="table-wrap" ref={tableWrapRef}>
-          <table className="complaints-table">
+          {/* Larghezza minima: le colonne a larghezza fissa piu' spazio per
+              quelle senza (Summary); se non ci sta, la tabella scorre in
+              orizzontale invece di schiacciare il Summary. */}
+          <table
+            className="complaints-table"
+            style={{
+              minWidth: shownColumns.reduce((total, col) => total + (widthOf(col) ?? MIN_FLEX_COLUMN_WIDTH), 0),
+            }}
+          >
             <colgroup>
               {shownColumns.map((col) => (
                 <col key={col.key} style={{ width: widthOf(col) }} />
@@ -877,15 +936,17 @@ export function ComplaintsPage() {
 // Cella "ID Salesforce": link al case (diretto con il Case ID, altrimenti
 // alla ricerca per numero a 8 cifre); i ticket AX restano testo semplice.
 function SalesforceCaseLinks({ complaint: c }: { complaint: Complaint }) {
-  if (c.salesforce_case_id) {
+  // Id del record: dal Case trovato in Salesforce, se no dal campo Jira.
+  const recordId = c.sf_record_id ?? c.salesforce_case_id
+  if (recordId) {
     return (
       <a
-        href={salesforceCaseUrl(c.salesforce_case_id)}
+        href={salesforceCaseUrl(recordId)}
         target="_blank"
         rel="noreferrer"
-        title={`Apri il case in Salesforce (Case ID ${c.salesforce_case_id})`}
+        title={`Apri il case in Salesforce (Case ID ${recordId})`}
       >
-        {c.salesforce_case_number ?? c.salesforce_case_id}
+        {c.salesforce_case_number ?? recordId}
       </a>
     )
   }

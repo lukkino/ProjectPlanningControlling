@@ -59,9 +59,18 @@ export function ComplaintsLayout() {
         <p className="muted" style={{ marginTop: 0 }}>
           Sync completata: {sync.data.created} nuovi complaint, {sync.data.updated} aggiornati
           {sync.data.removed > 0 && `, ${sync.data.removed} rimossi (non più nella JQL)`} (totale trovati:{' '}
-          {sync.data.total_matched}).
+          {sync.data.total_matched})
+          {sync.data.salesforce_matched != null &&
+            ` · Salesforce: ${sync.data.salesforce_matched} case trovati su ${sync.data.total_matched}`}
+          .
         </p>
       )}
+      {sync.isSuccess &&
+        sync.data.errors.map((e) => (
+          <div key={e} className="error-banner">
+            {e}
+          </div>
+        ))}
 
       <Outlet />
     </div>
