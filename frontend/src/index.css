@@ -1398,3 +1398,20 @@ ul.changelog-body { padding-left: 20px; }
 .wl-last-sync { flex-basis: 100%; text-align: right; font-size: 12px; }
 .wl-sync-ok { background: #e9f7ee; color: #1a9c5c; border: 1px solid #b8e3c8; border-radius: var(--radius); padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
 .wl-meta a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); }
+
+/* Tool Ticket certificazioni (pages/tools/CertificationTicketsPage.tsx) */
+.cert-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 12px; }
+.cert-toolbar input[type=search] { min-width: 260px; }
+.cert-count { margin-left: auto; font-size: 13px; }
+.cert-table td { white-space: normal; vertical-align: top; }
+.cert-table td.nowrap { white-space: nowrap; }
+.cert-table td.num { text-align: right; }
+.cert-row { cursor: pointer; }
+.cert-detail > td { background: var(--bg); }
+.cert-detail-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px 32px; padding: 4px 8px; }
+.cert-detail-body h4 { margin: 4px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--text-muted); }
+.cert-fields { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+.cert-fields dt { color: var(--text-muted); }
+.cert-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+.cert-detail-note { grid-column: 1 / -1; font-size: 12px; margin: 4px 0 0; }
+.cert-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 260px; }

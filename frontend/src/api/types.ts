@@ -275,7 +275,7 @@ export type ScenariosStatus = {
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
 export type SyncProgress = {
-  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce'
+  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets'
   done: number
   total: number
 }
@@ -794,6 +794,26 @@ export type Complaint = {
 export type ComplaintsSettings = {
   base_jql: string
 }
+
+// Tool Ticket certificazioni: un ticket del portale Product Certification.
+export type CertificationTicket = {
+  id: number
+  ticket_id: number
+  display_id: string | null
+  subject: string | null
+  status: string | null
+  created_at: string | null
+  assigned_to: string | null
+  stage: string | null
+  // Campi della richiesta e del ticket, come nel portale: {etichetta: valore}.
+  item: Record<string, string | null>
+  ticket: Record<string, string | null>
+  replies: number
+  synced_at: string | null
+  url: string
+}
+
+export type CertificationSyncResult = { created: number; updated: number; removed: number; total: number }
 
 // Tool Modulo Spedizioni: rubriche.
 export type ShippingAddress = {

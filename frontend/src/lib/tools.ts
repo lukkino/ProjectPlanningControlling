@@ -10,6 +10,13 @@ export type ToolInfo = {
 
 export const TOOLS: ToolInfo[] = [
   {
+    path: '/tools/certificazioni',
+    icon: '🏷️',
+    name: 'Ticket certificazioni',
+    description:
+      'I tuoi ticket del portale Product Certification (Freshservice): stato, articolo, manufacturer e codici, letti dal portale con un clic.',
+  },
+  {
     path: '/tools/spedizioni',
     icon: '🚚',
     name: 'Modulo Spedizioni',

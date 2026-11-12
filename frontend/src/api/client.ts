@@ -10,6 +10,8 @@ import type {
   ComplaintsSettings,
   CycleTimeMetrics,
   DashboardMetrics,
+  CertificationSyncResult,
+  CertificationTicket,
   EarnedValue,
   Workload,
   DashboardSnapshotDetail,
@@ -576,6 +578,11 @@ export const api = {
   },
   // Tools: utility indipendenti dai progetti.
   tools: {
+    certifications: {
+      list: () => request<CertificationTicket[]>('/tools/certification-tickets'),
+      sync: () => post<CertificationSyncResult>('/tools/certification-tickets/sync'),
+      syncProgress: () => request<SyncProgress>('/tools/certification-tickets/sync/progress'),
+    },
     shipping: {
       addresses: () => request<ShippingAddress[]>('/tools/shipping/addresses'),
       createAddress: (data: Omit<ShippingAddress, 'id'>) => post<ShippingAddress>('/tools/shipping/addresses', data),

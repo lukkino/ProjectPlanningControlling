@@ -1105,6 +1105,32 @@ class ComponentCatalogEntry(Base):
 # ---------- Tools ----------
 
 
+class CertificationTicket(Base):
+    """Tool Ticket certificazioni: un ticket del portale Product
+    Certification (Freshservice), letto dal portale (vedi
+    services/tools/certification_tickets.py). Campi della richiesta e del
+    ticket come JSON {etichetta: valore}: restano validi anche se il portale
+    aggiunge o rinomina campi."""
+
+    __tablename__ = "tool_certification_tickets"
+    __table_args__ = (UniqueConstraint("owner_id", "ticket_id", name="uq_cert_tickets_owner_ticket"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # Numero del ticket nel portale (URL /support/tickets/<ticket_id>).
+    ticket_id: Mapped[int] = mapped_column(Integer)
+    display_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    item_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ticket_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replies: Mapped[int] = mapped_column(Integer, default=0)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ShippingAddress(Base):
     """Tool Modulo Spedizioni: rubrica indirizzi (mittenti e destinatari)."""
 
