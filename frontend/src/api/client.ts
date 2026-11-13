@@ -8,6 +8,8 @@ import type {
   BugsOpenedMetrics,
   Complaint,
   ComplaintMismatches,
+  DoneCounts,
+  DoneJqlDefaults,
   PurchaseRequisition,
   TeamAbsence,
   TeamResource,
@@ -497,6 +499,11 @@ export const api = {
       post<ForecastSimulation>(`/projects/${projectId}/forecasting`, data),
     update: (id: number, data: Partial<ForecastSimulation>) => put<ForecastSimulation>(`/forecasting/${id}`, data),
     remove: (id: number) => del(`/forecasting/${id}`),
+    // Planned/Unplanned PBI Done dalle JQL dell'increment.
+    doneCounts: (projectId: number) => request<DoneCounts>(`/projects/${projectId}/forecasting/done-counts`),
+    // JQL predefinite dei PBI Done, per tutti gli increment dell'utente.
+    doneJqlDefaults: () => request<DoneJqlDefaults>('/forecasting/defaults/done-jql'),
+    updateDoneJqlDefaults: (data: DoneJqlDefaults) => put<DoneJqlDefaults>('/forecasting/defaults/done-jql', data),
   },
   documents: {
     // Presentazione di Kick-off (.pptx) dal template ufficiale.

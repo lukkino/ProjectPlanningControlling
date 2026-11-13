@@ -1,6 +1,8 @@
 import { OrderedList, TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
 import { Color, TextStyle } from '@tiptap/extension-text-style'
+import { Extension } from '@tiptap/core'
+import { Fragment } from '@tiptap/pm/model'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, TextSelection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
@@ -111,6 +113,140 @@ const NumberedList = OrderedList.extend({
   },
 })
 
+// Voci di elenco "Mandatorio" (es. nello Scope): attributo delle voci di
+// elenchi puntati, numerati e di controllo, salvato come data-mandatory.
+const LIST_ITEM_TYPES = ['listItem', 'taskItem']
+// Link a una issue Jira (".../browse/PTBSYS-3416") il cui testo e' l'indirizzo
+// stesso: si mostra solo la chiave, il link resta. Vale incollando o
+// scrivendo un indirizzo e per i link gia' presenti, alla prima modifica; un
+// link con un testo scelto a mano non si tocca.
+const JIRA_BROWSE_RE = /^https?:\/\/[^/\s]+\/browse\/([A-Z][A-Z0-9_]*-\d+)\/?(?:[?#]\S*)?$/i
+
+export function jiraKeyOfLink(href: string, text: string): string | null {
+  const match = JIRA_BROWSE_RE.exec(href)
+  if (!match) return null
+  const shown = text.trim().replace(/\/$/, '')
+  const bare = href.replace(/\/$/, '')
+  const sameAsHref = shown === bare || shown === bare.replace(/^https?:\/\//, '')
+  return sameAsHref ? match[1].toUpperCase() : null
+}
+
+const JiraLinkText = Extension.create({
+  name: 'jiraLinkText',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        appendTransaction: (transactions, _oldState, state) => {
+          if (!transactions.some((t) => t.docChanged)) return null
+          const edits: { from: number; to: number; key: string; node: PMNode }[] = []
+          state.doc.descendants((node, pos) => {
+            if (!node.isText || !node.text) return
+            const link = node.marks.find((m) => m.type.name === 'link')
+            const key = link ? jiraKeyOfLink(String(link.attrs.href ?? ''), node.text) : null
+            if (key && key !== node.text) edits.push({ from: pos, to: pos + node.nodeSize, key, node })
+          })
+          if (edits.length === 0) return null
+          const tr = state.tr
+          // Dal fondo, cosi' le posizioni prima di ogni modifica restano valide.
+          for (const e of edits.reverse()) tr.replaceWith(e.from, e.to, state.schema.text(e.key, e.node.marks))
+          return tr
+        },
+      }),
+    ]
+  },
+})
+
+const Mandatory = Extension.create({
+  name: 'mandatory',
+  addGlobalAttributes() {
+    return [
+      {
+        types: LIST_ITEM_TYPES,
+        attributes: {
+          mandatory: {
+            default: false,
+            parseHTML: (element: HTMLElement) => element.getAttribute('data-mandatory') === 'true',
+            renderHTML: (attributes: { mandatory?: boolean }) =>
+              attributes.mandatory ? { 'data-mandatory': 'true' } : {},
+          },
+        },
+      },
+    ]
+  },
+})
+
+// Voce di elenco piu' interna attorno al cursore.
+export function currentListItem(state: EditorState): { node: PMNode; pos: number } | null {
+  const { $from } = state.selection
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const node = $from.node(depth)
+    if (LIST_ITEM_TYPES.includes(node.type.name)) return { node, pos: $from.before(depth) }
+  }
+  return null
+}
+
+// Attiva/toglie "Mandatorio" sulla voce del cursore e riordina il suo elenco:
+// prima le voci mandatorie, poi le altre, ognuna nel suo ordine di prima (le
+// sotto-voci annidate si spostano con la loro voce). Gli elenchi dello stesso
+// tipo attaccati a quello della voce (separati al piu' da righe vuote: capita
+// premendo due volte Invio) vengono prima riuniti in uno solo, cosi' la voce
+// sale davvero in cima; un titolo o un paragrafo con testo li tiene separati.
+export function toggleMandatory(editor: Editor) {
+  const item = currentListItem(editor.state)
+  if (!item) return
+  const tr = editor.state.tr.setNodeMarkup(item.pos, undefined, { ...item.node.attrs, mandatory: !item.node.attrs.mandatory })
+  const toggled = tr.doc.nodeAt(item.pos)
+  const $item = tr.doc.resolve(item.pos)
+  const listDepth = $item.depth
+  const list = $item.parent
+  const container = $item.node(listDepth - 1)
+  const listIndex = $item.index(listDepth - 1)
+  const isEmptyParagraph = (n: PMNode) => n.type.name === 'paragraph' && n.textContent.trim() === '' && n.childCount === 0
+  const sameList = (n: PMNode) => n.type === list.type
+
+  // Gruppo di elenchi da riunire: indici [first, last] nel contenitore.
+  let first = listIndex
+  for (let i = listIndex - 1; i >= 0; i--) {
+    const n = container.child(i)
+    if (sameList(n)) first = i
+    else if (!isEmptyParagraph(n)) break
+  }
+  let last = listIndex
+  for (let i = listIndex + 1; i < container.childCount; i++) {
+    const n = container.child(i)
+    if (sameList(n)) last = i
+    else if (!isEmptyParagraph(n)) break
+  }
+  const items: PMNode[] = []
+  for (let i = first; i <= last; i++) {
+    const n = container.child(i)
+    if (sameList(n)) n.forEach((child) => items.push(child))
+  }
+  const sorted = [...items.filter((c) => c.attrs.mandatory), ...items.filter((c) => !c.attrs.mandatory)]
+
+  // Posizione del primo elenco del gruppo e fine dell'ultimo.
+  const containerStart = listDepth - 1 === 0 ? 0 : $item.start(listDepth - 1)
+  let from = containerStart
+  for (let i = 0; i < first; i++) from += container.child(i).nodeSize
+  let to = from
+  for (let i = first; i <= last; i++) to += container.child(i).nodeSize
+
+  const merged = first !== last
+  if (merged || sorted.some((c, i) => c !== items[i])) {
+    // Un solo elenco, con gli attributi di quello della voce.
+    tr.replaceWith(from, to, list.type.create(list.attrs, Fragment.fromArray(sorted), list.marks))
+    // Il cursore resta sulla voce appena cambiata, nella sua nuova posizione.
+    let offset = from + 1
+    for (const child of sorted) {
+      if (child === toggled) break
+      offset += child.nodeSize
+    }
+    tr.setSelection(TextSelection.near(tr.doc.resolve(offset + 1)))
+  }
+  editor.view.dispatch(tr)
+  editor.commands.focus()
+}
+
 // editable=false: sola lettura (senza il paragrafo vuoto di coda che l'editor
 // aggiunge dopo elenchi e blocchi). I link non si aprono mai via JS: in sola
 // lettura sono normali <a target="_blank">, in modifica un click posiziona
@@ -136,6 +272,8 @@ export function richTextExtensions({ editable, checkable = false }: { editable: 
     TextStyle,
     Color,
     TableKit.configure({ table: { resizable: false } }),
+    Mandatory,
+    JiraLinkText,
   ]
 }
 

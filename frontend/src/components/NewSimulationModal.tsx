@@ -92,12 +92,29 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
   )
   const historyData = cycleTime.data && !cycleTime.data.error ? cycleTime.data : undefined
   const syncBacklog = syncBacklogChoice ?? !isToday(lastSyncedAt)
-  const refreshHistory = refreshHistoryChoice ?? !isToday(historyData?.fetched_at)
+  // Storico da un file CSV: la riestrazione da Jira lo sostituirebbe, quindi
+  // non si propone da sola (si avvisa nei Controlli se il file e' vecchio).
+  const historyFromFile = !!historyData?.source
+  const refreshHistory = refreshHistoryChoice ?? (!historyFromFile && !isToday(historyData?.fetched_at))
 
   // Conteggi del backlog: come prima di questo popup.
   const items = backlogItems ?? []
   const { remainingCount } = countBacklogStats(items)
-  const done = countPlannedUnplannedDone(items, project.dev_start_date)
+  // Planned/Unplanned PBI Done: dalle JQL (dell'increment o predefinite,
+  // come nel foglio Excel), altrimenti dalle label del backlog. Senza JQL il
+  // backend risponde subito, senza chiamare Jira.
+  const doneJql = useQuery({
+    queryKey: ['done-counts', project.id],
+    queryFn: () => api.forecasting.doneCounts(project.id),
+  })
+  const byLabels = countPlannedUnplannedDone(items, project.dev_start_date)
+  const plannedKeys = doneJql.data?.planned.keys ?? byLabels.plannedKeys
+  const unplannedKeys = doneJql.data?.unplanned.keys ?? byLabels.unplannedKeys
+  const done = { planned: plannedKeys.length, unplanned: unplannedKeys.length, plannedKeys, unplannedKeys }
+  const doneSource = (part: 'planned' | 'unplanned') => {
+    const source = doneJql.data?.[part].source
+    return source === 'increment' ? "JQL dell'increment" : source === 'default' ? 'JQL predefinita' : 'label'
+  }
   const traditionalForecastIso = items
     .filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
     .reduce<string | null>(
@@ -142,6 +159,7 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
         setStep('backlog')
         await api.backlog.sync(project.id)
         await queryClient.refetchQueries({ queryKey: ['backlog', project.id] })
+        await doneJql.refetch()
         setSyncBacklogChoice(false)
       }
       if (refreshHistory) {
@@ -211,6 +229,49 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
   })
 
   const updating = step !== null
+
+  // Controlli prima di creare la riga: dati di oggi, storico che copre la
+  // finestra, da dove vengono i PBI Done e i parametri usati (in vista).
+  const checks: { label: string; ok: boolean; detail: string; action?: React.ReactNode }[] = [
+    {
+      label: 'Backlog',
+      ok: isToday(lastSyncedAt),
+      detail: lastSyncedAt
+        ? `sincronizzato ${isToday(lastSyncedAt) ? 'oggi' : 'il ' + formatDateTime(lastSyncedAt)}`
+        : 'mai sincronizzato',
+    },
+    {
+      label: 'Storico',
+      ok: !!historyData && isToday(historyData.fetched_at),
+      detail: !historyData
+        ? 'non caricato'
+        : `${historyFromFile ? `file ${historyData.source}` : 'Jira'}, ${
+            isToday(historyData.fetched_at) ? 'aggiornato oggi' : `del ${historyData.fetched_at ? formatDateTime(historyData.fetched_at) : "?"}`
+          }${history ? ` · ${history.itemCount} item nella finestra` : ''}`,
+    },
+    ...(coverage ? [{ label: 'Finestra storica', ok: false, detail: coverage }] : []),
+    {
+      label: 'PBI Done',
+      ok: !doneJql.isError,
+      detail: doneJql.isError
+        ? 'JQL non eseguita, si usano le label del backlog'
+        : `Planned da ${doneSource('planned')}, Unplanned da ${doneSource('unplanned')}`,
+    },
+    {
+      label: 'Parametri',
+      ok: true,
+      detail: paramsNote.replace(/^Monte Carlo: /, ''),
+      action: (
+        <>
+          {' '}
+          <button type="button" className="link-btn" onClick={() => setShowParams(true)}>
+            modifica
+          </button>
+        </>
+      ),
+    },
+  ]
+  const warnings = checks.filter((c) => !c.ok).length
   const toggleIssueType = (t: string) =>
     setOptions((o) => ({
       ...o,
@@ -252,10 +313,16 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
             onChange={(e) => setRefreshHistoryChoice(e.target.checked)}
           />
           <span>
-            <strong>Storico del team</strong> — riestrai i PBI chiusi dal {TEAM_LABEL[team]} negli ultimi 12 mesi
+            <strong>Storico del team</strong> — riestrai da Jira i PBI chiusi dal {TEAM_LABEL[team]}
             <span className="muted">
               {' '}
-              ({historyData?.fetched_at ? `estratto il ${formatDateTime(historyData.fetched_at)}` : 'mai estratto'})
+              (
+              {historyData?.fetched_at
+                ? historyFromFile
+                  ? `ora dal file ${historyData.source}, caricato il ${formatDateTime(historyData.fetched_at)}: riestraendo da Jira lo sostituisci`
+                  : `estratto da Jira il ${formatDateTime(historyData.fetched_at)}`
+                : 'mai estratto'}
+              )
             </span>
             <br />
             <span className="muted" style={{ fontSize: 12 }}>
@@ -268,12 +335,34 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
           <button className="btn" disabled={updating || (!syncBacklog && !refreshHistory)} onClick={runUpdates}>
             {updating ? 'Aggiornamento…' : '⟳ Aggiorna da Jira'}
           </button>
+          <label
+            className="btn"
+            title="Storico da un file CSV pre-elaborato (ID, Developing, Done, Issue Type), come nella pagina Monte Carlo"
+            style={{ cursor: updating || cycleTime.isImporting ? 'default' : 'pointer' }}
+          >
+            {cycleTime.isImporting ? 'Caricamento…' : '📄 Carica storico da file'}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              disabled={updating || cycleTime.isImporting}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  cycleTime.importFile(file)
+                  setRefreshHistoryChoice(false)
+                }
+                e.target.value = ''
+              }}
+            />
+          </label>
           {!syncBacklog && !refreshHistory && !updating && (
             <span className="muted" style={{ fontSize: 12 }}>
               Si usano i dati attuali.
             </span>
           )}
         </div>
+        {cycleTime.importError && <div className="error-banner">File non caricato: {cycleTime.importError}</div>}
         {(updateError || cycleTime.error) && (
           <div className="error-banner">Aggiornamento non riuscito: {updateError ?? cycleTime.error}</div>
         )}
@@ -303,6 +392,11 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
         </div>
 
         <h4 style={{ margin: '14px 0 6px' }}>3. Anteprima della riga</h4>
+        {doneJql.isError && (
+          <div className="error-banner">
+            {(doneJql.error as Error).message} — per i PBI Done si usano le label del backlog.
+          </div>
+        )}
         {!historyData ? (
           <p className="muted" style={{ margin: 0 }}>
             Storico Monte Carlo non ancora estratto: premi "Aggiorna da Jira" per calcolare le previsioni.
@@ -317,7 +411,17 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
               <strong>{remainingCount}</strong>
               <span>#PBI Done (Planned / Unplanned)</span>
               <strong>
-                {done.planned + done.unplanned} ({done.planned} / {done.unplanned})
+                {doneJql.isLoading ? (
+                  'lettura delle JQL…'
+                ) : (
+                  <>
+                    {done.planned + done.unplanned} ({done.planned} / {done.unplanned})
+                    <span className="muted sim-done-source">
+                      {' '}
+                      · Planned da {doneSource('planned')}, Unplanned da {doneSource('unplanned')}
+                    </span>
+                  </>
+                )}
               </strong>
               <span>Code Freeze Deadline</span>
               <strong>{formatIsoDate(deadline || null) ?? '—'}</strong>
@@ -396,6 +500,19 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
           </div>
         )}
 
+        <h4 style={{ margin: '14px 0 6px' }}>Controlli prima di creare</h4>
+        <ul className="sim-checks">
+          {checks.map((c) => (
+            <li key={c.label} className={c.ok ? 'ok' : 'warn'}>
+              <span className="sim-check-icon">{c.ok ? '✓' : '⚠'}</span>
+              <span>
+                <b>{c.label}</b> — {c.detail}
+                {c.action}
+              </span>
+            </li>
+          ))}
+        </ul>
+
         {create.isError && <div className="error-banner">{(create.error as Error).message}</div>}
         <div className="form-actions">
           <button className="btn" disabled={updating} onClick={onClose}>
@@ -407,7 +524,13 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
             title={!forecast ? 'Senza storico Monte Carlo le colonne delle previsioni restano vuote' : undefined}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? 'Creazione…' : forecast ? 'Crea simulazione' : 'Crea senza previsioni'}
+            {create.isPending
+              ? 'Creazione…'
+              : !forecast
+                ? 'Crea senza previsioni'
+                : warnings > 0
+                  ? `Crea comunque (${warnings} ${warnings === 1 ? 'avviso' : 'avvisi'})`
+                  : 'Crea simulazione'}
           </button>
         </div>
       </div>

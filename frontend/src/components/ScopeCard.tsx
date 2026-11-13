@@ -4,13 +4,16 @@ import type { Editor } from '@tiptap/react'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../api/client'
+import { ScopeBacklogCheck } from './ScopeBacklogCheck'
 import {
   editorToStoredHtml,
   hasEarlierNumberedList,
   innermostList,
   richTextExtensions,
+  currentListItem,
   setTaskCheckedFromDom,
   toEditorHtml,
+  toggleMandatory,
   toggleContinuedNumbering,
   toggleList,
   toggleNumberedList,
@@ -206,6 +209,8 @@ function Toolbar({ editor }: { editor: Editor }) {
         codeBlock: e.isActive('codeBlock'),
         table: e.isActive('table'),
         canMergeOrSplit: e.can().mergeOrSplit(),
+        listItem: !!currentListItem(e.state),
+        mandatory: !!currentListItem(e.state)?.node.attrs.mandatory,
         canUndo: e.can().undo(),
         canRedo: e.can().redo(),
       }
@@ -271,6 +276,13 @@ function Toolbar({ editor }: { editor: Editor }) {
           title="Elenco di controllo: caselle per marcare le voci completate (Ctrl+Shift+9)"
           active={s.task}
           onClick={() => toggleList(editor, 'taskList')}
+        />
+        <Tool
+          label="★ Mandatorio"
+          title="Segna la voce dell'elenco come mandatoria (o togli il segno): le voci mandatorie vanno in cima al loro elenco"
+          active={s.mandatory}
+          disabled={!s.listItem}
+          onClick={() => toggleMandatory(editor)}
         />
         <Tool label="⇥" title="Aumenta rientro: annida la voce nell'elenco (Tab)" disabled={!s.canIndent} onClick={indent} />
         <Tool label="⇤" title="Riduci rientro (Shift+Tab)" disabled={!s.canOutdent} onClick={outdent} />
@@ -410,6 +422,8 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   const [editorText, setEditorText] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  // Verifica di coerenza tra Scope schematico e backlog.
+  const [checking, setChecking] = useState(false)
   const queryClient = useQueryClient()
   const current = tab === 'schematic' ? scope : narrative
 
@@ -481,6 +495,15 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
               {generate.isPending ? 'Generazione...' : narrative ? 'Rigenera dal backlog' : 'Genera dal backlog'}
             </button>
           )}
+          {!editing && !collapsed && tab === 'schematic' && (
+            <button
+              className="btn"
+              title="Confronta le chiavi Jira dello scope con gli item del backlog (in scope, senza milestone e activity di servizio)"
+              onClick={() => setChecking((v) => !v)}
+            >
+              {checking ? 'Chiudi verifica' : 'Verifica con il backlog'}
+            </button>
+          )}
           {!editing && !collapsed && (
             <button className="btn" onClick={() => startEditing(current)}>
               Modifica
@@ -518,6 +541,9 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
         ))}
       </div>
 
+      {checking && !editing && tab === 'schematic' && (
+        <ScopeBacklogCheck projectId={projectId} scope={scope} onClose={() => setChecking(false)} />
+      )}
       {!editing &&
         (current ? (
           <RichText

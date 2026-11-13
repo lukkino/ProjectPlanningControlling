@@ -142,6 +142,10 @@ def run_lightweight_migrations() -> None:
 
     if "user_settings" in table_names:
         settings_columns = {col["name"] for col in inspector.get_columns("user_settings")}
+        if "planned_done_jql" not in settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_settings ADD COLUMN planned_done_jql TEXT"))
+                conn.execute(text("ALTER TABLE user_settings ADD COLUMN unplanned_done_jql TEXT"))
         if "d365_requisitions_url" not in settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE user_settings ADD COLUMN d365_requisitions_url TEXT"))
@@ -319,6 +323,10 @@ def run_lightweight_migrations() -> None:
 
     if "projects" in table_names:
         project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "planned_done_jql" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN planned_done_jql TEXT"))
+                conn.execute(text("ALTER TABLE projects ADD COLUMN unplanned_done_jql TEXT"))
         if "keep_phase_order" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN keep_phase_order BOOLEAN DEFAULT 1"))

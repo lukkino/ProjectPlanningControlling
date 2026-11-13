@@ -590,6 +590,28 @@ class ForecastSimulationUpdate(BaseModel):
     mc_params: str | None = None
 
 
+class DoneJqlResult(BaseModel):
+    """Esito di una JQL dei PBI Done: chiavi trovate (None = JQL non
+    impostata) e la JQL eseguita, con il segnaposto gia' sostituito."""
+
+    keys: list[str] | None = None
+    jql: str | None = None
+    # Da dove viene la JQL: "increment" o "default" (None = label).
+    source: str | None = None
+
+
+class DoneJqlDefaults(BaseModel):
+    """JQL predefinite dei Planned/Unplanned PBI Done (tutti gli increment)."""
+
+    planned_done_jql: str | None = None
+    unplanned_done_jql: str | None = None
+
+
+class DoneCounts(BaseModel):
+    planned: DoneJqlResult
+    unplanned: DoneJqlResult
+
+
 class ForecastSimulation(ForecastSimulationBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -644,6 +666,8 @@ class ProjectUpdate(BaseModel):
     code_freeze_phase_id: int | None = None
     finish_phase_id: int | None = None
     keep_phase_order: bool | None = None
+    planned_done_jql: str | None = None
+    unplanned_done_jql: str | None = None
     status: str | None = None
     scope: str | None = None
     scope_narrative: str | None = None
@@ -674,6 +698,9 @@ class ProjectListItem(ProjectBase):
     finish_phase_id: int | None = None
     # Spostando una fase, propone di spostare le successive (vedi models).
     keep_phase_order: bool = True
+    # JQL dei Planned/Unplanned PBI Done del Forecasting (vedi models).
+    planned_done_jql: str | None = None
+    unplanned_done_jql: str | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/{id}/pinned.

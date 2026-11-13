@@ -20,6 +20,7 @@ import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, parseBackendD
 import { parseMcParams, recalcForDeadline } from '../lib/forecastParams'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
+import { DoneJqlSettings } from '../components/DoneJqlSettings'
 
 // Palette categorica validata del progetto (vedi skill data-viz), ordine
 // fisso dei primi 6 slot: blu, arancio, aqua, giallo, magenta, verde.
@@ -55,6 +56,7 @@ export function ForecastingPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', project.id] })
       queryClient.invalidateQueries({ queryKey: ['phases', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['done-counts', project.id] })
     },
   })
 
@@ -131,10 +133,7 @@ export function ForecastingPage() {
           <DateInput value={project.dev_start_date} onChange={(value) => updateProject.mutate({ dev_start_date: value })} />
         </label>
       </div>
-      <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 12 }}>
-        Una nuova simulazione conta come Planned/Unplanned #PBI Done solo i PBI completati da questa data in poi
-        (label "planned" → Planned, label "oos" → Unplanned; se presenti entrambe vince "oos").
-      </p>
+      <DoneJqlSettings project={project} onSave={(data) => updateProject.mutate(data)} saving={updateProject.isPending} />
 
       {recalcError && <div className="error-banner">{recalcError}</div>}
       <div className="table-wrap table-wrap--sticky-head">
@@ -152,7 +151,8 @@ export function ForecastingPage() {
             <col style={{ width: '8%' }} />
             <col style={{ width: '9%' }} />
             <col style={{ width: '9%' }} />
-            <col style={{ width: '2%' }} />
+            {/* Pulsante elimina: larghezza fissa, in percentuale non ci stava. */}
+            <col style={{ width: 48 }} />
           </colgroup>
           <thead>
             <tr>
@@ -287,8 +287,8 @@ export function ForecastingPage() {
                     }
                   />
                 </td>
-                <td>
-                  <button className="btn btn-danger" onClick={() => remove.mutate(sim.id)}>
+                <td className="forecast-remove-cell">
+                  <button className="btn btn-danger forecast-remove" title="Elimina la simulazione" onClick={() => remove.mutate(sim.id)}>
                     ✕
                   </button>
                 </td>

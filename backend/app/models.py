@@ -161,6 +161,12 @@ class Project(Base):
     # propone di spostare le successive che finirebbero prima (e avvisa se la
     # fase andrebbe prima della precedente). Disattivabile per increment.
     keep_phase_order: Mapped[bool] = mapped_column(Boolean, default=True)
+    # JQL dei Planned e Unplanned PBI Done per le simulazioni del
+    # Forecasting (come nel foglio Excel); {inizio_sviluppi} = Inizio
+    # sviluppi effettivo (o Project start). Vuote = le JQL predefinite
+    # dell'utente (UserSettings), e se mancano anche quelle le label.
+    planned_done_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unplanned_done_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
     # solo l'avvio formale del progetto): usato in Forecasting per contare
     # solo i PBI Done da quella data in poi quando si crea una nuova
@@ -1239,6 +1245,11 @@ class UserSettings(Base):
     team_sw_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     team_embedded_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     complaints_base_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JQL predefinite dei Planned/Unplanned PBI Done del Forecasting, per
+    # tutti gli increment dell'utente (un increment le puo' sostituire con
+    # le sue, vedi Project.planned_done_jql).
+    planned_done_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unplanned_done_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Tool RDA: link all'elenco "Richieste di acquisto preparate dall'utente"
     # in Dynamics 365 (ambiente e societa'); None = quello predefinito.
     d365_requisitions_url: Mapped[str | None] = mapped_column(Text, nullable=True)

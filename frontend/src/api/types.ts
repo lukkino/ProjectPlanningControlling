@@ -324,6 +324,11 @@ export type Snapshot = {
   note: string | null
 }
 
+// Esito delle JQL dei PBI Done (keys null = JQL non impostata).
+export type DoneJqlResult = { keys: string[] | null; jql: string | null; source: 'increment' | 'default' | null }
+export type DoneJqlDefaults = { planned_done_jql: string | null; unplanned_done_jql: string | null }
+export type DoneCounts = { planned: DoneJqlResult; unplanned: DoneJqlResult }
+
 export type ForecastSimulation = {
   id: number
   project_id: number
@@ -364,6 +369,10 @@ export type Project = {
   // Spostando una fase propone di spostare le successive che finirebbero
   // prima (e avvisa se la fase andrebbe prima della precedente).
   keep_phase_order: boolean
+  // JQL dei Planned/Unplanned PBI Done del Forecasting ({inizio_sviluppi} =
+  // Inizio sviluppi effettivo); null = criterio delle label.
+  planned_done_jql: string | null
+  unplanned_done_jql: string | null
   dev_start_date: string | null
   jira_jql: string | null
   change_order_url: string | null

@@ -1503,3 +1503,51 @@ ul.changelog-body { padding-left: 20px; }
 .phase-order-modal { width: 480px; }
 .phase-order-modal h3 { margin-top: 0; }
 .phase-order-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* Forecasting: JQL dei Planned/Unplanned PBI Done. */
+.done-jql-form { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.done-jql-form textarea { width: 100%; font-family: var(--font-mono, monospace); font-size: 12px; }
+.sim-done-source { font-size: 11px; font-weight: 400; }
+.done-jql-form h4 { margin: 0 0 8px; font-size: 13px; }
+.done-jql-override { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; }
+.done-jql-unsaved { color: var(--warning); font-weight: 600; font-size: 12px; }
+.forecast-table td.forecast-remove-cell { padding-left: 2px; padding-right: 2px; }
+.forecast-table .forecast-remove { padding: 2px 8px; }
+
+/* Nuova simulazione: controlli prima di creare. */
+.sim-checks { list-style: none; padding: 0; margin: 0; font-size: 13px; display: grid; gap: 4px; }
+.sim-checks li { display: flex; gap: 8px; align-items: flex-start; padding: 4px 8px; border-radius: var(--radius); }
+.sim-checks li.ok { background: #e3f6ea; }
+.sim-checks li.warn { background: #fff2df; }
+.sim-check-icon { font-weight: 700; width: 14px; flex: none; }
+.sim-checks li.ok .sim-check-icon { color: var(--success); }
+.sim-checks li.warn .sim-check-icon { color: var(--warning); }
+
+/* Scope: voci di elenco mandatorie (★ Mandatorio nell'editor). Etichetta
+   davanti al testo (dopo c'e' gia' la spunta delle voci completate);
+   inline-block: la barratura delle voci completate non la attraversa. */
+.rich-text li[data-mandatory='true'] > p:first-child::before,
+.rich-text li[data-mandatory='true'] > div > p:first-child::before {
+  content: 'Mandatorio';
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: 1px;
+  background: #fde8e8;
+  color: var(--danger);
+}
+
+/* Scope: verifica di coerenza con il backlog. */
+.scope-check { border: 1px solid #f3dcae; background: #fffaf0; border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
+.scope-check--ok { border-color: #bfe5cc; background: #f3fbf6; }
+.scope-check-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.scope-check-head .link-btn { margin-left: auto; }
+.scope-check h4 { margin: 10px 0 4px; font-size: 13px; }
+.scope-check ul { margin: 0; padding-left: 18px; }
+.scope-check p { margin: 2px 0; }
+.scope-check details { margin-top: 10px; }
