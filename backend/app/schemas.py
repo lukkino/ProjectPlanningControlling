@@ -643,6 +643,7 @@ class ProjectUpdate(BaseModel):
     start_phase_id: int | None = None
     code_freeze_phase_id: int | None = None
     finish_phase_id: int | None = None
+    keep_phase_order: bool | None = None
     status: str | None = None
     scope: str | None = None
     scope_narrative: str | None = None
@@ -671,6 +672,8 @@ class ProjectListItem(ProjectBase):
     start_phase_id: int | None = None
     code_freeze_phase_id: int | None = None
     finish_phase_id: int | None = None
+    # Spostando una fase, propone di spostare le successive (vedi models).
+    keep_phase_order: bool = True
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/{id}/pinned.

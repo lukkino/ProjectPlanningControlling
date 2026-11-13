@@ -1496,3 +1496,10 @@ ul.changelog-body { padding-left: 20px; }
 .rda-approver { font-size: 12px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
 .rda-approver--done { background: #e3f6ea; color: var(--success); }
 .rda-approver--pending { background: #fff2df; color: var(--warning); font-weight: 600; }
+
+/* Fasi increment: opzione e avviso "Mantieni l'ordine delle fasi". */
+.phases-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.phases-keep-order { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.phase-order-modal { width: 480px; }
+.phase-order-modal h3 { margin-top: 0; }
+.phase-order-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }

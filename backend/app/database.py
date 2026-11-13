@@ -319,6 +319,9 @@ def run_lightweight_migrations() -> None:
 
     if "projects" in table_names:
         project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "keep_phase_order" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN keep_phase_order BOOLEAN DEFAULT 1"))
         if "start_phase_id" not in project_columns:
             # Fasi che danno le date dell'increment, prima riconosciute dal
             # nome: si collegano una volta quelle di oggi (prima fase, "Code

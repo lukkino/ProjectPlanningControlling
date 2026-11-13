@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import { isMilestone } from '../lib/milestone'
 import type { BacklogItem, Phase } from '../api/types'
-import { dateStrToEpochDays, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
+import { dateStrToEpochDays, epochDaysToDate, formatEpochDaysAsDate, formatIsoDate, toEpochDays } from '../lib/dates'
 import { DateInput } from './DateInput'
 
 type Props = { projectId: number; currentStatus: string }
@@ -91,6 +92,55 @@ function MilestoneMismatch({
   return null
 }
 
+const isoOfEpoch = (day: number) => epochDaysToDate(day).toISOString().slice(0, 10)
+
+// Spostamento della data aggiornata di una fase con "Mantieni l'ordine delle
+// fasi": le successive che finirebbero prima si spostano degli stessi giorni
+// (le durate tra le fasi restano uguali), almeno fino alla fase precedente.
+type PhaseShift = { phase: Phase; from: string; to: string }
+type OrderPlan =
+  // fix: dal pulsante "Sistema" (fasi gia' fuori ordine), non da uno spostamento.
+  | { kind: 'after'; phase: Phase; newDate: string; shifts: PhaseShift[]; fix?: boolean }
+  | { kind: 'before'; phase: Phase; newDate: string; previous: Phase }
+
+function planPhaseMove(phases: Phase[], phase: Phase, newDate: string): OrderPlan | null {
+  const index = phases.findIndex((p) => p.id === phase.id)
+  const previous = phases
+    .slice(0, index)
+    .reverse()
+    .find((p) => p.planned_date)
+  if (previous?.planned_date && newDate < previous.planned_date) return { kind: 'before', phase, newDate, previous }
+  const oldDay = dateStrToEpochDays(phase.planned_date)
+  const newDay = dateStrToEpochDays(newDate) as number
+  const delta = oldDay === null ? 0 : newDay - oldDay
+  const shifts: PhaseShift[] = []
+  let last = newDay
+  for (const next of phases.slice(index + 1)) {
+    const day = dateStrToEpochDays(next.planned_date)
+    if (day === null) continue
+    if (day < last) {
+      const to = Math.max(day + Math.max(delta, 0), last)
+      shifts.push({ phase: next, from: next.planned_date as string, to: isoOfEpoch(to) })
+      last = to
+    } else {
+      last = day
+    }
+  }
+  return shifts.length > 0 ? { kind: 'after', phase, newDate, shifts } : null
+}
+
+// Prima fase gia' fuori ordine (data aggiornata prima di una fase che la
+// precede): la fase "colpevole" e quella che la supera.
+function firstOutOfOrder(phases: Phase[]): { ahead: Phase; behind: Phase } | null {
+  let ahead: Phase | null = null
+  for (const p of phases) {
+    if (!p.planned_date) continue
+    if (ahead?.planned_date && p.planned_date < ahead.planned_date) return { ahead, behind: p }
+    if (!ahead?.planned_date || p.planned_date >= ahead.planned_date) ahead = p
+  }
+  return null
+}
+
 export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
   const { data: phases } = useQuery({ queryKey: ['phases', projectId], queryFn: () => api.phases.list(projectId) })
@@ -151,7 +201,46 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     },
   })
 
-  const error = update.error ?? addPhase.error ?? removePhase.error ?? linkMilestone.error ?? setLink.error
+  // Mantieni l'ordine delle fasi (opzione dell'increment, attiva di default).
+  const keepOrder = project?.keep_phase_order ?? true
+  const setKeepOrder = useMutation({
+    mutationFn: (value: boolean) => api.projects.update(projectId, { keep_phase_order: value }),
+    onSuccess: invalidate,
+  })
+  const [orderPlan, setOrderPlan] = useState<OrderPlan | null>(null)
+  // Rimonta i campi data dopo un "Annulla", per rimostrare la data salvata.
+  const [dateResets, setDateResets] = useState(0)
+  const applyMoves = useMutation({
+    mutationFn: async (moves: { id: number; date: string }[]) => {
+      for (const m of moves) await api.phases.update(m.id, { planned_date: m.date })
+    },
+    onSuccess: () => {
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['backlog', projectId] })
+    },
+  })
+  const changePlannedDate = (phase: Phase, value: string | null) => {
+    const plan = keepOrder && value && phases ? planPhaseMove(phases, phase, value) : null
+    if (plan) setOrderPlan(plan)
+    else update.mutate({ id: phase.id, data: { planned_date: value } })
+  }
+  // Fasi gia' fuori ordine (es. spostate prima che ci fosse l'opzione):
+  // "Sistema" propone di portare le successive almeno alla data della fase
+  // che le supera, con lo stesso riquadro di conferma.
+  const outOfOrder = keepOrder && phases ? firstOutOfOrder(phases) : null
+  const fixOrder = () => {
+    if (!outOfOrder || !phases) return
+    const plan = planPhaseMove(phases, outOfOrder.ahead, outOfOrder.ahead.planned_date as string)
+    if (plan?.kind === 'after') setOrderPlan({ ...plan, fix: true })
+  }
+  const closePlan = (moves: { id: number; date: string }[] | null) => {
+    if (moves) applyMoves.mutate(moves)
+    else setDateResets((n) => n + 1)
+    setOrderPlan(null)
+  }
+
+  const error =
+    update.error ?? addPhase.error ?? removePhase.error ?? linkMilestone.error ?? setLink.error ?? applyMoves.error ?? setKeepOrder.error
 
   // Fase corrente: quella il cui nome corrisponde allo Stato increment scelto
   // in Dashboard (il menu li' e' popolato proprio dai nomi di queste fasi).
@@ -188,7 +277,33 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
 
   return (
     <div className="card">
-      <h3>Fasi increment</h3>
+      <div className="phases-head">
+        <h3>Fasi increment</h3>
+        {project && (
+          <label
+            className="phases-keep-order"
+            title="Spostando la data aggiornata di una fase, propone di spostare anche le successive che finirebbero prima, e avvisa se la fase andrebbe prima della precedente"
+          >
+            <input
+              type="checkbox"
+              checked={keepOrder}
+              disabled={setKeepOrder.isPending}
+              onChange={(e) => setKeepOrder.mutate(e.target.checked)}
+            />{' '}
+            Mantieni l'ordine delle fasi
+          </label>
+        )}
+      </div>
+      {orderPlan && <PhaseOrderModal plan={orderPlan} onClose={closePlan} />}
+      {outOfOrder && (
+        <div className="phase-link-missing phase-out-of-order">
+          ⚠ <b>{outOfOrder.behind.name}</b> ({formatIsoDate(outOfOrder.behind.planned_date)}) è prima di{' '}
+          <b>{outOfOrder.ahead.name}</b> ({formatIsoDate(outOfOrder.ahead.planned_date)}).{' '}
+          <button type="button" className="link-btn" onClick={fixOrder} disabled={applyMoves.isPending}>
+            Sistema
+          </button>
+        </div>
+      )}
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
       {project && (
         <div className="phase-links">
@@ -278,7 +393,8 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   <td className="editable-cell">
                     <DateInput
                       value={phase.planned_date}
-                      onChange={(value) => update.mutate({ id: phase.id, data: { planned_date: value } })}
+                      key={`${phase.id}|${phase.planned_date}|${dateResets}`}
+                      onChange={(value) => changePlannedDate(phase, value)}
                     />
                     {phase.changes.length > 0 && (
                       <div className="phase-history">
@@ -464,6 +580,87 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
         </button>
       </div>
     </div>
+  )
+}
+
+// Avviso di "Mantieni l'ordine delle fasi": cosa succede spostando la fase.
+function PhaseOrderModal({
+  plan,
+  onClose,
+}: {
+  plan: OrderPlan
+  onClose: (moves: { id: number; date: string }[] | null) => void
+}) {
+  const fmt = (iso: string) => formatIsoDate(iso) ?? iso
+  const only = [{ id: plan.phase.id, date: plan.newDate }]
+  return createPortal(
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose(null)}>
+      <div className="modal phase-order-modal" role="dialog" aria-label="Ordine delle fasi">
+        {plan.kind === 'after' ? (
+          <>
+            <h3>{plan.fix ? 'Rimettere in ordine le fasi?' : 'Spostare anche le fasi successive?'}</h3>
+            {plan.fix ? (
+              <p>
+                Queste fasi sono prima di <b>{plan.phase.name}</b> ({fmt(plan.newDate)}): si portano almeno alla sua data.
+              </p>
+            ) : (
+              <p>
+                Con <b>{plan.phase.name}</b> al <b>{fmt(plan.newDate)}</b> queste fasi finirebbero prima. Spostandole degli
+                stessi giorni restano in ordine:
+              </p>
+            )}
+            <ul>
+              {plan.shifts.map((s) => (
+                <li key={s.phase.id}>
+                  <b>{s.phase.name}</b>: {fmt(s.from)} → {fmt(s.to)}
+                </li>
+              ))}
+            </ul>
+            <div className="phase-order-actions">
+              <button className="btn" onClick={() => onClose(null)}>
+                Annulla
+              </button>
+              {!plan.fix && (
+                <button className="btn" onClick={() => onClose(only)}>
+                  Sposta solo {plan.phase.name}
+                </button>
+              )}
+              <button
+                className="btn btn-primary"
+                onClick={() =>
+                  onClose([...(plan.fix ? [] : only), ...plan.shifts.map((s) => ({ id: s.phase.id, date: s.to }))])
+                }
+              >
+                {plan.fix ? 'Sistema le date' : 'Sposta anche le successive'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>Fase prima della precedente</h3>
+            <p>
+              <b>{plan.phase.name}</b> al <b>{fmt(plan.newDate)}</b> sarebbe prima di <b>{plan.previous.name}</b> (
+              {fmt(plan.previous.planned_date as string)}).
+            </p>
+            <div className="phase-order-actions">
+              <button className="btn" onClick={() => onClose(null)}>
+                Annulla
+              </button>
+              <button className="btn" onClick={() => onClose(only)}>
+                Usa comunque {fmt(plan.newDate)}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => onClose([{ id: plan.phase.id, date: plan.previous.planned_date as string }])}
+              >
+                Usa {fmt(plan.previous.planned_date as string)}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }
 

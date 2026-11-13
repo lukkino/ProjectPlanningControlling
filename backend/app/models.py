@@ -157,6 +157,10 @@ class Project(Base):
     start_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     code_freeze_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     finish_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Fasi in ordine: spostando la data aggiornata di una fase, la pagina
+    # propone di spostare le successive che finirebbero prima (e avvisa se la
+    # fase andrebbe prima della precedente). Disattivabile per increment.
+    keep_phase_order: Mapped[bool] = mapped_column(Boolean, default=True)
     # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
     # solo l'avvio formale del progetto): usato in Forecasting per contare
     # solo i PBI Done da quella data in poi quando si crea una nuova

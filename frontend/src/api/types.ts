@@ -361,6 +361,9 @@ export type Project = {
   start_phase_id: number | null
   code_freeze_phase_id: number | null
   finish_phase_id: number | null
+  // Spostando una fase propone di spostare le successive che finirebbero
+  // prima (e avvisa se la fase andrebbe prima della precedente).
+  keep_phase_order: boolean
   dev_start_date: string | null
   jira_jql: string | null
   change_order_url: string | null
