@@ -307,6 +307,26 @@ def run_lightweight_migrations() -> None:
 
     if "projects" in table_names:
         project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "start_phase_id" not in project_columns:
+            # Fasi che danno le date dell'increment, prima riconosciute dal
+            # nome: si collegano una volta quelle di oggi (prima fase, "Code
+            # freeze", "Release to Market"), poi le sceglie l'utente.
+            norm = "lower(replace(trim(name), '-', ' '))"
+            with engine.begin() as conn:
+                for column in ("start_phase_id", "code_freeze_phase_id", "finish_phase_id"):
+                    conn.execute(text(f"ALTER TABLE projects ADD COLUMN {column} INTEGER"))
+                conn.execute(text(
+                    "UPDATE projects SET start_phase_id = (SELECT id FROM phases WHERE project_id = projects.id "
+                    'ORDER BY "order", id LIMIT 1)'
+                ))
+                conn.execute(text(
+                    "UPDATE projects SET code_freeze_phase_id = (SELECT id FROM phases WHERE project_id = projects.id "
+                    f"AND {norm} = 'code freeze' ORDER BY \"order\", id LIMIT 1)"
+                ))
+                conn.execute(text(
+                    "UPDATE projects SET finish_phase_id = (SELECT id FROM phases WHERE project_id = projects.id "
+                    f"AND {norm} = 'release to market' ORDER BY \"order\", id LIMIT 1)"
+                ))
         if "is_current" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN is_current BOOLEAN DEFAULT 0"))

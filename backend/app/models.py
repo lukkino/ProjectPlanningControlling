@@ -145,12 +145,18 @@ class Project(Base):
     scope_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # start_date, code_freeze_date e planned_finish_date sono copie in sola
-    # lettura delle date aggiornate delle fasi Kick-off, Code freeze e
-    # Release to Market (vedi routers/projects.sync_phase_dates): le mantiene
-    # il backend, cosi' chi legge l'increment (Backlog, Gantt, Monte Carlo,
-    # presentazioni, Releases...) usa sempre le date delle fasi.
+    # lettura delle date aggiornate delle fasi scelte per l'increment
+    # (start_phase_id, code_freeze_phase_id, finish_phase_id; vedi
+    # routers/projects.sync_phase_dates): le mantiene il backend, cosi' chi
+    # legge l'increment (Backlog, Gantt, Monte Carlo, presentazioni,
+    # Releases...) usa sempre le date delle fasi. Fase non scelta = data vuota.
     code_freeze_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     planned_finish_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Fasi che danno Project start, Code freeze e Planned finish
+    # dell'increment: le sceglie l'utente (le fasi hanno nomi liberi).
+    start_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    code_freeze_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    finish_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Inizio reale degli sviluppi (puo' differire da start_date, che spesso e'
     # solo l'avvio formale del progetto): usato in Forecasting per contare
     # solo i PBI Done da quella data in poi quando si crea una nuova

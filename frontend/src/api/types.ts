@@ -356,6 +356,11 @@ export type Project = {
   start_date: string | null
   code_freeze_date: string | null
   planned_finish_date: string | null
+  // Fasi che danno Project start, Code freeze e Planned finish (le date qui
+  // sopra ne sono la copia); null = nessuna, data vuota.
+  start_phase_id: number | null
+  code_freeze_phase_id: number | null
+  finish_phase_id: number | null
   dev_start_date: string | null
   jira_jql: string | null
   change_order_url: string | null

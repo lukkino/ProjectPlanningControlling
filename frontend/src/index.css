@@ -599,7 +599,8 @@ tr.phase-current input { background: #e6eefc; }
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  /* Sopra la barra in alto (.topbar, z-index 50). */
+  z-index: 100;
 }
 
 .modal {
@@ -1475,3 +1476,10 @@ ul.changelog-body { padding-left: 20px; }
 .wl-role { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 8px; background: #e8efff; color: var(--primary); }
 .wl-away-mark { font-size: 10px; margin-left: 2px; }
 .wl-team-hint { font-size: 13px; margin: 4px 0 8px; }
+
+/* Fasi increment: fasi che danno le date dell'increment. */
+.phase-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 10px; font-size: 13px; }
+.phase-links select { margin-left: 4px; }
+.phase-link-tag { background: #e8efff; color: var(--primary); font-size: 10px; white-space: nowrap; }
+.phase-link-missing { background: #fff8eb; border: 1px solid #f3dcae; border-radius: var(--radius); padding: 4px 10px; margin-bottom: 6px; font-size: 13px; }
+.phase-link-tags { display: flex; gap: 4px; margin: 2px 0 0 4px; }

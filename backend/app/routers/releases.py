@@ -21,14 +21,13 @@ def _project_ptih_codes(project: models.Project) -> str | None:
 PROJECT_DATE_FIELDS = ("start_date", "expected_release_date", "actual_release_date")
 
 
-RELEASE_TO_MARKET = "Release to Market"
-
 
 def _project_dates(project: models.Project) -> dict:
     """Start Date: l'inizio dell'increment. Expected e Actual Release: la
     data Aggiornata e quella Effettiva della fase Release to Market (per
     l'Actual, in mancanza, la data in cui l'increment e' segnato rilasciato)."""
-    rtm = next((phase for phase in project.phases if phase.name == RELEASE_TO_MARKET), None)
+    # Fase scelta per la fine pianificata (di solito Release to Market).
+    rtm = next((phase for phase in project.phases if phase.id == project.finish_phase_id), None)
     return {
         "start_date": project.start_date,
         "expected_release_date": rtm.planned_date if rtm else None,

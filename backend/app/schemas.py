@@ -639,6 +639,10 @@ class SidebarPin(BaseModel):
 class ProjectUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
+    # Fasi che danno le date dell'increment (None = nessuna).
+    start_phase_id: int | None = None
+    code_freeze_phase_id: int | None = None
+    finish_phase_id: int | None = None
     status: str | None = None
     scope: str | None = None
     scope_narrative: str | None = None
@@ -658,11 +662,15 @@ class ProjectUpdate(BaseModel):
 class ProjectListItem(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    # Sola lettura: date aggiornate delle fasi Kick-off, Code freeze e
-    # Release to Market, si modificano dalle fasi dell'increment.
+    # Sola lettura: date aggiornate delle fasi scelte per Project start,
+    # Code freeze e Planned finish (si modificano dalle fasi).
     start_date: dt.date | None = None
     code_freeze_date: dt.date | None = None
     planned_finish_date: dt.date | None = None
+    # Fasi scelte per le tre date (None = nessuna, data vuota).
+    start_phase_id: int | None = None
+    code_freeze_phase_id: int | None = None
+    finish_phase_id: int | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/gantt-order.
     gantt_order: int | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/{id}/pinned.

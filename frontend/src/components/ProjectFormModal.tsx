@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useSuggestions } from '../lib/useSuggestions'
@@ -67,7 +68,9 @@ export function ProjectFormModal({ project, onClose }: Props) {
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
-  return (
+  // Nel body, non dove e' aperto: dalla sidebar il velo restava chiuso nel
+  // suo livello e la barra in alto ci finiva sopra.
+  return createPortal(
     // onMouseDown (non onClick) con controllo target===currentTarget: un
     // trascinamento per selezionare testo che parte dentro il modale e
     // termina fuori farebbe altrimenti scattare la chiusura, perche' il
@@ -139,6 +142,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -16,14 +16,16 @@ STANDARD_PHASE_NAMES = ["Kick-off", "Planning", "Code freeze", "Execution", "Dep
 KICK_OFF_PHASE_NAME = "Kick-off"
 CODE_FREEZE_PHASE_NAME = "Code freeze"
 RELEASE_TO_MARKET_PHASE_NAME = "Release to Market"
-# Fasi che portano le date dell'increment, riconosciute dal nome: non si
-# rinominano e non si eliminano. La data aggiornata (planned_date) di
-# ciascuna e' copiata sul campo dell'increment, che resta in sola lettura
-# (vedi sync_phase_dates). Il Project start e' invece la prima fase, qualunque
-# sia il suo nome: si rinomina, ma non si elimina.
-DATE_PHASES = {
-    CODE_FREEZE_PHASE_NAME: "code_freeze_date",
-    RELEASE_TO_MARKET_PHASE_NAME: "planned_finish_date",
+# Le fasi hanno nomi liberi: si creano, rinominano ed eliminano senza
+# vincoli. Le date dell'increment (Project start, Code freeze, Planned
+# finish) vengono dalle fasi scelte per ciascuna (start_phase_id...): la data
+# aggiornata (planned_date) della fase e' copiata sul campo dell'increment,
+# che resta in sola lettura (vedi sync_phase_dates). Fase non scelta o
+# eliminata = data vuota.
+DATE_PHASE_LINKS = {
+    "start_phase_id": "start_date",
+    "code_freeze_phase_id": "code_freeze_date",
+    "finish_phase_id": "planned_finish_date",
 }
 
 
@@ -31,67 +33,24 @@ def _normalize(name: str) -> str:
     return name.strip().lower().replace("-", " ")
 
 
-def _date_phase_name(phase: models.Phase) -> str | None:
-    """Il nome standard se la fase porta una data dell'increment."""
-    return next((name for name in DATE_PHASES if _normalize(name) == _normalize(phase.name)), None)
-
-
 def _find_phase(project: models.Project, name: str) -> models.Phase | None:
     return next((p for p in project.phases if _normalize(p.name) == _normalize(name)), None)
 
 
-def _first_phase(project: models.Project) -> models.Phase | None:
-    return min(project.phases, key=lambda p: (p.order, p.id or 0), default=None)
-
-
 def sync_phase_dates(project: models.Project) -> None:
-    """Le date dell'increment sono quelle aggiornate delle fasi: Project
-    start = la prima fase, Code freeze = Code freeze, Planned finish =
-    Release to Market. I campi dell'increment ne sono solo la copia."""
-    first = _first_phase(project)
-    project.start_date = first.planned_date if first else None
-    for name, field in DATE_PHASES.items():
-        phase = _find_phase(project, name)
+    """Le date dell'increment sono quelle aggiornate delle fasi scelte;
+    i campi dell'increment ne sono solo la copia."""
+    by_id = {p.id: p for p in project.phases}
+    for link, field in DATE_PHASE_LINKS.items():
+        phase = by_id.get(getattr(project, link))
+        if phase is None:
+            setattr(project, link, None)
         setattr(project, field, phase.planned_date if phase else None)
 
 
-def _ensure_phase(project: models.Project, name: str, order: int, fallback) -> None:
-    """Aggiunge la fase se manca (spostando in giu' le successive) e, se
-    non ha una data, le da' quella che l'increment aveva."""
-    phase = _find_phase(project, name)
-    if phase is None:
-        for other in project.phases:
-            if other.order >= order:
-                other.order += 1
-        phase = models.Phase(name=name, order=order)
-        project.phases.append(phase)
-    if phase.planned_date is None and fallback is not None:
-        phase.planned_date = fallback
-        if phase.original_date is None:
-            phase.original_date = fallback
-
-
-def ensure_date_phases(db: Session) -> None:
-    """All'avvio: ogni increment ha una prima fase (Kick-off se non ne ha
-    nessuna), Code freeze (dopo Planning, se c'e') e Release to Market (in
-    fondo), con la data che l'increment aveva se la fase non ne ha una; poi
-    le date dell'increment si riallineano alle fasi."""
+def sync_all_phase_dates(db: Session) -> None:
+    """All'avvio: le date di ogni increment si riallineano alle fasi scelte."""
     for project in db.query(models.Project).all():
-        first = _first_phase(project)
-        if first is None:
-            _ensure_phase(project, KICK_OFF_PHASE_NAME, 1, project.start_date)
-        elif first.planned_date is None and project.start_date is not None:
-            first.planned_date = project.start_date
-            if first.original_date is None:
-                first.original_date = project.start_date
-        planning = _find_phase(project, "Planning")
-        order = planning.order + 1 if planning else max((p.order for p in project.phases), default=0) + 1
-        _ensure_phase(project, CODE_FREEZE_PHASE_NAME, order, project.code_freeze_date)
-        last = max((p.order for p in project.phases), default=0)
-        _ensure_phase(project, RELEASE_TO_MARKET_PHASE_NAME, last + 1, project.planned_finish_date)
-        # Posizioni 1, 2, 3... senza buchi ne' doppioni.
-        for position, phase in enumerate(sorted(project.phases, key=lambda p: (p.order, p.id or 0)), start=1):
-            phase.order = position
         sync_phase_dates(project)
     db.commit()
 
@@ -162,6 +121,13 @@ def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)
     db.flush()  # assegna project.id, serve per le fasi sotto
     for order, name in enumerate(STANDARD_PHASE_NAMES, start=1):
         db.add(models.Phase(project_id=project.id, name=name, order=order))
+    db.flush()
+    db.refresh(project)
+    # Date dell'increment: Kick-off, Code freeze e Release to Market,
+    # cambiabili poi dall'utente.
+    project.start_phase_id = _find_phase(project, KICK_OFF_PHASE_NAME).id
+    project.code_freeze_phase_id = _find_phase(project, CODE_FREEZE_PHASE_NAME).id
+    project.finish_phase_id = _find_phase(project, RELEASE_TO_MARKET_PHASE_NAME).id
     db.commit()
     db.refresh(project)
     return project
@@ -176,8 +142,13 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
     data = payload.model_dump(exclude_unset=True)
+    phase_ids = {p.id for p in project.phases}
+    for link in DATE_PHASE_LINKS:
+        if data.get(link) is not None and data[link] not in phase_ids:
+            raise HTTPException(status_code=400, detail="La fase scelta non è di questo increment")
     for field, value in data.items():
         setattr(project, field, value)
+    sync_phase_dates(project)
     db.commit()
     db.refresh(project)
     return project
@@ -226,10 +197,6 @@ def update_phase(phase_id: int, payload: schemas.PhaseUpdate, db: Session = Depe
     if phase is None:
         raise HTTPException(status_code=404, detail="Fase non trovata")
     data = payload.model_dump(exclude_unset=True)
-    # Le fasi che portano le date dell'increment non si rinominano.
-    standard = _date_phase_name(phase)
-    if "name" in data and standard and data["name"] != phase.name:
-        raise HTTPException(status_code=400, detail=f"La fase {standard} porta una data dell'increment: non si può rinominare")
     planned_changed = "planned_date" in data
     new_planned = data.pop("planned_date", None)
     for field, value in data.items():
@@ -250,14 +217,18 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
     phase = db.get(models.Phase, phase_id)
     if phase is None:
         raise HTTPException(status_code=404, detail="Fase non trovata")
-    standard = _date_phase_name(phase)
-    if standard:
-        raise HTTPException(status_code=400, detail=f"La fase {standard} porta una data dell'increment: non si può eliminare")
-    if phase is _first_phase(phase.project):
-        raise HTTPException(status_code=400, detail="La prima fase porta il Project start dell'increment: non si può eliminare")
+    project = phase.project
     for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
         item.milestone_phase_id = None
+    # Se dava una data all'increment, la data resta vuota (si sceglie
+    # un'altra fase dalle impostazioni dell'increment).
+    for link in DATE_PHASE_LINKS:
+        if getattr(project, link) == phase.id:
+            setattr(project, link, None)
     db.delete(phase)
+    db.flush()
+    db.refresh(project)
+    sync_phase_dates(project)
     db.commit()
 
 

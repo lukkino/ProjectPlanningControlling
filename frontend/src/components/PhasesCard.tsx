@@ -19,14 +19,25 @@ const COLOR_SLIP = '#d62728'
 // Linea di oggi, rossa come nel Gantt del Backlog.
 const COLOR_TODAY = '#d3402f'
 
-// Fasi che portano le date dell'increment (la loro data aggiornata): il
-// backend non le lascia rinominare ne' eliminare. Il Project start e' la
-// prima fase, che si rinomina ma non si elimina.
-const DATE_PHASES: Record<string, string> = {
-  'code freeze': "Code freeze ufficiale dell'increment: vale per Backlog, Gantt, Monte Carlo e Forecasting",
-  'release to market': "Planned finish dell'increment: vale per i Gantt delle dashboard e per Releases (Expected Release)",
-}
-const datePhaseRole = (p: Phase): string | undefined => DATE_PHASES[p.name.trim().toLowerCase().replace(/-/g, ' ')]
+// Date dell'increment: ognuna e' la data aggiornata della fase scelta qui
+// (le fasi hanno nomi liberi e si eliminano senza vincoli; fase non scelta =
+// data vuota).
+type DateLink = 'start_phase_id' | 'code_freeze_phase_id' | 'finish_phase_id'
+const DATE_LINKS: { field: DateLink; label: string; tag: string; usage: string }[] = [
+  { field: 'start_phase_id', label: 'Project start', tag: 'Start', usage: 'inizio dell\'increment (Gantt, Releases)' },
+  {
+    field: 'code_freeze_phase_id',
+    label: 'Code freeze',
+    tag: 'Code freeze',
+    usage: 'code freeze ufficiale (Backlog, Gantt, Monte Carlo, Forecasting)',
+  },
+  {
+    field: 'finish_phase_id',
+    label: 'Planned finish',
+    tag: 'Fine',
+    usage: 'fine pianificata (Gantt delle dashboard, Releases: Expected Release)',
+  },
+]
 
 // Data che vale ora per una fase: l'effettiva se c'e', altrimenti la
 // pianificata aggiornata.
@@ -83,6 +94,8 @@ function MilestoneMismatch({
 export function PhasesCard({ projectId, currentStatus }: Props) {
   const queryClient = useQueryClient()
   const { data: phases } = useQuery({ queryKey: ['phases', projectId], queryFn: () => api.phases.list(projectId) })
+  const { data: project } = useQuery({ queryKey: ['project', projectId], queryFn: () => api.projects.get(projectId) })
+  const linksOf = (phase: Phase) => DATE_LINKS.filter((l) => project?.[l.field] === phase.id)
 
   // Kick-off, Code freeze e Release to Market danno le date dell'increment
   // (il backend le tiene allineate): si rinfresca anche l'increment.
@@ -129,8 +142,16 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     mutationFn: (id: number) => api.phases.remove(id),
     onSuccess: invalidate,
   })
+  const setLink = useMutation({
+    mutationFn: ({ field, phaseId }: { field: DateLink; phaseId: number | null }) =>
+      api.projects.update(projectId, { [field]: phaseId }),
+    onSuccess: () => {
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['backlog', projectId] })
+    },
+  })
 
-  const error = update.error ?? addPhase.error ?? removePhase.error ?? linkMilestone.error
+  const error = update.error ?? addPhase.error ?? removePhase.error ?? linkMilestone.error ?? setLink.error
 
   // Fase corrente: quella il cui nome corrisponde allo Stato increment scelto
   // in Dashboard (il menu li' e' popolato proprio dai nomi di queste fasi).
@@ -164,13 +185,41 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     <div className="card">
       <h3>Fasi increment</h3>
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
+      {project && (
+        <div className="phase-links">
+          <span className="muted">Date dell'increment dalla fase:</span>
+          {DATE_LINKS.map((l) => (
+            <label key={l.field} title={`Data aggiornata della fase scelta = ${l.usage}`}>
+              {l.label}{' '}
+              <select
+                value={project[l.field] ?? ''}
+                disabled={setLink.isPending}
+                onChange={(e) => setLink.mutate({ field: l.field, phaseId: e.target.value ? Number(e.target.value) : null })}
+              >
+                <option value="">— nessuna —</option>
+                {(phases ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+      {project &&
+        DATE_LINKS.filter((l) => !project[l.field]).map((l) => (
+          <div key={l.field} className="phase-link-missing">
+            ⚠ {l.label} non impostato: nessuna fase scelta, quindi l'increment non ha la data di {l.usage}.
+          </div>
+        ))}
       {/* Tabella piu' larga del grafico: date, scostamento e note devono stare tutte. */}
       <div className="grid-3-2" style={{ gridTemplateColumns: '2fr 1fr' }}>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th style={{ minWidth: 140 }}>Fase</th>
+                <th style={{ minWidth: 170 }}>Fase</th>
                 <th title="Data della prima pianificazione (baseline)">Originale</th>
                 <th title="Data pianificata che vale ora: Backlog, Gantt e presentazioni usano questa. Ogni cambio resta nello storico.">
                   Aggiornata
@@ -193,9 +242,11 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <input
                         defaultValue={phase.name}
-                        disabled={!!datePhaseRole(phase)}
-                        title={datePhaseRole(phase) && `La data aggiornata è il ${datePhaseRole(phase)}`}
-                        onBlur={(e) => e.target.value !== phase.name && update.mutate({ id: phase.id, data: { name: e.target.value } })}
+                        onBlur={(e) => {
+                          const value = e.target.value.trim()
+                          if (value && value !== phase.name) update.mutate({ id: phase.id, data: { name: value } })
+                          else e.target.value = phase.name
+                        }}
                       />
                       {index === currentPhaseIndex && (
                         <span className="badge current" title="Fase in cui ci troviamo ora">
@@ -203,6 +254,15 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                         </span>
                       )}
                     </div>
+                    {linksOf(phase).length > 0 && (
+                      <div className="phase-link-tags">
+                        {linksOf(phase).map((l) => (
+                          <span key={l.field} className="badge phase-link-tag" title={`La data aggiornata è il ${l.usage}`}>
+                            {l.tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="editable-cell">
                     <DateInput
@@ -280,13 +340,18 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   <td>
                     <button
                       className="btn btn-danger"
-                      disabled={!!datePhaseRole(phase) || index === 0}
-                      title={
-                        index === 0
-                          ? "La prima fase porta il Project start dell'increment: non si può eliminare"
-                          : datePhaseRole(phase) && "Porta una data dell'increment: non si può eliminare"
-                      }
-                      onClick={() => removePhase.mutate(phase.id)}
+                      title="Elimina la fase"
+                      onClick={() => {
+                        const links = linksOf(phase)
+                        if (
+                          links.length === 0 ||
+                          confirm(
+                            `La fase ${phase.name} dà all'increment: ${links.map((l) => l.label).join(', ')}. ` +
+                              'Eliminandola quella data resterà vuota finché non scegli un\'altra fase. Eliminare?',
+                          )
+                        )
+                          removePhase.mutate(phase.id)
+                      }}
                     >
                       ✕
                     </button>

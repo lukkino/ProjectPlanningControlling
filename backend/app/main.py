@@ -14,10 +14,10 @@ from app.routers import app_info, backlog, change_order, complaints, dashboard, 
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations()
 run_budget_migrations()
-# Il code freeze ufficiale e' la fase "Code freeze": ogni increment deve
-# averla e la copia sull'increment deve coincidere.
+# Le date dell'increment sono copie di quelle delle fasi scelte: si
+# riallineano all'avvio.
 with SessionLocal() as _db:
-    projects.ensure_date_phases(_db)
+    projects.sync_all_phase_dates(_db)
     # Dati di prima del multi-utente: al primo Admin (vedi ownership.py).
     ownership.claim_orphans_for_first_admin(_db)
 
