@@ -48,9 +48,21 @@ def sync_phase_dates(project: models.Project) -> None:
         setattr(project, field, phase.planned_date if phase else None)
 
 
+def _fill_planned_from_original(phase: models.Phase) -> None:
+    """Fase con la sola data Originale: l'Aggiornata parte uguale (e' quella
+    che danno le date dell'increment, Gantt e dashboard). Senza storico: non
+    e' uno spostamento."""
+    if phase.planned_date is None and phase.original_date is not None:
+        phase.planned_date = phase.original_date
+
+
 def sync_all_phase_dates(db: Session) -> None:
-    """All'avvio: le date di ogni increment si riallineano alle fasi scelte."""
+    """All'avvio: le fasi con la sola data Originale prendono anche
+    l'Aggiornata, poi le date di ogni increment si riallineano alle fasi
+    scelte."""
     for project in db.query(models.Project).all():
+        for phase in project.phases:
+            _fill_planned_from_original(phase)
         sync_phase_dates(project)
     db.commit()
 
@@ -182,6 +194,7 @@ def create_phase(project_id: int, payload: schemas.PhaseCreate, db: Session = De
     phase = models.Phase(project_id=project_id, **payload.model_dump())
     if phase.original_date is None:
         phase.original_date = phase.planned_date
+    _fill_planned_from_original(phase)
     db.add(phase)
     db.flush()
     db.refresh(phase.project)
@@ -203,6 +216,8 @@ def update_phase(phase_id: int, payload: schemas.PhaseUpdate, db: Session = Depe
         setattr(phase, field, value)
     if planned_changed:
         _set_phase_planned_date(phase, new_planned)
+    else:
+        _fill_planned_from_original(phase)
     # Le milestone collegate seguono la fase (vedi models.align_milestone).
     for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
         models.align_milestone(item, phase)

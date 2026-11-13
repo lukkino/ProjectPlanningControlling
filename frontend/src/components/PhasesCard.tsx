@@ -170,10 +170,15 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
     .map((s) => ({ id: s.id, points: [{ x: s.from as number, y: s.y }, { x: s.to as number, y: s.y }] }))
   const arrowId = `phase-slip-arrow-${projectId}`
   const allEpochs = [...originalPoints, ...plannedPoints, ...actualPoints].map((p) => p.x)
-  // Oggi entra sempre nel range, cosi' la sua linea resta visibile.
+  // Oggi entra nel range (con la sua linea) solo da Project start in poi: per
+  // un increment che parte nel futuro allargherebbe il grafico fino a oggi,
+  // schiacciando le fasi. Senza Project start vale la prima data delle fasi.
   const todayEpoch = toEpochDays(new Date())
+  const startEpoch = dateStrToEpochDays(project?.start_date ?? null) ?? (allEpochs.length > 0 ? Math.min(...allEpochs) : null)
+  const showToday = startEpoch !== null && todayEpoch >= startEpoch
+  const domainEpochs = showToday ? [...allEpochs, todayEpoch] : allEpochs
   const dateDomain: [number, number] =
-    allEpochs.length > 0 ? [Math.min(...allEpochs, todayEpoch) - 3, Math.max(...allEpochs, todayEpoch) + 3] : [0, 1]
+    allEpochs.length > 0 ? [Math.min(...domainEpochs) - 3, Math.max(...domainEpochs) + 3] : [0, 1]
   // Etichetta "Today" dal lato con piu' spazio: a destra della linea nella
   // prima meta' del grafico (a inizio progetto la linea e' vicina all'asse
   // delle fasi e il testo a sinistra ci finirebbe sopra), a sinistra nella
@@ -407,12 +412,14 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <ReferenceLine
-                  x={todayEpoch}
-                  stroke={COLOR_TODAY}
-                  strokeWidth={2}
-                  label={{ value: 'Today', position: todayLabelPosition, fill: COLOR_TODAY, fontSize: 11, fontWeight: 700 }}
-                />
+                {showToday && (
+                  <ReferenceLine
+                    x={todayEpoch}
+                    stroke={COLOR_TODAY}
+                    strokeWidth={2}
+                    label={{ value: 'Today', position: todayLabelPosition, fill: COLOR_TODAY, fontSize: 11, fontWeight: 700 }}
+                  />
+                )}
                 {/* Punta della freccia verso la data effettiva, arretrata di
                     qualche pixel per non finire sotto il pallino. */}
                 <defs>
