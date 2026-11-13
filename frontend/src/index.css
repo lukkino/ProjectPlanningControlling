@@ -1488,3 +1488,11 @@ ul.changelog-body { padding-left: 20px; }
 .history-window { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .history-window input { width: 140px; }
 .history-coverage { background: #fff8eb; border: 1px solid #f3dcae; border-radius: var(--radius); padding: 4px 8px; margin-top: 6px; font-size: 12px; }
+
+/* Tool RDA: flusso di approvazione. */
+.rda-in-charge { font-weight: 600; color: var(--warning); }
+.rda-last-by { font-size: 12px; }
+.rda-approvers { display: flex; flex-wrap: wrap; gap: 4px; }
+.rda-approver { font-size: 12px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.rda-approver--done { background: #e3f6ea; color: var(--success); }
+.rda-approver--pending { background: #fff2df; color: var(--warning); font-weight: 600; }

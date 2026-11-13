@@ -34,6 +34,16 @@ const money = (value: number, currency = 'EUR') =>
   // useGrouping 'always': in italiano le cifre da 4 non avrebbero il punto (2472,00 €).
   value.toLocaleString('it-IT', { style: 'currency', currency, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)
 
+// Stati in cui la RDA e' ancora "di qualcuno" (in carico a un approvatore o
+// rimandata al preparatore): per le chiuse/annullate il dato non serve.
+const ACTIVE_STATUSES = new Set(['Draft', 'InReview', 'Approved', 'Rejected'])
+
+// Data/ora dell'ultima azione: ora locale di Dynamics, senza fuso.
+const formatLocalDateTime = (value: string) => {
+  const [date, time = ''] = value.split('T')
+  return `${formatIsoDate(date) ?? date} ${time.slice(0, 5)}`.trim()
+}
+
 const totalOf = (r: PurchaseRequisition) => r.lines.reduce((sum, l) => sum + (l.amount ?? 0), 0)
 const currencyOf = (r: PurchaseRequisition) => r.lines.find((l) => l.currency)?.currency ?? 'EUR'
 const vendorsOf = (r: PurchaseRequisition) => [
@@ -48,6 +58,8 @@ const searchable = (r: PurchaseRequisition) =>
     r.project_id,
     r.justification_code,
     r.justification,
+    ...r.in_charge,
+    r.last_action_by,
     ...r.lines.flatMap((l) => [l.product, l.description, l.item_number, l.category, l.vendor_name, l.vendor_account]),
   ]
     .filter(Boolean)
@@ -239,12 +251,13 @@ export function PurchaseRequisitionsPage() {
                   <th>RDA</th>
                   <th>Nome</th>
                   <th>Stato</th>
+                  <th title="Approvatori a cui la RDA è in attesa (flusso di lavoro di Dynamics)">In carico a</th>
+                  <th title="Ultima azione del flusso di lavoro: quando e chi">Ultima azione</th>
                   <th>Data</th>
                   <th>Progetto</th>
                   <th>Fornitore</th>
                   <th className="num">Righe</th>
                   <th className="num">Importo</th>
-                  <th>Giustificazione</th>
                 </tr>
               </thead>
               <tbody>
@@ -267,6 +280,23 @@ export function PurchaseRequisitionsPage() {
                             </span>
                           )}
                         </td>
+                        <td>
+                          {ACTIVE_STATUSES.has(r.status ?? '') && r.in_charge.length > 0 ? (
+                            <span className="rda-in-charge">{r.in_charge.join(', ')}</span>
+                          ) : (
+                            <span className="muted">-</span>
+                          )}
+                        </td>
+                        <td className="nowrap">
+                          {r.last_action_at ? (
+                            <>
+                              {formatLocalDateTime(r.last_action_at)}
+                              <div className="muted rda-last-by">{r.last_action_by}</div>
+                            </>
+                          ) : (
+                            <span className="muted">-</span>
+                          )}
+                        </td>
                         <td className="nowrap">{formatIsoDate(r.date) ?? '-'}</td>
                         <td className="nowrap">
                           {r.project_id ?? <span className="muted">-</span>}
@@ -286,11 +316,10 @@ export function PurchaseRequisitionsPage() {
                         <td>{vendorsOf(r).join(', ') || <span className="muted">-</span>}</td>
                         <td className="num">{r.lines.length}</td>
                         <td className="num nowrap">{money(totalOf(r), currencyOf(r))}</td>
-                        <td>{r.justification_code ?? <span className="muted">-</span>}</td>
                       </tr>
                       {isOpen && (
                         <tr className="cert-detail">
-                          <td colSpan={9}>
+                          <td colSpan={10}>
                             <RequisitionDetail requisition={r} />
                           </td>
                         </tr>
@@ -300,7 +329,7 @@ export function PurchaseRequisitionsPage() {
                 })}
                 {visible.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="muted">
+                    <td colSpan={10} className="muted">
                       Nessuna RDA con i filtri selezionati.
                     </td>
                   </tr>
@@ -386,6 +415,32 @@ function RequisitionDetail({ requisition: r }: { requisition: PurchaseRequisitio
           <>
             <dt>In attesa</dt>
             <dd>{r.on_hold_explanation ?? '-'}</dd>
+          </>
+        )}
+        <dt>Approvazioni</dt>
+        <dd>
+          {r.approvers.length === 0 ? (
+            <span className="muted">nessun flusso di approvazione</span>
+          ) : (
+            <span className="rda-approvers">
+              {r.approvers.map((a, i) => (
+                <span
+                  key={`${a.name}-${a.status}-${i}`}
+                  className={`rda-approver rda-approver--${a.status === 'Pending' ? 'pending' : 'done'}`}
+                  title={a.status === 'Pending' ? 'In attesa della sua approvazione' : 'Ha approvato'}
+                >
+                  {a.status === 'Pending' ? '⏳' : '✓'} {a.name}
+                </span>
+              ))}
+            </span>
+          )}
+        </dd>
+        {r.last_action_at && (
+          <>
+            <dt>Ultima azione</dt>
+            <dd>
+              {formatLocalDateTime(r.last_action_at)} · {r.last_action_by}
+            </dd>
           </>
         )}
       </dl>

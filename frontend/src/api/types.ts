@@ -920,6 +920,13 @@ export type PurchaseRequisition = {
   on_hold: boolean
   on_hold_explanation: string | null
   lines: RequisitionLine[]
+  // Flusso di approvazione: approvatori (Pending = in carico, Completed =
+  // approvato), chi ha in carico la RDA e l'ultima azione (data/ora locale
+  // e utente; letta solo per le RDA col flusso in corso).
+  approvers: { name: string; status: string | null }[]
+  in_charge: string[]
+  last_action_at: string | null
+  last_action_by: string | null
   synced_at: string | null
 }
 

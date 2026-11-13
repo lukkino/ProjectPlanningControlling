@@ -52,6 +52,12 @@ class RequisitionLine(BaseModel):
     requested_date: dt.date | None = None
 
 
+class RequisitionApprover(BaseModel):
+    name: str
+    # Pending = la RDA e' in carico a questa persona, Completed = approvato.
+    status: str | None = None
+
+
 class PurchaseRequisition(BaseModel):
     id: int
     number: str
@@ -67,9 +73,20 @@ class PurchaseRequisition(BaseModel):
     on_hold: bool
     on_hold_explanation: str | None
     lines: list[RequisitionLine] = []
+    approvers: list[RequisitionApprover] = []
+    in_charge: list[str] = []
+    last_action_at: dt.datetime | None = None
+    last_action_by: str | None = None
     synced_at: dt.datetime | None
 
-    @field_validator("lines", mode="before")
+    @field_validator("in_charge", mode="before")
+    @classmethod
+    def _split(cls, value):
+        if isinstance(value, str):
+            return [v for v in value.split("; ") if v]
+        return value or []
+
+    @field_validator("lines", "approvers", mode="before")
     @classmethod
     def _parse(cls, value):
         if isinstance(value, str):
@@ -116,6 +133,10 @@ def _out(r: models.PurchaseRequisition) -> PurchaseRequisition:
         on_hold=bool(r.on_hold),
         on_hold_explanation=r.on_hold_explanation,
         lines=r.lines_json,
+        approvers=r.approvers_json,
+        in_charge=r.in_charge,
+        last_action_at=r.last_action_at,
+        last_action_by=r.last_action_by,
         synced_at=r.synced_at,
     )
 
@@ -243,6 +264,14 @@ def sync_requisitions(db: Session = Depends(get_db)):
         req.on_hold = bool(row.get("on_hold"))
         req.on_hold_explanation = row.get("on_hold_explanation")
         req.lines_json = json.dumps(row.get("lines") or [], ensure_ascii=False)
+        req.approvers_json = json.dumps(row.get("approvers") or [], ensure_ascii=False)
+        req.in_charge = "; ".join(row.get("in_charge") or []) or None
+        # Ultima azione: letta solo per le RDA col flusso in corso; per le
+        # altre resta l'ultima letta.
+        if row.get("workflow_read"):
+            action = row.get("last_action") or {}
+            req.last_action_at = dt.datetime.fromisoformat(action["at"]) if action.get("at") else None
+            req.last_action_by = action.get("by")
         req.synced_at = now
     for req in existing.values():
         db.delete(req)

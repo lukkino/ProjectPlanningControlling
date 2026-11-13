@@ -21,6 +21,7 @@ da rifare, 1 altro errore. Non scrive nel database ne' in Dynamics.
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -146,13 +147,80 @@ def _first_requisition_number(page, list_url: str) -> str | None:
                 number = None
             if number:
                 return number
-        elif "login.microsoftonline.com" in page.url:
-            _answer_microsoft_prompts(page)
             # In Dynamics da un pezzo ma l'elenco resta vuoto: nessuna RDA.
             if time.monotonic() - start > EMPTY_LIST_AFTER_S:
                 return None
+        elif "login.microsoftonline.com" in page.url:
+            _answer_microsoft_prompts(page)
         page.wait_for_timeout(1000)
     raise LoginRequired(page.url)
+
+
+# Stati delle RDA con un flusso di approvazione ancora in corso: per queste
+# si legge l'ultima azione dal menu "Flusso di lavoro" (una lettura a RDA).
+OPEN_WORKFLOW_STATUSES = {"InReview", "Approved"}
+NUMBER_INPUT = 'input[aria-label="Richiesta di acquisto"]'
+# Velo di attesa di Dynamics: finche' c'e', i clic non arrivano.
+SHELL_IDLE_JS = (
+    "() => { const b = document.getElementById('ShellBlockingDiv');"
+    " return !b || getComputedStyle(b).display === 'none' || b.offsetParent === null }"
+)
+_LAST_ACTION_RE = re.compile(r"Ultima azione eseguita:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s+Utente:\s*([^\]]+)\]")
+
+
+def _approvers(context, base_url: str, numbers: list[str]) -> dict[str, list[dict]]:
+    """Approvatori del flusso di ogni RDA con il loro stato (Pending = la
+    RDA e' in carico a loro, Completed = gia' approvato)."""
+    result: dict[str, list[dict]] = {}
+    for i in range(0, len(numbers), CHUNK):
+        filter_ = " or ".join(f"RequisitionNumber eq {_quote(n)}" for n in numbers[i:i + CHUNK])
+        for row in _get(context, base_url, _query("UbuyRequisitionWorkflowApprovers", filter_)):
+            entry = {"name": (row.get("PersonName") or "").strip(), "status": row.get("RequisitionWorkflowApproverStatus")}
+            if entry["name"] and entry not in result.setdefault(row["RequisitionNumber"], []):
+                result[row["RequisitionNumber"]].append(entry)
+    return result
+
+
+def _last_action(page, number: str) -> dict | None:
+    """Ultima azione del flusso di lavoro della RDA, dal menu "Flusso di
+    lavoro" della pagina elenco (agisce sulla riga selezionata): la si filtra
+    col campo Filtro, la si seleziona e si apre il menu."""
+    page.wait_for_function(SHELL_IDLE_JS, timeout=20000)
+    box = page.locator('input[aria-label="Filtro"]').first
+    box.click()
+    box.fill(number)
+    box.press("Enter")
+    page.wait_for_function(
+        "n => { const c = [...document.querySelectorAll('input[aria-label=\"Richiesta di acquisto\"]')];"
+        " return c.length === 1 && c[0].value === n }",
+        arg=number,
+        timeout=20000,
+    )
+    page.wait_for_function(SHELL_IDLE_JS, timeout=20000)
+    # Si seleziona la riga cliccando il Nome: il numero e' un link (aprirebbe
+    # la RDA) e a volte risulta coperto.
+    row_cell = page.locator('input[aria-label="Nome"]').first
+    if row_cell.count():
+        row_cell.click(force=True)
+    else:
+        page.locator(f'{NUMBER_INPUT}[value="{number}"]').first.click(force=True)
+    page.wait_for_function(SHELL_IDLE_JS, timeout=20000)
+    page.wait_for_timeout(400)
+    page.locator('button[data-dyn-controlname$="WorkflowDropDialog"]').first.click()
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('*')].some(e => e.childElementCount === 0 && /Ultima azione/.test(e.textContent))",
+        timeout=20000,
+    )
+    text = page.evaluate(
+        "() => [...document.querySelectorAll('*')].filter(e => e.childElementCount === 0"
+        " && /Ultima azione/.test(e.textContent)).map(e => e.textContent)[0] || ''"
+    )
+    page.keyboard.press("Escape")
+    match = _LAST_ACTION_RE.search(text)
+    if not match:
+        return None
+    day, month, year, hour, minute, user = match.groups()
+    return {"at": f"{year}-{int(month):02d}-{int(day):02d}T{int(hour):02d}:{minute}", "by": user.strip()}
 
 
 def fetch_requisitions(list_url: str) -> tuple[list[dict], str | None]:
@@ -199,6 +267,23 @@ def fetch_requisitions(list_url: str) -> tuple[list[dict], str | None]:
             except RuntimeError:
                 pass
 
+            # Flusso di approvazione: in carico a chi (API) e ultima azione
+            # (dalla pagina, solo per le RDA con il flusso in corso). Best
+            # effort: senza, restano vuoti.
+            try:
+                approvers = _approvers(context, base_url, numbers)
+            except RuntimeError:
+                approvers = {}
+            open_numbers = sorted(h["RequisitionNumber"] for h in headers if h.get("RequisitionStatus") in OPEN_WORKFLOW_STATUSES)
+            last_actions: dict[str, dict | None] = {}
+            for done, number in enumerate(open_numbers, start=1):
+                try:
+                    last_actions[number] = _last_action(page, number)
+                except Exception:
+                    last_actions[number] = None
+                    page.keyboard.press("Escape")
+                _progress(done, len(open_numbers))
+
             result = []
             for h in headers:
                 number = h["RequisitionNumber"]
@@ -217,6 +302,10 @@ def fetch_requisitions(list_url: str) -> tuple[list[dict], str | None]:
                         "requested_date": _date(h.get("DefaultRequestedDate")),
                         "on_hold": h.get("IsPurchaseRequisitionOnHold") == "Yes",
                         "on_hold_explanation": h.get("OnHoldExplanation") or None,
+                        "approvers": approvers.get(number, []),
+                        "in_charge": [a["name"] for a in approvers.get(number, []) if a["status"] == "Pending"],
+                        "last_action": last_actions.get(number),
+                        "workflow_read": number in last_actions,
                         "lines": [
                             {
                                 "line": l.get("RequisitionLineNumber"),

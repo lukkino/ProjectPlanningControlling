@@ -128,6 +128,18 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE increment_member_absences ADD COLUMN kind VARCHAR(32) DEFAULT 'Ferie'"))
 
+    if "tool_purchase_requisitions" in table_names:
+        rda_columns = {col["name"] for col in inspector.get_columns("tool_purchase_requisitions")}
+        if "approvers_json" not in rda_columns:
+            with engine.begin() as conn:
+                for column, kind in (
+                    ("approvers_json", "TEXT"),
+                    ("in_charge", "TEXT"),
+                    ("last_action_at", "DATETIME"),
+                    ("last_action_by", "VARCHAR(255)"),
+                ):
+                    conn.execute(text(f"ALTER TABLE tool_purchase_requisitions ADD COLUMN {column} {kind}"))
+
     if "user_settings" in table_names:
         settings_columns = {col["name"] for col in inspector.get_columns("user_settings")}
         if "d365_requisitions_url" not in settings_columns:

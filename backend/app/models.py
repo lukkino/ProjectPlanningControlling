@@ -1267,6 +1267,13 @@ class PurchaseRequisition(Base):
     on_hold: Mapped[bool] = mapped_column(Boolean, default=False)
     on_hold_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     lines_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Flusso di approvazione: approvatori [{name, status}] (Pending = in
+    # carico, Completed = approvato), chi ha in carico la RDA ("; ") e
+    # l'ultima azione (data/ora locale e utente, solo per le RDA aperte).
+    approvers_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    in_charge: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_action_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_action_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
