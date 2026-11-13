@@ -1055,6 +1055,20 @@ class CycleTimeMetrics(BaseModel):
     error: str | None = None
     # Quando i dati sono stati estratti da Jira (UTC): vedi CachedExtraction.
     fetched_at: dt.datetime | None = None
+    # Da dove vengono: None = Jira; altrimenti il nome del file pre-elaborato
+    # caricato (vedi services/cycle_time_file.py).
+    source: str | None = None
+    # Da che data i dati sono completi (inizio dell'estrazione Jira, o la
+    # prima chiusura nel file): una finestra storica che parte prima e'
+    # coperta solo in parte.
+    data_from: dt.date | None = None
+
+
+class CycleTimeImport(BaseModel):
+    """File pre-elaborato (CSV) con lo storico per Monte Carlo/Forecasting."""
+
+    filename: str
+    content: str
 
 
 class BugsOpenedMonth(BaseModel):

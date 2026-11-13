@@ -26,13 +26,21 @@ export type HistoryOptions = {
   issueTypes: string[]
   excludeCve: boolean
   historyDays: number
+  // Finestra da una data fissa (ISO) a ieri: se c'e', historyDays non conta.
+  historyFrom?: string | null
   workingDaysOnly: boolean
 }
 export const DEFAULT_HISTORY_OPTIONS: HistoryOptions = {
   issueTypes: ['Story', 'Bug'],
   excludeCve: true,
   historyDays: 365,
+  historyFrom: null,
   workingDaysOnly: true,
+}
+
+// Primo giorno della finestra storica (epoch days) rispetto a today.
+export function historyStartDay(options: Pick<HistoryOptions, 'historyDays' | 'historyFrom'>, today: number): number {
+  return dateStrToEpochDays(options.historyFrom ?? null) ?? today - options.historyDays
 }
 export const DEFAULT_ITERATIONS = 10000
 
@@ -46,11 +54,13 @@ export type History = {
 }
 
 // Storico del throughput: i PBI Done (estrazione Cycle Time) dei tipi scelti
-// chiusi negli historyDays giorni prima di oggi (today escluso).
+// chiusi negli historyDays giorni prima di oggi, o da historyFrom (today
+// escluso).
 export function buildHistory(points: CycleTimePoint[], options: HistoryOptions, today: number): History {
-  const { issueTypes, excludeCve, historyDays, workingDaysOnly } = options
-  const fromDay = today - historyDays
+  const { issueTypes, excludeCve, workingDaysOnly } = options
+  const fromDay = historyStartDay(options, today)
   const toDay = today - 1
+  const windowDays = Math.max(1, toDay - fromDay + 1)
   const inWindow = points.filter((p) => {
     if (!issueTypes.includes(p.issue_type) || (excludeCve && p.is_cve)) return false
     const d = dateStrToEpochDays(p.finish_date)
@@ -61,7 +71,7 @@ export function buildHistory(points: CycleTimePoint[], options: HistoryOptions, 
   return {
     itemCount: inWindow.length,
     samples: dailyThroughputSamples(finishDays, fromDay, toDay, workingDaysOnly),
-    perWeek: (inWindow.length / historyDays) * 7,
+    perWeek: (inWindow.length / windowDays) * 7,
     p50: interpolatedPercentile(cycleTimes, 50),
     p85: interpolatedPercentile(cycleTimes, 85),
     p95: interpolatedPercentile(cycleTimes, 95),

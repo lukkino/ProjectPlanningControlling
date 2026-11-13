@@ -313,7 +313,10 @@ def _percentile(sorted_values: list[float], p: float) -> float | None:
 
 
 def compute_cycle_time_metrics(
-    db: Session, team: str = "sw", on_progress: Callable[[str, int, int], None] | None = None
+    db: Session,
+    team: str = "sw",
+    on_progress: Callable[[str, int, int], None] | None = None,
+    since: dt.date | None = None,
 ) -> schemas.CycleTimeMetrics:
     """Scatterplot Cycle Time della Dashboard generale (e dati sorgente del
     Throughput, che li aggrega per mese lato frontend): un punto per PBI
@@ -328,7 +331,12 @@ def compute_cycle_time_metrics(
             points=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
         )
 
-    jql = f"{base_jql} AND status CHANGED TO Done AFTER -365d"
+    # Ultimi 12 mesi, o da since se e' piu' indietro (finestra storica di
+    # Monte Carlo/Forecasting scelta dall'utente).
+    window_start = dt.date.today() - dt.timedelta(days=365)
+    if since is not None and since < window_start:
+        window_start = since
+    jql = f'{base_jql} AND status CHANGED TO Done AFTER "{window_start.isoformat()}"'
 
     try:
         issues = fetch_cycle_times(
@@ -353,12 +361,22 @@ def compute_cycle_time_metrics(
         if issue.actual_start is not None and issue.actual_finish is not None
         and issue.actual_finish >= issue.actual_start
     ]
-    points.sort(key=lambda p: p.finish_date)
+    metrics = cycle_time_metrics_from_points(points)
+    metrics.data_from = window_start
+    return metrics
 
+
+def cycle_time_metrics_from_points(points: list[schemas.CycleTimePoint]) -> schemas.CycleTimeMetrics:
+    """Punti ordinati per data di chiusura e percentili 50/85/95. Usata sia
+    dall'estrazione Jira sia dal file pre-elaborato. I punti possono andare
+    oltre i 12 mesi (finestra storica di Monte Carlo); i percentili, che
+    mostra la Dashboard generale, sono sugli ultimi 12 mesi."""
+    points = sorted(points, key=lambda p: p.finish_date)
+    last_year = dt.date.today() - dt.timedelta(days=365)
     # Percentili senza i Bug CVE del bot di security scan: chiusi in blocco
     # quasi subito (cycle time 0), abbasserebbero i percentili fino a dare
     # un P50 di 0 giorni. Restano comunque nei punti, come serie a se'.
-    durations = sorted(p.cycle_time_days for p in points if not p.is_cve)
+    durations = sorted(p.cycle_time_days for p in points if not p.is_cve and p.finish_date >= last_year)
     return schemas.CycleTimeMetrics(
         points=points,
         p50=_percentile(durations, 50),

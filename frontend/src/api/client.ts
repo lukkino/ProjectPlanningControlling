@@ -473,10 +473,15 @@ export const api = {
       downloadFile(`/projects/${projectId}/dashboard/presentation`, { days: String(closedDays) }),
     overview: (team: Team, period: OverviewPeriod = 'current') =>
       request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
-    cycleTime: (team: Team) => request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}`),
+    // since: estrae anche prima degli ultimi 12 mesi (finestra storica scelta).
+    cycleTime: (team: Team, since?: string | null) =>
+      request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}${since ? `&since=${since}` : ''}`),
     cycleTimeProgress: (team: Team) => request<SyncProgress>(`/dashboard/cycle-time/progress?team=${team}`),
     // Ultima estrazione Cycle Time salvata dal backend (null se mai fatta).
     cycleTimeCached: (team: Team) => request<CycleTimeMetrics | null>(`/dashboard/cycle-time/cached?team=${team}`),
+    // Storico da un file pre-elaborato (CSV) invece che da Jira.
+    importCycleTime: (team: Team, filename: string, content: string) =>
+      post<CycleTimeMetrics>(`/dashboard/cycle-time/import?team=${team}`, { filename, content }),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
   },
   dashboardSnapshots: {

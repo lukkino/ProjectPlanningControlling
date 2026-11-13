@@ -16,6 +16,7 @@ import {
   DEFAULT_HISTORY_OPTIONS,
   DEFAULT_ITERATIONS,
   forecastIncrement,
+  historyStartDay,
   type HistoryOptions,
 } from '../lib/monteCarlo'
 import type { McParams } from '../lib/forecastParams'
@@ -23,13 +24,10 @@ import { daysOffSet } from '../lib/scheduling'
 import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { SyncProgressModal } from './SyncProgressModal'
 import { DateInput } from './DateInput'
+import { HistoryWindowSelect } from './HistoryWindowSelect'
+import { coverageWarning, readStoredWindow, storeWindow, windowLabel } from '../lib/historyWindow'
 
 const ISSUE_TYPES = ['Story', 'Bug', 'Activity', 'Task']
-const HISTORY_WINDOWS = [
-  { days: 90, label: 'ultimi 3 mesi' },
-  { days: 180, label: 'ultimi 6 mesi' },
-  { days: 365, label: 'ultimo anno' },
-]
 const TEAM_LABEL: Record<Team, string> = { sw: 'Team SW', embedded: 'Team Embedded' }
 
 function todayIso(): string {
@@ -57,7 +55,11 @@ const isToday = (value: string | null | undefined) => {
 export function NewSimulationModal({ project, onClose }: { project: Project; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [team, setTeam] = useState<Team>('sw')
-  const [options, setOptions] = useState<HistoryOptions>(DEFAULT_HISTORY_OPTIONS)
+  // Finestra storica: l'ultima scelta (qui o in Monte Carlo), dal browser.
+  const [options, setOptions] = useState<HistoryOptions>(() => ({
+    ...DEFAULT_HISTORY_OPTIONS,
+    ...readStoredWindow(DEFAULT_HISTORY_OPTIONS),
+  }))
   const [showParams, setShowParams] = useState(false)
   // null = scelta di default (aggiorna se i dati non sono di oggi).
   const [syncBacklogChoice, setSyncBacklogChoice] = useState<boolean | null>(null)
@@ -83,7 +85,7 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
     queryKey: ['non-working-days', project.id],
     queryFn: () => api.nonWorkingDays.list(project.id),
   })
-  const cycleTime = useCycleTimeData(team)
+  const cycleTime = useCycleTimeData(team, options.historyFrom)
 
   const lastSyncedAt = (backlogItems ?? []).reduce<string | null>(
     (latest, i) => (i.last_synced_at && (!latest || i.last_synced_at > latest) ? i.last_synced_at : latest),
@@ -156,10 +158,14 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
     }
   }
 
-  const windowLabel = HISTORY_WINDOWS.find((w) => w.days === options.historyDays)?.label ?? `${options.historyDays} giorni`
+  const windowText = windowLabel(options)
+  const coverage = coverageWarning(
+    historyData,
+    epochDaysToDate(historyStartDay(options, dateStrToEpochDays(todayIso()) as number)).toISOString().slice(0, 10),
+  )
   const paramsNote =
     `Monte Carlo: ${TEAM_LABEL[team]} · ${options.issueTypes.join('+')}` +
-    `${options.excludeCve ? ' (CVE esclusi)' : ''} · ${windowLabel}` +
+    `${options.excludeCve ? ' (CVE esclusi)' : ''} · ${windowText}` +
     `${options.workingDaysOnly ? ' · solo giorni lavorativi' : ''} · ${DEFAULT_ITERATIONS.toLocaleString('it-IT')} simulazioni`
 
   const create = useMutation({
@@ -373,17 +379,16 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
             </div>
             <label>
               Finestra storica{' '}
-              <select
-                value={options.historyDays}
-                onChange={(e) => setOptions((o) => ({ ...o, historyDays: Number(e.target.value) }))}
-              >
-                {HISTORY_WINDOWS.map((w) => (
-                  <option key={w.days} value={w.days}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
+              <HistoryWindowSelect
+                compact
+                value={options}
+                onChange={(value) => {
+                  setOptions((o) => ({ ...o, ...value }))
+                  storeWindow(value)
+                }}
+              />
             </label>
+            {coverage && <div className="history-coverage">⚠ {coverage}</div>}
             <label>
               <input
                 type="checkbox"

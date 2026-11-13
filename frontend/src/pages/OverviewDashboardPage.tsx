@@ -552,6 +552,15 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
   )
 }
 
+// I dati Cycle Time possono andare oltre i 12 mesi (finestra storica di
+// Monte Carlo o file pre-elaborato): qui si mostrano gli ultimi 12 mesi.
+function lastYearPoints<T extends { finish_date: string }>(points: T[]): T[] {
+  const from = new Date()
+  from.setFullYear(from.getFullYear() - 1)
+  const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`
+  return points.filter((p) => p.finish_date >= fromIso)
+}
+
 // Scatterplot Cycle Time: un punto per PBI (JQL configurabile in
 // Configurazione + ultimi 12 mesi), asse X la data di completamento, asse Y
 // il cycle time in giorni, con le linee di percentile 50/85/95.
@@ -585,7 +594,8 @@ function CycleTimeCard() {
 
   const pointsBySeries: Record<string, ScatterPoint[]> = {}
   const xs: number[] = []
-  for (const p of data.points) {
+  const points = lastYearPoints(data.points)
+  for (const p of points) {
     const x = dateStrToEpochDays(p.finish_date)
     if (x === null) continue
     xs.push(x)
@@ -620,7 +630,7 @@ function CycleTimeCard() {
 
       {data.error ? (
         <p className="muted">{data.error}</p>
-      ) : data.points.length === 0 ? (
+      ) : points.length === 0 ? (
         <p className="muted">Nessun PBI completato negli ultimi 12 mesi con i dati necessari.</p>
       ) : (
         <>
@@ -734,10 +744,11 @@ function ThroughputCard() {
     )
   }
 
-  const buckets = buildMonthBuckets(data.points)
+  const points = lastYearPoints(data.points)
+  const buckets = buildMonthBuckets(points)
   const countsByMonth: Record<string, Record<string, number>> = {}
   for (const b of buckets) countsByMonth[b.key] = Object.fromEntries(SERIES.map((s) => [s.key, 0]))
-  for (const p of data.points) {
+  for (const p of points) {
     const key = p.finish_date.slice(0, 7)
     const seriesKey = seriesKeyFor(p)
     countsByMonth[key][seriesKey] = (countsByMonth[key][seriesKey] ?? 0) + 1
@@ -753,7 +764,7 @@ function ThroughputCard() {
 
       {data.error ? (
         <p className="muted">{data.error}</p>
-      ) : data.points.length === 0 ? (
+      ) : points.length === 0 ? (
         <p className="muted">Nessun PBI completato negli ultimi 12 mesi.</p>
       ) : (
         <div style={{ height: 280 }}>

@@ -7,6 +7,7 @@ import type { Team } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
 import {
   dateStrToEpochDays,
+  epochDaysToDate,
   formatEpochDaysAsDate,
   formatIsoDate,
   parseBackendDateTime,
@@ -16,6 +17,7 @@ import {
   buildHistory,
   DEFAULT_HISTORY_OPTIONS,
   DEFAULT_ITERATIONS,
+  historyStartDay,
   nearestRank,
   simulateHowMany,
   simulateWhen,
@@ -23,15 +25,12 @@ import {
 import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
+import { HistoryWindowSelect } from '../components/HistoryWindowSelect'
+import { coverageWarning, readStoredWindow, storeWindow, type HistoryWindow } from '../lib/historyWindow'
 
 type Mode = 'when' | 'howMany'
 
 const ISSUE_TYPES = ['Story', 'Bug', 'Activity', 'Task']
-const HISTORY_WINDOWS = [
-  { days: 90, label: 'Ultimi 3 mesi' },
-  { days: 180, label: 'Ultimi 6 mesi' },
-  { days: 365, label: 'Ultimo anno' },
-]
 const CONFIDENCE_LEVELS = [50, 70, 85, 95]
 // Numero massimo di barre dell'istogramma: oltre, i valori si raggruppano
 // in intervalli piu' larghi (settimane per le date, range per i conteggi).
@@ -130,7 +129,13 @@ export function MonteCarloPage() {
   const [team, setTeam] = useState<Team>('sw')
   const [issueTypes, setIssueTypes] = useState<string[]>(DEFAULT_HISTORY_OPTIONS.issueTypes)
   const [excludeCve, setExcludeCve] = useState(DEFAULT_HISTORY_OPTIONS.excludeCve)
-  const [historyDays, setHistoryDays] = useState(DEFAULT_HISTORY_OPTIONS.historyDays)
+  // Finestra storica: ultimi N giorni o da una data (ricordata nel browser).
+  const [historyWindow, setHistoryWindowState] = useState<HistoryWindow>(() => readStoredWindow(DEFAULT_HISTORY_OPTIONS))
+  const setHistoryWindow = (value: HistoryWindow) => {
+    setHistoryWindowState(value)
+    storeWindow(value)
+  }
+  const { historyDays, historyFrom } = historyWindow
   const [workingDaysOnly, setWorkingDaysOnly] = useState(DEFAULT_HISTORY_OPTIONS.workingDaysOnly)
   const [startDate, setStartDate] = useState(todayIso())
   const [itemCountInput, setItemCountInput] = useState<string | null>(null)
@@ -142,7 +147,7 @@ export function MonteCarloPage() {
 
   // Storico Jira: ultima estrazione salvata, aggiornabile col pulsante
   // "Aggiorna da Jira" (vedi useCycleTimeData).
-  const cycleTime = useCycleTimeData(team)
+  const cycleTime = useCycleTimeData(team, historyFrom)
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
@@ -159,9 +164,12 @@ export function MonteCarloPage() {
   const today = toEpochDays(new Date(`${todayIso()}T00:00:00Z`))
 
   const history = useMemo(
-    () => buildHistory(cycleTime.data?.points ?? [], { issueTypes, excludeCve, historyDays, workingDaysOnly }, today),
-    [cycleTime.data, issueTypes, excludeCve, historyDays, workingDaysOnly, today],
+    () =>
+      buildHistory(cycleTime.data?.points ?? [], { issueTypes, excludeCve, historyDays, historyFrom, workingDaysOnly }, today),
+    [cycleTime.data, issueTypes, excludeCve, historyDays, historyFrom, workingDaysOnly, today],
   )
+  const windowStartIso = epochDaysToDate(historyStartDay(historyWindow, today)).toISOString().slice(0, 10)
+  const coverage = coverageWarning(cycleTime.data ?? undefined, windowStartIso)
 
   const toggleIssueType = (t: string) =>
     setIssueTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
@@ -258,7 +266,7 @@ export function MonteCarloPage() {
 
         <div className="grid-2" style={{ marginTop: 12 }}>
           <div>
-            <h4 style={{ marginTop: 0 }}>Storico (dati Jira)</h4>
+            <h4 style={{ marginTop: 0 }}>Storico (da Jira o da file)</h4>
             <div className="form-row">
               <label>Team</label>
               <select value={team} onChange={(e) => setTeam(e.target.value as Team)}>
@@ -283,13 +291,8 @@ export function MonteCarloPage() {
             </div>
             <div className="form-row">
               <label>Finestra storica</label>
-              <select value={historyDays} onChange={(e) => setHistoryDays(Number(e.target.value))}>
-                {HISTORY_WINDOWS.map((w) => (
-                  <option key={w.days} value={w.days}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
+              <HistoryWindowSelect value={historyWindow} onChange={setHistoryWindow} />
+              {coverage && <div className="history-coverage">⚠ {coverage}</div>}
             </div>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
               <input type="checkbox" checked={workingDaysOnly} onChange={(e) => setWorkingDaysOnly(e.target.checked)} />
@@ -305,7 +308,14 @@ export function MonteCarloPage() {
                   </span>
                   {cycleTime.data.fetched_at && (
                     <span className="muted">
-                      Estratti da Jira il {parseBackendDateTime(cycleTime.data.fetched_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {cycleTime.data.source ? (
+                        <>
+                          Dal file <b title={cycleTime.data.source}>{cycleTime.data.source}</b>, caricato il{' '}
+                        </>
+                      ) : (
+                        'Estratti da Jira il '
+                      )}
+                      {parseBackendDateTime(cycleTime.data.fetched_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}
                   {history.p85 != null && (
@@ -318,7 +328,9 @@ export function MonteCarloPage() {
               ) : (
                 !cycleTime.error &&
                 !cycleTime.isLoadingCached && (
-                  <span className="muted">Dati storici non ancora caricati: premi "Aggiorna da Jira".</span>
+                  <span className="muted">
+                    Dati storici non ancora caricati: premi "Aggiorna da Jira" oppure carica un file pre-elaborato.
+                  </span>
                 )
               )}
               <button
@@ -329,6 +341,27 @@ export function MonteCarloPage() {
               >
                 {cycleTime.isFetching ? 'Aggiornamento...' : '⟳ Aggiorna da Jira'}
               </button>
+              {/* Alternativa veloce a Jira: il CSV pre-elaborato (ID,
+                  Developing, Done, Issue Type...), vedi cycle_time_file.py. */}
+              <label
+                className="btn"
+                style={{ fontSize: 12, padding: '4px 10px', cursor: cycleTime.isImporting ? 'default' : 'pointer' }}
+                title="Carica lo storico da un file CSV pre-elaborato (colonne ID, Developing, Done, Issue Type): più veloce dell'estrazione da Jira"
+              >
+                {cycleTime.isImporting ? 'Caricamento...' : '📄 Carica da file'}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  hidden
+                  disabled={cycleTime.isImporting}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) cycleTime.importFile(file)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {cycleTime.importError && <span style={{ color: 'var(--danger)' }}>{cycleTime.importError}</span>}
             </div>
             {cycleTime.isFetching && (
               <SyncProgressModal

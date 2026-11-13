@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Team } from '../api/types'
 
@@ -9,10 +9,23 @@ import type { Team } from '../api/types'
 // restano disponibili anche ricaricando la pagina o dopo un riavvio. La query
 // "live" e' la stessa della Dashboard generale: se li' i dati sono gia' stati
 // estratti in questa sessione, qui si vedono subito.
-export function useCycleTimeData(team: Team) {
+// since: inizio della finestra storica scelta; "Aggiorna da Jira" estrae da
+// li' se e' oltre gli ultimi 12 mesi.
+export function useCycleTimeData(team: Team, since?: string | null) {
+  const queryClient = useQueryClient()
+  // In alternativa a Jira: un file pre-elaborato (CSV). Il risultato
+  // sostituisce sia l'estrazione salvata sia quella "live" di questa
+  // sessione, cosi' tutte le pagine che usano lo storico lo vedono.
+  const importFile = useMutation({
+    mutationFn: async (file: File) => api.dashboard.importCycleTime(team, file.name, await file.text()),
+    onSuccess: (metrics) => {
+      queryClient.setQueryData(['dashboard', 'cycle-time', team], metrics)
+      queryClient.setQueryData(['dashboard', 'cycle-time-cached', team], metrics)
+    },
+  })
   const live = useQuery({
     queryKey: ['dashboard', 'cycle-time', team],
-    queryFn: () => api.dashboard.cycleTime(team),
+    queryFn: () => api.dashboard.cycleTime(team, since),
     staleTime: Infinity,
     enabled: false,
   })
@@ -32,5 +45,8 @@ export function useCycleTimeData(team: Team) {
     isFetching: live.isFetching,
     isLoadingCached: cached.isLoading,
     refresh: async () => (await live.refetch()).data,
+    importFile: (file: File) => importFile.mutate(file),
+    isImporting: importFile.isPending,
+    importError: importFile.isError ? (importFile.error as Error).message : null,
   }
 }

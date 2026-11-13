@@ -15,6 +15,7 @@ from app.services.metrics import (
     compute_dashboard_metrics,
     compute_overview_metrics,
 )
+from app.services.cycle_time_file import CycleTimeFileError, parse_cycle_time_file
 from app.services.earned_value import compute_earned_value
 from app.services.workload import TeamPerson, compute_workload, team_key
 from app.services.presentation import generate_dashboard_presentation
@@ -129,12 +130,16 @@ def get_overview_dashboard(team: Team = "sw", period: Period = "current", db: Se
 
 
 @router.get("/api/dashboard/cycle-time", response_model=schemas.CycleTimeMetrics)
-def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
+def get_cycle_time_dashboard(
+    team: Team = "sw",
+    since: dt.date | None = Query(None, description="Estrae da questa data se e' oltre gli ultimi 12 mesi"),
+    db: Session = Depends(get_db),
+):
     def on_progress(phase: str, done: int, total: int) -> None:
         _cycle_time_progress[team] = schemas.SyncProgress(phase=phase, done=done, total=total)
 
     try:
-        metrics = compute_cycle_time_metrics(db, team, on_progress)
+        metrics = compute_cycle_time_metrics(db, team, on_progress, since)
     finally:
         _cycle_time_progress.pop(team, None)
     # Solo un'estrazione riuscita sostituisce quella salvata.
@@ -147,6 +152,25 @@ def get_cycle_time_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
         cached.fetched_at = metrics.fetched_at
         db.add(cached)
         db.commit()
+    return metrics
+
+
+@router.post("/api/dashboard/cycle-time/import", response_model=schemas.CycleTimeMetrics)
+def import_cycle_time(payload: schemas.CycleTimeImport, team: Team = "sw", db: Session = Depends(get_db)):
+    """Storico da un file pre-elaborato (CSV) invece che da Jira: stessi
+    punti e percentili, salvati come ultima estrazione del team (Monte Carlo,
+    Forecasting e Dashboard generale li usano allo stesso modo)."""
+    try:
+        metrics = parse_cycle_time_file(payload.content)
+    except CycleTimeFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    metrics.fetched_at = dt.datetime.utcnow()
+    metrics.source = payload.filename.rsplit("\\", 1)[-1].rsplit("/", 1)[-1][:200] or "file"
+    cached = db.get(models.CachedExtraction, _cycle_time_key(team)) or models.CachedExtraction(key=_cycle_time_key(team))
+    cached.payload = metrics.model_dump_json()
+    cached.fetched_at = metrics.fetched_at
+    db.add(cached)
+    db.commit()
     return metrics
 
 

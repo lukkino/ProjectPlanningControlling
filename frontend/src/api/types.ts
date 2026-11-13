@@ -732,6 +732,10 @@ export type CycleTimeMetrics = {
   // Quando i dati sono stati estratti da Jira (UTC, senza fuso: vedi
   // parseBackendDateTime).
   fetched_at: string | null
+  // null = da Jira; altrimenti il nome del file pre-elaborato caricato.
+  source?: string | null
+  // Da che data i dati sono completi (inizio estrazione / prima chiusura).
+  data_from?: string | null
 }
 
 export type AppSettings = {
