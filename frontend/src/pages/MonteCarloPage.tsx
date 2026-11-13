@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api/client'
 import { SyncProgressModal } from '../components/SyncProgressModal'
@@ -26,7 +26,7 @@ import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
 import { HistoryWindowSelect } from '../components/HistoryWindowSelect'
-import { coverageWarning, readStoredWindow, storeWindow, type HistoryWindow } from '../lib/historyWindow'
+import { coverageWarning, readStoredOptions, storeOptions, type HistoryWindow } from '../lib/historyWindow'
 
 type Mode = 'when' | 'howMany'
 
@@ -127,16 +127,22 @@ export function MonteCarloPage() {
 
   const [mode, setMode] = useState<Mode>('when')
   const [team, setTeam] = useState<Team>('sw')
-  const [issueTypes, setIssueTypes] = useState<string[]>(DEFAULT_HISTORY_OPTIONS.issueTypes)
-  const [excludeCve, setExcludeCve] = useState(DEFAULT_HISTORY_OPTIONS.excludeCve)
+  // Parametri dello storico: gli ultimi scelti (qui o in "Aggiungi
+  // simulazione" del Forecasting), dal browser.
+  const [stored] = useState(() => readStoredOptions(DEFAULT_HISTORY_OPTIONS))
+  const [issueTypes, setIssueTypes] = useState<string[]>(stored.issueTypes)
+  const [excludeCve, setExcludeCve] = useState(stored.excludeCve)
   // Finestra storica: ultimi N giorni o da una data (ricordata nel browser).
-  const [historyWindow, setHistoryWindowState] = useState<HistoryWindow>(() => readStoredWindow(DEFAULT_HISTORY_OPTIONS))
-  const setHistoryWindow = (value: HistoryWindow) => {
-    setHistoryWindowState(value)
-    storeWindow(value)
-  }
+  const [historyWindow, setHistoryWindow] = useState<HistoryWindow>({
+    historyDays: stored.historyDays,
+    historyFrom: stored.historyFrom ?? null,
+  })
   const { historyDays, historyFrom } = historyWindow
-  const [workingDaysOnly, setWorkingDaysOnly] = useState(DEFAULT_HISTORY_OPTIONS.workingDaysOnly)
+  const [workingDaysOnly, setWorkingDaysOnly] = useState(stored.workingDaysOnly)
+  useEffect(
+    () => storeOptions({ issueTypes, excludeCve, workingDaysOnly, ...historyWindow }),
+    [issueTypes, excludeCve, workingDaysOnly, historyWindow],
+  )
   const [startDate, setStartDate] = useState(todayIso())
   const [itemCountInput, setItemCountInput] = useState<string | null>(null)
   const [endDateInput, setEndDateInput] = useState<string | null>(null)

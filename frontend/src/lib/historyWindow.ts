@@ -1,7 +1,8 @@
 // Finestra storica del throughput (Monte Carlo e "Aggiungi simulazione" del
 // Forecasting): ultimi N giorni, oppure da una data fissa a ieri (come in
 // Actionable Agile: i dati piu' vecchi sono poco attendibili). L'ultima
-// scelta resta nel browser.
+// scelta resta nel browser, insieme agli altri parametri dello storico (tipi
+// di item, CVE, giorni lavorativi): le due pagine usano sempre gli stessi.
 import type { CycleTimeMetrics } from '../api/types'
 import { formatIsoDate } from './dates'
 import type { HistoryOptions } from './monteCarlo'
@@ -30,6 +31,47 @@ export function readStoredWindow(fallback: HistoryWindow): HistoryWindow {
     // localStorage non disponibile o dato corrotto: default.
   }
   return fallback
+}
+
+const OPTIONS_KEY = 'mc-history-options-v1'
+
+// Tutti i parametri dello storico, condivisi tra Monte Carlo e Forecasting.
+export function readStoredOptions(fallback: HistoryOptions): HistoryOptions {
+  const window = readStoredWindow(fallback)
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? 'null')
+    if (parsed && typeof parsed === 'object') {
+      const o = parsed as Record<string, unknown>
+      return {
+        issueTypes:
+          Array.isArray(o.issueTypes) && o.issueTypes.every((t) => typeof t === 'string')
+            ? (o.issueTypes as string[])
+            : fallback.issueTypes,
+        excludeCve: typeof o.excludeCve === 'boolean' ? o.excludeCve : fallback.excludeCve,
+        workingDaysOnly: typeof o.workingDaysOnly === 'boolean' ? o.workingDaysOnly : fallback.workingDaysOnly,
+        ...window,
+      }
+    }
+  } catch {
+    // localStorage non disponibile o dato corrotto: default.
+  }
+  return { ...fallback, ...window }
+}
+
+export function storeOptions(options: HistoryOptions) {
+  storeWindow({ historyDays: options.historyDays, historyFrom: options.historyFrom ?? null })
+  try {
+    localStorage.setItem(
+      OPTIONS_KEY,
+      JSON.stringify({
+        issueTypes: options.issueTypes,
+        excludeCve: options.excludeCve,
+        workingDaysOnly: options.workingDaysOnly,
+      }),
+    )
+  } catch {
+    // localStorage non disponibile: la scelta vale fino al ricaricamento.
+  }
 }
 
 export function storeWindow(window: HistoryWindow) {

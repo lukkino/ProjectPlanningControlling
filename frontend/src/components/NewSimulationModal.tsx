@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { Project, Team } from '../api/types'
 import { countBacklogStats, countPlannedUnplannedDone, countsForCodefreeze } from '../lib/backlogStats'
@@ -25,7 +25,7 @@ import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { SyncProgressModal } from './SyncProgressModal'
 import { DateInput } from './DateInput'
 import { HistoryWindowSelect } from './HistoryWindowSelect'
-import { coverageWarning, readStoredWindow, storeWindow, windowLabel } from '../lib/historyWindow'
+import { coverageWarning, readStoredOptions, storeOptions, windowLabel } from '../lib/historyWindow'
 
 const ISSUE_TYPES = ['Story', 'Bug', 'Activity', 'Task']
 const TEAM_LABEL: Record<Team, string> = { sw: 'Team SW', embedded: 'Team Embedded' }
@@ -55,11 +55,10 @@ const isToday = (value: string | null | undefined) => {
 export function NewSimulationModal({ project, onClose }: { project: Project; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [team, setTeam] = useState<Team>('sw')
-  // Finestra storica: l'ultima scelta (qui o in Monte Carlo), dal browser.
-  const [options, setOptions] = useState<HistoryOptions>(() => ({
-    ...DEFAULT_HISTORY_OPTIONS,
-    ...readStoredWindow(DEFAULT_HISTORY_OPTIONS),
-  }))
+  // Parametri dello storico: gli ultimi scelti (qui o in Monte Carlo), dal
+  // browser, cosi' le due pagine usano gli stessi.
+  const [options, setOptions] = useState<HistoryOptions>(() => readStoredOptions(DEFAULT_HISTORY_OPTIONS))
+  useEffect(() => storeOptions(options), [options])
   const [showParams, setShowParams] = useState(false)
   // null = scelta di default (aggiorna se i dati non sono di oggi).
   const [syncBacklogChoice, setSyncBacklogChoice] = useState<boolean | null>(null)
@@ -382,10 +381,7 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
               <HistoryWindowSelect
                 compact
                 value={options}
-                onChange={(value) => {
-                  setOptions((o) => ({ ...o, ...value }))
-                  storeWindow(value)
-                }}
+                onChange={(value) => setOptions((o) => ({ ...o, ...value }))}
               />
             </label>
             {coverage && <div className="history-coverage">⚠ {coverage}</div>}
