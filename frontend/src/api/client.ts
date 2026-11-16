@@ -21,6 +21,9 @@ import type {
   DashboardMetrics,
   CertificationSyncResult,
   CertificationTicket,
+  CommercialCodingSettings,
+  CommercialCodingSyncResult,
+  CommercialCodingTicket,
   EarnedValue,
   Workload,
   DashboardSnapshotDetail,
@@ -629,6 +632,14 @@ export const api = {
       list: () => request<CertificationTicket[]>('/tools/certification-tickets'),
       sync: () => post<CertificationSyncResult>('/tools/certification-tickets/sync'),
       syncProgress: () => request<SyncProgress>('/tools/certification-tickets/sync/progress'),
+    },
+    commercialCoding: {
+      list: () => request<CommercialCodingTicket[]>('/tools/commercial-coding'),
+      sync: () => post<CommercialCodingSyncResult>('/tools/commercial-coding/sync'),
+      getSettings: () => request<CommercialCodingSettings>('/tools/commercial-coding/settings'),
+      updateSettings: (data: CommercialCodingSettings) =>
+        put<CommercialCodingSettings>('/tools/commercial-coding/settings', data),
+      syncProgress: () => request<SyncProgress>('/tools/commercial-coding/sync/progress'),
     },
     shipping: {
       addresses: () => request<ShippingAddress[]>('/tools/shipping/addresses'),

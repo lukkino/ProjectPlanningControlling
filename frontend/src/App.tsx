@@ -26,12 +26,13 @@ import { SnapshotsPage } from './pages/SnapshotsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { CertificationTicketsPage } from './pages/tools/CertificationTicketsPage'
+import { CommercialCodingPage } from './pages/tools/CommercialCodingPage'
 import { PurchaseRequisitionsPage } from './pages/tools/PurchaseRequisitionsPage'
 import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/rda', '/workload']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/rda', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -76,6 +77,7 @@ export default function App() {
           <Route path="/changelog" element={<ChangelogPage />} />
           <Route path="/tools/spedizioni" element={<ShippingToolPage />} />
           <Route path="/tools/certificazioni" element={<CertificationTicketsPage />} />
+          <Route path="/tools/commercial-coding" element={<CommercialCodingPage />} />
           <Route path="/tools/rda" element={<PurchaseRequisitionsPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>

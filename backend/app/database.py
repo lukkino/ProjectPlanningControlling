@@ -149,6 +149,9 @@ def run_lightweight_migrations() -> None:
         if "d365_requisitions_url" not in settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE user_settings ADD COLUMN d365_requisitions_url TEXT"))
+        if "cc_tickets_url" not in settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_settings ADD COLUMN cc_tickets_url TEXT"))
 
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}

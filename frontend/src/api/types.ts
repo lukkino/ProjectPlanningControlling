@@ -967,6 +967,41 @@ export type CertificationTicket = {
 
 export type CertificationSyncResult = { created: number; updated: number; removed: number; total: number }
 
+// Tool Commercial Coding: un ticket della lista SharePoint "Tickets" (sito Development).
+export type CommercialCodingTicket = {
+  id: number
+  item_id: number
+  description: string | null
+  vendor: string | null
+  vendor_code: string | null
+  family: string | null
+  status: string | null
+  final_coding: string | null
+  change_reason: string | null
+  certification_ticket: string | null
+  department: string | null
+  agent: string | null
+  author: string | null
+  has_attachments: boolean
+  // Dati tecnici dell'articolo (temperature, umidita'...): {etichetta: valore}.
+  details: Record<string, string | null>
+  created_at: string | null
+  modified_at: string | null
+  synced_at: string | null
+  url: string
+  certification_url: string | null
+}
+
+export type CommercialCodingSettings = { list_url: string; default_url?: string }
+
+export type CommercialCodingSyncResult = {
+  created: number
+  updated: number
+  removed: number
+  total: number
+  account: string | null
+}
+
 // Tool Modulo Spedizioni: rubriche.
 export type ShippingAddress = {
   id: number

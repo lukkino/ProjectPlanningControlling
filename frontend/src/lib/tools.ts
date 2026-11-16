@@ -24,6 +24,13 @@ export const TOOLS: ToolInfo[] = [
       'I tuoi ticket del portale Product Certification (Freshservice): stato, articolo, manufacturer e codici, letti dal portale con un clic.',
   },
   {
+    path: '/tools/commercial-coding',
+    icon: '🔖',
+    name: 'Commercial Coding',
+    description:
+      'I tuoi ticket di Commercial Coding (lista Tickets di SharePoint Development): articolo, vendor, famiglia, stato e codifica finale, letti con un clic.',
+  },
+  {
     path: '/tools/spedizioni',
     icon: '🚚',
     name: 'Modulo Spedizioni',

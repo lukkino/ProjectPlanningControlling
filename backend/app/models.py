@@ -1180,6 +1180,38 @@ class CertificationTicket(Base):
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class CommercialCodingTicket(Base):
+    """Tool Commercial Coding: un ticket della lista SharePoint "Tickets" del
+    sito Development creato dall'utente, letto con le API REST di SharePoint
+    (vedi services/tools/commercial_coding.py). I dati tecnici
+    dell'articolo (temperature, umidita'...) come JSON {etichetta: valore}."""
+
+    __tablename__ = "tool_commercial_coding_tickets"
+    __table_args__ = (UniqueConstraint("owner_id", "item_id", name="uq_cc_tickets_owner_item"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # ID dell'elemento nella lista SharePoint.
+    item_id: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vendor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vendor_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    family: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    final_coding: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    change_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Numero del ticket del portale Product Certification (Freshservice).
+    certification_ticket: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    has_attachments: Mapped[bool] = mapped_column(Boolean, default=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    modified_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ShippingAddress(Base):
     """Tool Modulo Spedizioni: rubrica indirizzi (mittenti e destinatari)."""
 
@@ -1260,6 +1292,9 @@ class UserSettings(Base):
     # Tool RDA: link all'elenco "Richieste di acquisto preparate dall'utente"
     # in Dynamics 365 (ambiente e societa'); None = quello predefinito.
     d365_requisitions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tool Commercial Coding: link alla lista SharePoint dei ticket (vuoto =
+    # quella predefinita, vedi services/tools/commercial_coding.py).
+    cc_tickets_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PurchaseRequisition(Base):
