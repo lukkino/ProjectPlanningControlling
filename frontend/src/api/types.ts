@@ -145,6 +145,8 @@ export type HoursCalculator = {
   start_date: string | null
   end_date: string | null
   vacation_days: number
+  // Fattore correttivo (%) delle ore del team: 100 = nessuna correzione.
+  correction_percent: number
   resource_types: IncrementResourceType[]
   // Assenze delle persone del Team del Carico team, per nome (vedi teamKey).
   team_absences?: TeamAbsencesByName

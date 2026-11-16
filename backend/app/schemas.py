@@ -240,6 +240,7 @@ class HoursCalculatorUpdate(BaseModel):
     start_date: dt.date | None = None
     end_date: dt.date | None = None
     vacation_days: float | None = Field(default=None, ge=0)
+    correction_percent: float | None = Field(default=None, gt=0, le=100)
 
 
 class TeamAbsenceRef(BaseModel):
@@ -261,6 +262,8 @@ class HoursCalculator(BaseModel):
     start_date: dt.date | None = None
     end_date: dt.date | None = None
     vacation_days: float = 0
+    # Fattore correttivo (%) delle ore del team: 100 = nessuna correzione.
+    correction_percent: float = 100
     resource_types: list[IncrementResourceType] = []
     # Assenze delle persone del Team del Carico team (stesso proprietario),
     # per nome normalizzato (minuscolo, spazi singoli): valgono anche per le

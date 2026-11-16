@@ -42,6 +42,9 @@ class Increment(Base):
     calc_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     calc_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     calc_vacation_days: Mapped[float] = mapped_column(Float, default=0)
+    # Fattore correttivo (%) applicato alle ore del team: 85 = ore ridotte
+    # del 15% (riunioni, attivita' non di progetto...).
+    calc_correction_percent: Mapped[float] = mapped_column(Float, default=100)
     # "Congela budget": da qui il budget iniziale (Dettaglio budget ore e
     # Dettaglio materiali) non cambia piu', solo le review (services/budget.py).
     budget_frozen_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)

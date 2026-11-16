@@ -67,6 +67,7 @@ def _hours_calculator(increment: models.Increment) -> schemas.HoursCalculator:
         start_date=increment.calc_start_date,
         end_date=increment.calc_end_date,
         vacation_days=increment.calc_vacation_days or 0,
+        correction_percent=increment.calc_correction_percent or 100,
         resource_types=list(increment.resource_types),
         team_absences={team_key(r.name): list(r.absences) for r in people if r.absences},
         team_people=sorted(r.name for r in people),
@@ -449,8 +450,13 @@ def get_hours_calculator(increment_id: int, db: Session = Depends(get_db)):
 def update_hours_calculator(increment_id: int, payload: schemas.HoursCalculatorUpdate, db: Session = Depends(get_db)):
     increment = _get_increment_or_404(db, increment_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
-        # vacation_days non e' annullabile: un valore vuoto vale 0.
-        setattr(increment, f"calc_{field}", (value or 0) if field == "vacation_days" else value)
+        # vacation_days e correction_percent non sono annullabili: un valore
+        # vuoto vale 0 (nessuna chiusura) e 100 (nessuna correzione).
+        if field == "vacation_days":
+            value = value or 0
+        elif field == "correction_percent":
+            value = value or 100
+        setattr(increment, f"calc_{field}", value)
     db.commit()
     db.refresh(increment)
     return _hours_calculator(increment)

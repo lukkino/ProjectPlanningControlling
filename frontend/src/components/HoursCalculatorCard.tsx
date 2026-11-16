@@ -16,7 +16,8 @@ type Props = {
 }
 
 const fmt = (value: number) => value.toLocaleString('it-IT', { maximumFractionDigits: 2 })
-// Quota FTE della persona sul progetto (100% = 1).
+// Quota delle ore al giorno che la persona lavora (100% = tempo pieno,
+// 50% = part-time). Non c'entra con il fattore correttivo del totale.
 const memberFte = (m: TeamMember) => (m.fte_percent ?? 100) / 100
 // Ore di una giornata piena: 1 FTE.
 const HOURS_PER_FTE = 8
@@ -158,7 +159,7 @@ export function AbsencesCell({
   )
 }
 
-// Celle per aggiungere una persona a una tipologia: nome, % FTE e
+// Celle per aggiungere una persona a una tipologia: nome, % ore e
 // "+ Aggiungi" (o Invio nel nome). Occupano le colonne Persona, Reparto,
 // Societa' e N. risorse.
 function NewMemberCells({
@@ -211,7 +212,7 @@ function NewMemberCells({
         </button>
         {pending && <div className="capacity-pending">⚠ premi + Aggiungi persona (o Invio) per salvarla</div>}
       </td>
-      <td className="editable-cell" title="Quota del tempo della nuova persona dedicata al progetto (100% = tempo pieno)">
+      <td className="editable-cell" title="Quota delle ore al giorno che la nuova persona lavora (100% = tempo pieno, 50% = part-time)">
         <span className="fte-input">
           <input
             type="number"
@@ -219,7 +220,7 @@ function NewMemberCells({
             max={100}
             step={5}
             className="text-right"
-            aria-label={`% FTE della nuova persona di ${typeName}`}
+            aria-label={`% ore della nuova persona di ${typeName}`}
             value={fte}
             onChange={(e) => setFte(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && add()}
@@ -375,12 +376,16 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   const totalResources = calc.resource_types.reduce((sum, t) => sum + typeResources(t), 0)
   const totalDailyHours = calc.resource_types.reduce((sum, t) => sum + typeDailyHours(t), 0)
   const totalAbsenceDays = calc.resource_types.reduce((sum, t) => sum + typeAbsenceDays(t), 0)
-  const totalHours = netDays === null ? null : calc.resource_types.reduce((sum, t) => sum + (hoursOf(t) ?? 0), 0)
+  // Ore delle righe (senza correzione) e capacity del team: il fattore
+  // correttivo si applica solo al totale (85% = -15%).
+  const correction = (calc.correction_percent ?? 100) / 100
+  const rawHours = netDays === null ? null : calc.resource_types.reduce((sum, t) => sum + (hoursOf(t) ?? 0), 0)
+  const totalHours = rawHours === null ? null : rawHours * correction
   const teamSize = calc.resource_types.reduce((sum, t) => sum + t.members.length, 0)
   // FTE (Full Time Equivalent): ore/giorno del team su una giornata piena di
   // 8 ore; effettivo = capacity del periodo (ferie comprese) sui giorni
   // disponibili a tempo pieno.
-  const totalFte = totalResources
+  const totalFte = totalDailyHours / HOURS_PER_FTE
   const effectiveFte = totalHours !== null && netDays ? totalHours / (netDays * HOURS_PER_FTE) : null
 
   const toggle = (id: number) =>
@@ -396,7 +401,15 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   const publishRows = () =>
     calc.resource_types.flatMap((t) => {
       if (t.members.length === 0)
-        return [{ name: t.name, department: t.department, company: t.company, resource_count: t.resource_count, hours: hoursOf(t) ?? 0 }]
+        return [
+          {
+            name: t.name,
+            department: t.department,
+            company: t.company,
+            resource_count: t.resource_count,
+            hours: (hoursOf(t) ?? 0) * correction,
+          },
+        ]
       const companies = [...new Set(t.members.map((m) => m.company))]
       return companies.map((company) => {
         const members = t.members.filter((m) => m.company === company)
@@ -405,7 +418,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
           department: t.department,
           company,
           resource_count: members.length,
-          hours: members.reduce((sum, m) => sum + (memberHours(m) ?? 0), 0),
+          hours: members.reduce((sum, m) => sum + (memberHours(m) ?? 0), 0) * correction,
         }
       })
     })
@@ -481,7 +494,10 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
 
       {/* key: i campi non controllati vanno ricreati quando il valore salvato cambia. */}
-      <div className="grid-3" key={`${calc.start_date}|${calc.end_date}|${calc.vacation_days}`}>
+      <div
+        className="grid-4"
+        key={`${calc.start_date}|${calc.end_date}|${calc.vacation_days}|${calc.correction_percent}`}
+      >
         <div className="form-row">
           <label>Data di inizio{!calc.start_date && projectStartDate && ' (dal progetto)'}</label>
           {/* Campo svuotato: si torna alla data del progetto. */}
@@ -502,6 +518,25 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
               const value = parseNumber(e.target.value)
               if (value !== calc.vacation_days) updateCalc.mutate({ vacation_days: value })
               else e.target.value = String(calc.vacation_days)
+            }}
+          />
+        </div>
+        <div
+          className="form-row"
+          title="Percentuale delle ore del team che diventa capacity effettiva: 85% riduce il totale del 15% (riunioni, attività non di progetto...). 100% = nessuna correzione."
+        >
+          <label>Fattore correttivo ore (%)</label>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            step={1}
+            aria-label="Fattore correttivo ore (%)"
+            defaultValue={calc.correction_percent ?? 100}
+            onBlur={(e) => {
+              const value = Math.min(100, parseNumber(e.target.value)) || 100
+              if (value !== calc.correction_percent) updateCalc.mutate({ correction_percent: value })
+              else e.target.value = String(calc.correction_percent)
             }}
           />
         </div>
@@ -526,14 +561,16 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
         </div>
         <div className="stat-chip violet">
           <span className="value">{totalHours === null ? '—' : `${fmt(totalHours)} h`}</span>
-          <span className="label">Capacity totale del team</span>
+          <span className="label">
+            Capacity totale del team{correction !== 1 && ` (× ${fmt(calc.correction_percent)}%)`}
+          </span>
         </div>
         <div
           className="stat-chip blue"
           title={
-            `Somma degli FTE: % FTE delle persone, o numero di risorse per le tipologie stimate (${fmt(totalDailyHours)} h/giorno in tutto)` +
+            `Ore produttive al giorno del team (${fmt(totalDailyHours)} h, già con la % delle persone part-time) su giornate di ${HOURS_PER_FTE} h` +
             (effectiveFte === null ? '' : `
-Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
+Effettivi nel periodo, con ferie, malattie e fattore correttivo: ${fmt(effectiveFte)} FTE`)
           }
         >
           <span className="value">{fmt(totalFte)}</span>
@@ -622,7 +659,7 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                     {hasMembers ? (
                       <td
                         className="text-right"
-                        title={`Somma degli FTE delle ${t.members.length} persone (ognuna con la sua % FTE)`}
+                        title={`Somma delle % delle ${t.members.length} persone (part-time in proporzione)`}
                       >
                         <strong>{fmt(typeResources(t))}</strong>
                       </td>
@@ -643,7 +680,7 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                       </td>
                     )}
                     {hasMembers ? (
-                      <td className="text-right" title="Somma delle ore al giorno delle persone, per la loro % FTE">
+                      <td className="text-right" title="Somma delle ore al giorno delle persone, per la loro %">
                         <strong>{fmt(typeDailyHours(t))} h</strong>
                       </td>
                     ) : (
@@ -712,7 +749,7 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                           <td className="editable-cell">
                             {companySelect(m.company, (company) => updateMember.mutate({ id: m.id, data: { company } }), `Società di ${m.name}`)}
                           </td>
-                          <td className="editable-cell" title="Quota del tempo della persona dedicata al progetto (100% = tempo pieno)">
+                          <td className="editable-cell" title="Quota delle ore al giorno che la persona lavora (100% = tempo pieno, 50% = part-time)">
                             <span className="fte-input">
                               <input
                                 type="number"
@@ -720,7 +757,7 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                                 max={100}
                                 step={5}
                                 className="text-right"
-                                aria-label={`% FTE di ${m.name}`}
+                                aria-label={`% ore di ${m.name}`}
                                 defaultValue={m.fte_percent}
                                 key={`fte-${m.id}-${m.fte_percent}`}
                                 onBlur={(e) => {
@@ -732,19 +769,29 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                               %
                             </span>
                           </td>
-                          <td className="editable-cell">
+                          {/* Ore produttive al giorno gia' con la % della persona (8 h al
+                              50% = 4 h). Il valore inserito vale per la % attuale: si salva
+                              la giornata piena corrispondente (4 h al 50% = 8 h). */}
+                          <td
+                            className="editable-cell"
+                            title={`Ore al giorno già con la % della persona: ${fmt(m.hours_per_day)} h di giornata piena × ${fmt(m.fte_percent ?? 100)}%`}
+                          >
                             <input
+                              key={`h-${m.id}-${m.hours_per_day}-${m.fte_percent}`}
                               type="number"
                               min={0}
                               max={24}
                               step={0.5}
                               className="text-right"
-                              defaultValue={m.hours_per_day}
+                              aria-label={`Ore produttive al giorno di ${m.name}`}
+                              defaultValue={Math.round(m.hours_per_day * memberFte(m) * 100) / 100}
                               onBlur={(e) => {
+                                const shown = Math.round(m.hours_per_day * memberFte(m) * 100) / 100
                                 const value = Math.min(24, parseNumber(e.target.value))
-                                if (value !== m.hours_per_day)
-                                  updateMember.mutate({ id: m.id, data: { hours_per_day: value } })
-                                else e.target.value = String(m.hours_per_day)
+                                const fte = memberFte(m)
+                                if (value !== shown && fte > 0)
+                                  updateMember.mutate({ id: m.id, data: { hours_per_day: Math.min(24, value / fte) } })
+                                else e.target.value = String(shown)
                               }}
                             />
                           </td>
@@ -846,7 +893,16 @@ Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
                 </td>
                 <td className="muted">{totalAbsenceDays > 0 && `${fmt(totalAbsenceDays)} gg in tutto`}</td>
                 <td className="text-right">
-                  <strong>{totalHours === null ? '—' : `${fmt(totalHours)} h`}</strong>
+                  {correction !== 1 && rawHours !== null ? (
+                    <>
+                      <span className="muted">{fmt(rawHours)} h</span>
+                      <div title="Ore del team per il fattore correttivo">
+                        × {fmt(calc.correction_percent)}% = <strong>{fmt(totalHours ?? 0)} h</strong>
+                      </div>
+                    </>
+                  ) : (
+                    <strong>{totalHours === null ? '—' : `${fmt(totalHours)} h`}</strong>
+                  )}
                 </td>
                 <td />
               </tr>

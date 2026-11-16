@@ -510,6 +510,7 @@ def run_budget_migrations() -> None:
             ("budget_frozen_at", "DATETIME"),
             ("budget_corrected_at", "DATETIME"),
             ("sidebar_pinned", "BOOLEAN DEFAULT 0"),
+            ("calc_correction_percent", "FLOAT DEFAULT 100"),
         ],
         "projects": [("sidebar_pinned", "BOOLEAN DEFAULT 0")],
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],

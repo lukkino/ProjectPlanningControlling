@@ -11,17 +11,23 @@ foglio della propria review e quelli delle review precedenti:
 - foglio della review: nuovo, dal template (per il Planning con la sezione
   "Deliverable Check" compilata dal popup);
 - fogli delle review precedenti e Action Items: dall'ultimo documento della
-  fase precedente (es. per l'Execution dall'ultimo Planning).
+  fase precedente (es. per l'Execution dall'ultimo Planning);
+- foglio della review: data in alto dalla fase dell'increment con lo stesso
+  nome (data aggiornata) e Meeting Minutes dall'ultima versione dello stesso
+  documento.
 
 Si usa Excel via COM e non openpyxl: openpyxl scarta il logo
 nell'intestazione e i menu a tendina dei fogli di review, e non sa copiare
 fogli da un file all'altro. Serve quindi Excel installato dove gira il
 backend; le generazioni sono una alla volta (una sola istanza di Excel)."""
 
+import datetime as dt
 import re
 import shutil
 import tempfile
 import threading
+import zipfile
+from xml.sax.saxutils import escape
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
@@ -680,6 +686,155 @@ def _read_attendees(wb, sheet_name: str) -> list[tuple[str, str]] | None:
     return attendees
 
 
+def _review_date(project: models.Project, doc_type: str) -> dt.date | None:
+    """Data della review: quella aggiornata (pianificata) della fase
+    dell'increment con lo stesso nome (es. "Execution"), o l'originale se
+    manca."""
+    label = _norm(PPR_DOCUMENT_TYPES[doc_type].label)
+    phase = next((ph for ph in project.phases if _norm(ph.name) == label), None)
+    if phase is None:
+        return None
+    return phase.planned_date or phase.original_date
+
+
+def _fill_date(sheet, date: dt.date) -> None:
+    """Data in alto nel foglio della review (riga "Date", colonna D), al
+    posto del segnaposto arancione "YYYY/MM/DD", in nero. Scritta come
+    numero di serie di Excel (giorni dal 30/12/1899): un datetime passato
+    via COM viene spostato dal fuso orario (25/11 -> 24/11 23:00); il
+    formato data e' gia' quello della cella del template."""
+    row = next((r for r in range(1, 10) if _norm(sheet.Cells(r, 1).Value) == "date"), None)
+    if row is None:
+        return
+    cell = sheet.Cells(row, 4)
+    cell.MergeArea.ClearContents()
+    cell.Value = (date - dt.date(1899, 12, 30)).days
+    cell.MergeArea.Font.Color = 0  # nero
+
+
+def _minutes_row(sheet) -> int | None:
+    """Riga del titolo "Meeting Minutes" del foglio di una review."""
+    for row in range(1, _used_rows(sheet) + 1):
+        if _norm(sheet.Cells(row, 1).Value) == "meeting minutes":
+            return row
+    return None
+
+
+def _copy_minutes(source, target) -> bool:
+    """Meeting Minutes dell'ultima versione del documento (tutte le righe
+    sotto il titolo, tabelle e formattazione comprese) al posto del
+    segnaposto del template. Niente se nell'ultima versione c'era ancora il
+    segnaposto."""
+    source_title = _minutes_row(source)
+    target_title = _minutes_row(target)
+    if source_title is None or target_title is None:
+        return False
+    source_last = _used_rows(source)
+    if source_last <= source_title:
+        return False
+    texts = [
+        _norm(source.Cells(r, c).Value)
+        for r in range(source_title + 1, source_last + 1)
+        for c in range(1, 11)
+        if source.Cells(r, c).Value not in (None, "")
+    ]
+    if not texts or all(t.startswith("report here the meeting minutes") for t in texts):
+        return False
+    target_last = _used_rows(target)
+    if target_last > target_title:
+        target.Rows(f"{target_title + 1}:{target_last}").Delete()
+    source.Rows(f"{source_title + 1}:{source_last}").Copy(target.Rows(target_title + 1))
+    return True
+
+
+# Metadati SharePoint dentro un file Office: le proprieta' delle colonne
+# della raccolta (documentManagement: Owner, Increment, Phase,
+# DocumentType...), lo schema del tipo di contenuto e il suo id
+# (ContentTypeId in docProps/custom.xml). Il template MOD-PPR ha quelli
+# della raccolta dei template (tipo "Templates", altri owner): caricato
+# nella raccolta delle review, un file cosi' finisce in un tipo di
+# contenuto indeterminato. Si prendono quindi dall'ultima versione dello
+# stesso documento, che e' gia' nella raccolta giusta.
+_SP_PROPERTIES = "<documentManagement"
+_SP_SCHEMA = "contentTypeSchema"
+_CONTENT_TYPE_ID_RE = re.compile(r'(name="ContentTypeId"><vt:lpwstr>)([^<]*)(<)')
+
+
+def _sp_parts(files: dict[str, bytes]) -> dict[str, tuple[str, str]]:
+    """Parti customXml con i metadati SharePoint, per tipo ("properties",
+    "schema"): (item, itemProps)."""
+    parts = {}
+    for name, data in files.items():
+        m = re.fullmatch(r"customXml/item(\d+)\.xml", name)
+        if not m:
+            continue
+        text = data.decode("utf-8", "replace")
+        kind = "properties" if _SP_PROPERTIES in text else "schema" if _SP_SCHEMA in text else None
+        props = f"customXml/itemProps{m.group(1)}.xml"
+        if kind and props in files:
+            parts[kind] = (name, props)
+    return parts
+
+
+def _set_sp_field(xml: str, field: str, value: str) -> str:
+    """Valore di una colonna semplice (testo) nelle proprieta' SharePoint."""
+    pattern = re.compile(rf"<{field}( [^>]*?)?(/>|>[^<]*</{field}>)")
+    match = pattern.search(xml)
+    if match is None:
+        return xml
+    attrs = re.sub(r'\s*xsi:nil="true"', "", match.group(1) or "")
+    return xml[: match.start()] + f"<{field}{attrs}>{escape(value)}</{field}>" + xml[match.end() :]
+
+
+def _sp_field(xml: str, field: str) -> str | None:
+    match = re.search(rf"<{field}(?: [^>]*)?>([^<]*)</{field}>", xml)
+    return match.group(1) if match else None
+
+
+def _copy_sharepoint_metadata(content: bytes, source: bytes, increment: str, increment_name: str) -> bytes:
+    """Metadati SharePoint di source (ultima versione del documento) nel file
+    generato, con Increment e Note del nuovo increment. Il file resta com'e'
+    se source non ha i metadati di una raccolta."""
+    with zipfile.ZipFile(BytesIO(source)) as z:
+        src = {n: z.read(n) for n in z.namelist()}
+    src_parts = _sp_parts(src)
+    src_custom = src.get("docProps/custom.xml", b"").decode("utf-8", "replace")
+    src_ct = _CONTENT_TYPE_ID_RE.search(src_custom)
+    if "properties" not in src_parts or src_ct is None:
+        return content
+
+    with zipfile.ZipFile(BytesIO(content)) as z:
+        infos = z.infolist()
+        files = {i.filename: z.read(i.filename) for i in infos}
+    parts = _sp_parts(files)
+    for kind, (src_item, src_props) in src_parts.items():
+        if kind not in parts:
+            continue
+        item, props = parts[kind]
+        data = src[src_item]
+        if kind == "properties":
+            xml = data.decode("utf-8")
+            # Note dell'ultima versione solo se era dello stesso increment
+            # (es. "PTBSYS-03-002 - ..." non vale per il 03-003).
+            if _sp_field(xml, "Increment") != increment:
+                xml = _set_sp_field(xml, "Note", f"{increment} - {increment_name}".rstrip(" -"))
+            xml = _set_sp_field(xml, "Increment", increment)
+            data = xml.encode("utf-8")
+        files[item] = data
+        files[props] = src[src_props]
+    if "docProps/custom.xml" in files:
+        custom = files["docProps/custom.xml"].decode("utf-8")
+        files["docProps/custom.xml"] = _CONTENT_TYPE_ID_RE.sub(
+            lambda m: m.group(1) + src_ct.group(2) + m.group(3), custom
+        ).encode("utf-8")
+
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for info in infos:
+            z.writestr(info, files[info.filename])
+    return out.getvalue()
+
+
 def _fill_deliverables(sheet, deliverables: list[dict]) -> None:
     by_index = {d.get("row"): d for d in deliverables}
     for row in range(1, _used_rows(sheet) + 1):
@@ -744,6 +899,7 @@ def generate_ppr_document(
             (tmp / name).write_bytes(content)
             return excel.Workbooks.Open(str(tmp / name), UpdateLinks=0, ReadOnly=True)
 
+        previous_wb = open_source(previous, "previous.xlsx") if previous is not None else None
         if previous_phase is not None:
             phase_wb = open_source(previous_phase, "previous_phase.xlsx")
             for name in [*earlier_sheets, ACTION_ITEMS]:
@@ -770,6 +926,11 @@ def generate_ppr_document(
             _fill_attendees(base.Worksheets(config.sheet), attendees)
         if doc_type == "planning":
             _fill_deliverables(base.Worksheets(config.sheet), deliverables or [])
+        review_date = _review_date(project, doc_type)
+        if review_date is not None:
+            _fill_date(base.Worksheets(config.sheet), review_date)
+        if previous_wb is not None and config.sheet in [ws.Name for ws in previous_wb.Worksheets]:
+            _copy_minutes(previous_wb.Worksheets(config.sheet), base.Worksheets(config.sheet))
 
         # Codice documento nel pie' di pagina a sinistra, sotto "MOD-PPR.1":
         # al posto di "Document code" del template o del codice della
@@ -783,10 +944,18 @@ def generate_ppr_document(
             page_setup.LeftFooter = footer if count else f"{footer}\n{code}".lstrip("\n")
         excel.PrintCommunication = True
 
+        # Proprieta' del file: autore e ultimo a modificarlo il project
+        # manager, non chi ha creato il template.
+        properties = base.BuiltinDocumentProperties
+        properties("Author").Value = PROJECT_MANAGER
+        properties("Last Author").Value = PROJECT_MANAGER
+
         cover.Activate()
         cover.Range("A1").Select()
         out = tmp / "out.xlsx"
         base.SaveAs(str(out), FileFormat=XL_OPEN_XML_WORKBOOK)
         base.Close(SaveChanges=False)
         content = out.read_bytes()
+    if previous is not None:
+        content = _copy_sharepoint_metadata(content, previous, _increment_code(project), project.name or "")
     return content, config.filename
