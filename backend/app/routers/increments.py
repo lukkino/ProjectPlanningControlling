@@ -507,6 +507,7 @@ def create_team_member(resource_type_id: int, payload: schemas.TeamMemberCreate,
         name=name,
         hours_per_day=resource_type.hours_per_day if payload.hours_per_day is None else payload.hours_per_day,
         company=payload.company or resource_type.company,
+        fte_percent=payload.fte_percent,
         order=max((m.order for m in resource_type.members), default=0) + 1,
     )
     db.add(member)

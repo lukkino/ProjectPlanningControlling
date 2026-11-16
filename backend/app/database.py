@@ -513,7 +513,7 @@ def run_budget_migrations() -> None:
         ],
         "projects": [("sidebar_pinned", "BOOLEAN DEFAULT 0")],
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
-        "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'")],
+        "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'"), ("fte_percent", "FLOAT DEFAULT 100")],
         "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
     }
     for table, columns in added.items():

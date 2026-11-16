@@ -310,6 +310,8 @@ export function ComplaintsPage() {
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [fixVersionFilter, setFixVersionFilter] = useState<Set<string>>(new Set())
   const [tsbFilter, setTsbFilter] = useState<Set<string>>(new Set())
+  // Chiusi nell'anno (data di chiusura su Jira: Done/Rejected); '' = tutti.
+  const [closedYear, setClosedYear] = useState('')
   const [search, setSearch] = useState('')
   const searchWords = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
@@ -339,6 +341,11 @@ export function ComplaintsPage() {
   const severityCounts = countBy(all, (c) => [c.severity ?? NO_SEVERITY])
   const fixVersionCounts = countBy(all, fixVersionsOf)
   const tsbCounts = countBy(all, (c) => [tsbOf(c)])
+  // Anni di chiusura: da quest'anno indietro fino al primo con chiusure.
+  const closedCounts = countBy(all, (c) => (c.jira_resolved ? [c.jira_resolved.slice(0, 4)] : []))
+  const currentYear = new Date().getFullYear()
+  const firstClosedYear = Math.min(currentYear, ...[...closedCounts.keys()].map(Number))
+  const closedYears = Array.from({ length: currentYear - firstClosedYear + 1 }, (_, i) => String(currentYear - i))
 
   const architectureOptions = architectureCounts.has(NO_ARCHITECTURE) ? [...ARCHITECTURES, NO_ARCHITECTURE] : ARCHITECTURES
   const jiraOptions = [...jiraCounts.keys()]
@@ -382,6 +389,7 @@ export function ComplaintsPage() {
         (severityFilter.size === 0 || severityFilter.has(c.severity ?? NO_SEVERITY)) &&
         (fixVersionFilter.size === 0 || fixVersionsOf(c).some((v) => fixVersionFilter.has(v))) &&
         (tsbFilter.size === 0 || tsbFilter.has(tsbOf(c))) &&
+        (!closedYear || (c.jira_resolved ?? '').startsWith(closedYear)) &&
         matchesSearch(c, searchWords),
     )
     .sort((a, b) => {
@@ -403,6 +411,7 @@ export function ComplaintsPage() {
       fixVersionFilter.size +
       tsbFilter.size >
       0 ||
+    !!closedYear ||
     searchWords.length > 0
   const clearFilters = () => {
     setSearch('')
@@ -412,6 +421,7 @@ export function ComplaintsPage() {
     setSeverityFilter(new Set())
     setFixVersionFilter(new Set())
     setTsbFilter(new Set())
+    setClosedYear('')
   }
 
   const sortHeader = (key: SortKey, label: string, ascTitle: string, descTitle: string, clickTitle: string) => (
@@ -853,6 +863,24 @@ export function ComplaintsPage() {
             selected={tsbFilter}
             onToggle={(v) => setTsbFilter((s) => toggled(s, v))}
           />
+          <div className="filter-group">
+            <span className="filter-group-label" title="Data di chiusura su Jira (passaggio a Done o Rejected)">
+              Chiusi nell'anno
+            </span>
+            <select
+              value={closedYear}
+              aria-label="Complaint chiusi nell'anno"
+              className={closedYear ? 'filter-select-active' : undefined}
+              onChange={(e) => setClosedYear(e.target.value)}
+            >
+              <option value="">Tutti</option>
+              {closedYears.map((y) => (
+                <option key={y} value={y}>
+                  {y} ({closedCounts.get(y) ?? 0})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>

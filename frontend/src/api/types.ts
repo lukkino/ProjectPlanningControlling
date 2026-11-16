@@ -88,6 +88,9 @@ export type TeamMember = {
   name: string
   hours_per_day: number
   company: Company
+  // Quota del tempo dedicata al progetto (100 = tempo pieno): le ore della
+  // persona e gli FTE della tipologia ne tengono conto.
+  fte_percent: number
   order: number
   absences: MemberAbsence[]
 }

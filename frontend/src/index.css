@@ -1551,3 +1551,9 @@ ul.changelog-body { padding-left: 20px; }
 .scope-check ul { margin: 0; padding-left: 18px; }
 .scope-check p { margin: 2px 0; }
 .scope-check details { margin-top: 10px; }
+.filter-select-active { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.fte-input { display: inline-flex; align-items: center; gap: 2px; }
+.fte-input input { width: 64px; }
+.capacity-add-member { padding: 2px 10px; font-size: 12px; white-space: nowrap; }
+.company-select { min-width: 72px; }
+.capacity-pending { color: var(--warning); font-size: 11px; font-weight: 600; margin-top: 2px; white-space: nowrap; }

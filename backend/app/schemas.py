@@ -204,12 +204,15 @@ class TeamMemberCreate(BaseModel):
     hours_per_day: float | None = Field(default=None, ge=0, le=24)
     # None = la societa' della tipologia.
     company: Literal["SpA", "SA", "TPM"] | None = None
+    # Quota FTE sul progetto (100 = tempo pieno).
+    fte_percent: float = Field(default=100, ge=0, le=100)
 
 
 class TeamMemberUpdate(BaseModel):
     name: str | None = None
     hours_per_day: float | None = Field(default=None, ge=0, le=24)
     company: Literal["SpA", "SA", "TPM"] | None = None
+    fte_percent: float | None = Field(default=None, ge=0, le=100)
     order: int | None = None
 
 
@@ -220,6 +223,7 @@ class TeamMember(BaseModel):
     name: str
     hours_per_day: float
     company: str = "SpA"
+    fte_percent: float = 100
     order: int
     absences: list[MemberAbsence] = []
 

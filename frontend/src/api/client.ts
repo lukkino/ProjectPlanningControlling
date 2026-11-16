@@ -343,9 +343,12 @@ export const api = {
       put<IncrementResourceType>(`/increments/resource-types/${id}`, data),
     removeResourceType: (id: number) => del(`/increments/resource-types/${id}`),
     // Persone del team di una tipologia e le loro ferie.
-    addMember: (resourceTypeId: number, data: { name: string; hours_per_day?: number }) =>
+    addMember: (resourceTypeId: number, data: { name: string; hours_per_day?: number; fte_percent?: number }) =>
       post<TeamMember>(`/increments/resource-types/${resourceTypeId}/members`, data),
-    updateMember: (id: number, data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company' | 'order'>>) =>
+    updateMember: (
+      id: number,
+      data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company' | 'fte_percent' | 'order'>>,
+    ) =>
       put<TeamMember>(`/increments/members/${id}`, data),
     removeMember: (id: number) => del(`/increments/members/${id}`),
     addAbsence: (

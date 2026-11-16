@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { AbsenceKind, Company, HoursCalculator, IncrementResourceType, MemberAbsence, TeamMember } from '../api/types'
 import { formatIsoDate, workingDaysBetween } from '../lib/dates'
@@ -15,7 +15,11 @@ type Props = {
   projectEndDate: string | null
 }
 
-const fmt = (value: number) => value.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+const fmt = (value: number) => value.toLocaleString('it-IT', { maximumFractionDigits: 2 })
+// Quota FTE della persona sul progetto (100% = 1).
+const memberFte = (m: TeamMember) => (m.fte_percent ?? 100) / 100
+// Ore di una giornata piena: 1 FTE.
+const HOURS_PER_FTE = 8
 
 // Numero da un campo di input: vuoto o non valido = 0, mai negativo (accetta
 // anche la virgola decimale).
@@ -154,6 +158,79 @@ export function AbsencesCell({
   )
 }
 
+// Celle per aggiungere una persona a una tipologia: nome, % FTE e
+// "+ Aggiungi" (o Invio nel nome). Occupano le colonne Persona, Reparto,
+// Societa' e N. risorse.
+function NewMemberCells({
+  typeName,
+  adding,
+  onAdd,
+}: {
+  typeName: string
+  adding: boolean
+  onAdd: (name: string, ftePercent: number) => void
+}) {
+  const [name, setName] = useState('')
+  const [fte, setFte] = useState('100')
+  const ftePercent = Math.min(100, parseNumber(fte))
+  const pending = name.trim() !== ''
+  // Nome scritto ma non ancora aggiunto: ricaricando o chiudendo la pagina
+  // andrebbe perso, quindi il browser chiede conferma.
+  useEffect(() => {
+    if (!pending) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [pending])
+  const add = () => {
+    if (!name.trim() || adding) return
+    onAdd(name.trim(), ftePercent)
+    setName('')
+    setFte('100')
+  }
+  return (
+    <>
+      <td className="editable-cell" style={{ paddingLeft: 32 }}>
+        <input
+          placeholder="Nuova persona (nome)"
+          aria-label={`Nome della nuova persona di ${typeName}`}
+          list="capacity-team-people"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+        />
+      </td>
+      <td colSpan={2}>
+        <button
+          type="button"
+          className={`btn capacity-add-member${pending ? ' btn-primary' : ''}`}
+          disabled={!pending || adding}
+          onClick={add}
+        >
+          + Aggiungi persona
+        </button>
+        {pending && <div className="capacity-pending">⚠ premi + Aggiungi persona (o Invio) per salvarla</div>}
+      </td>
+      <td className="editable-cell" title="Quota del tempo della nuova persona dedicata al progetto (100% = tempo pieno)">
+        <span className="fte-input">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={5}
+            className="text-right"
+            aria-label={`% FTE della nuova persona di ${typeName}`}
+            value={fte}
+            onChange={(e) => setFte(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+          />
+          %
+        </span>
+      </td>
+    </>
+  )
+}
+
 // Capacity Planner (ex Calcolatore ore progetto): ore lavorative disponibili
 // nel periodo. Ogni tipologia di risorsa si espande nelle persone del team:
 // per ognuna (giorni disponibili - sue ferie/malattie) x le sue ore al giorno,
@@ -193,11 +270,12 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
     onSuccess: invalidate,
   })
   const addMember = useMutation({
-    mutationFn: ({ typeId, name }: { typeId: number; name: string }) => api.hoursCalculator.addMember(typeId, { name }),
+    mutationFn: ({ typeId, name, ftePercent }: { typeId: number; name: string; ftePercent: number }) =>
+      api.hoursCalculator.addMember(typeId, { name, fte_percent: ftePercent }),
     onSuccess: invalidate,
   })
   const updateMember = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company'>> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<Pick<TeamMember, 'name' | 'hours_per_day' | 'company' | 'fte_percent'>> }) =>
       api.hoursCalculator.updateMember(id, data),
     onSuccess: invalidate,
   })
@@ -273,10 +351,12 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   const memberAbsenceDays = (m: TeamMember) =>
     absenceDaysInPeriod([...m.absences, ...teamAbsencesOf(m)], startDate, endDate)
   const memberHours = (m: TeamMember) =>
-    netDays === null ? null : Math.max(0, netDays - memberAbsenceDays(m)) * m.hours_per_day
+    netDays === null ? null : Math.max(0, netDays - memberAbsenceDays(m)) * m.hours_per_day * memberFte(m)
 
-  // Valori di una tipologia: dalle persone se ce ne sono, altrimenti stimati.
-  const typeResources = (t: IncrementResourceType) => (t.members.length > 0 ? t.members.length : t.resource_count)
+  // Valori di una tipologia: dalle persone se ce ne sono (somma dei loro
+  // FTE), altrimenti stimati (numero di risorse).
+  const typeResources = (t: IncrementResourceType) =>
+    t.members.length > 0 ? t.members.reduce((sum, m) => sum + memberFte(m), 0) : t.resource_count
   const typeAbsenceDays = (t: IncrementResourceType) => t.members.reduce((sum, m) => sum + memberAbsenceDays(m), 0)
   const hoursOf = (t: IncrementResourceType) =>
     netDays === null
@@ -288,13 +368,20 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   // Ore che la tipologia puo' lavorare in un giorno senza ferie: somma delle
   // ore/giorno delle persone, o risorse x ore/giorno se e' solo stimata.
   const typeDailyHours = (t: IncrementResourceType) =>
-    t.members.length > 0 ? t.members.reduce((sum, m) => sum + m.hours_per_day, 0) : t.resource_count * t.hours_per_day
+    t.members.length > 0
+      ? t.members.reduce((sum, m) => sum + m.hours_per_day * memberFte(m), 0)
+      : t.resource_count * t.hours_per_day
 
   const totalResources = calc.resource_types.reduce((sum, t) => sum + typeResources(t), 0)
   const totalDailyHours = calc.resource_types.reduce((sum, t) => sum + typeDailyHours(t), 0)
   const totalAbsenceDays = calc.resource_types.reduce((sum, t) => sum + typeAbsenceDays(t), 0)
   const totalHours = netDays === null ? null : calc.resource_types.reduce((sum, t) => sum + (hoursOf(t) ?? 0), 0)
   const teamSize = calc.resource_types.reduce((sum, t) => sum + t.members.length, 0)
+  // FTE (Full Time Equivalent): ore/giorno del team su una giornata piena di
+  // 8 ore; effettivo = capacity del periodo (ferie comprese) sui giorni
+  // disponibili a tempo pieno.
+  const totalFte = totalResources
+  const effectiveFte = totalHours !== null && netDays ? totalHours / (netDays * HOURS_PER_FTE) : null
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -333,7 +420,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   }
 
   const companySelect = (value: Company, onChange: (company: Company) => void, label: string) => (
-    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Company)}>
+    <select className="company-select" aria-label={label} value={value} onChange={(e) => onChange(e.target.value as Company)}>
       {(catalog?.companies ?? ['SpA', 'SA', 'TPM']).map((c) => (
         <option key={c} value={c}>
           {c}
@@ -441,6 +528,17 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
           <span className="value">{totalHours === null ? '—' : `${fmt(totalHours)} h`}</span>
           <span className="label">Capacity totale del team</span>
         </div>
+        <div
+          className="stat-chip blue"
+          title={
+            `Somma degli FTE: % FTE delle persone, o numero di risorse per le tipologie stimate (${fmt(totalDailyHours)} h/giorno in tutto)` +
+            (effectiveFte === null ? '' : `
+Effettivi nel periodo, con ferie e malattie: ${fmt(effectiveFte)} FTE`)
+          }
+        >
+          <span className="value">{fmt(totalFte)}</span>
+          <span className="label">FTE del team</span>
+        </div>
       </div>
       {workingDays === null && (
         <p className="muted" style={{ marginTop: 0 }}>
@@ -522,8 +620,11 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                       </td>
                     )}
                     {hasMembers ? (
-                      <td className="text-right" title="Numero di persone del team in questa tipologia">
-                        {t.members.length}
+                      <td
+                        className="text-right"
+                        title={`Somma degli FTE delle ${t.members.length} persone (ognuna con la sua % FTE)`}
+                      >
+                        <strong>{fmt(typeResources(t))}</strong>
                       </td>
                     ) : (
                       <td className="editable-cell">
@@ -542,7 +643,7 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                       </td>
                     )}
                     {hasMembers ? (
-                      <td className="text-right" title="Somma delle ore al giorno delle persone">
+                      <td className="text-right" title="Somma delle ore al giorno delle persone, per la loro % FTE">
                         <strong>{fmt(typeDailyHours(t))} h</strong>
                       </td>
                     ) : (
@@ -611,7 +712,26 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                           <td className="editable-cell">
                             {companySelect(m.company, (company) => updateMember.mutate({ id: m.id, data: { company } }), `Società di ${m.name}`)}
                           </td>
-                          <td />
+                          <td className="editable-cell" title="Quota del tempo della persona dedicata al progetto (100% = tempo pieno)">
+                            <span className="fte-input">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={5}
+                                className="text-right"
+                                aria-label={`% FTE di ${m.name}`}
+                                defaultValue={m.fte_percent}
+                                key={`fte-${m.id}-${m.fte_percent}`}
+                                onBlur={(e) => {
+                                  const value = Math.min(100, parseNumber(e.target.value))
+                                  if (value !== m.fte_percent) updateMember.mutate({ id: m.id, data: { fte_percent: value } })
+                                  else e.target.value = String(m.fte_percent)
+                                }}
+                              />
+                              %
+                            </span>
+                          </td>
                           <td className="editable-cell">
                             <input
                               type="number"
@@ -661,23 +781,12 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
                     })}
 
                   {open && (
-                    <tr className="capacity-member-row">
-                      <td className="editable-cell" style={{ paddingLeft: 32 }}>
-                        <input
-                          placeholder="+ Aggiungi persona (Invio)"
-                          list="capacity-team-people"
-                          onKeyDown={(e) => {
-                            const name = e.currentTarget.value.trim()
-                            if (e.key === 'Enter' && name) {
-                              addMember.mutate({ typeId: t.id, name })
-                              e.currentTarget.value = ''
-                            }
-                          }}
-                        />
-                      </td>
-                      <td />
-                      <td />
-                      <td />
+                    <tr className="capacity-member-row capacity-new-member">
+                      <NewMemberCells
+                        typeName={t.name}
+                        adding={addMember.isPending}
+                        onAdd={(name, ftePercent) => addMember.mutate({ typeId: t.id, name, ftePercent })}
+                      />
                       {/* Ore al giorno proposte alle persone nuove della tipologia. */}
                       <td className="editable-cell" title="Ore al giorno proposte per le persone nuove">
                         <input

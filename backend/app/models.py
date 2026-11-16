@@ -379,6 +379,10 @@ class IncrementTeamMember(Base):
     # Societa' della persona (SpA/SA/TPM): le ore del file di budget sono
     # divise per societa'.
     company: Mapped[str] = mapped_column(String(8), default="SpA")
+    # Quota del tempo della persona dedicata al progetto (100 = a tempo pieno):
+    # le sue ore = giorni disponibili x ore/giorno x fte_percent/100, e la
+    # tipologia riporta la somma degli FTE delle sue persone.
+    fte_percent: Mapped[float] = mapped_column(Float, default=100)
     order: Mapped[int] = mapped_column(Integer, default=0)
 
     resource_type: Mapped["IncrementResourceType"] = relationship(back_populates="members")
