@@ -28,7 +28,7 @@ type JiraFilter = 'all' | 'missing' | 'linked' | 'outside'
 
 const JIRA_FILTERS: { value: JiraFilter; label: string; title: string }[] = [
   { value: 'all', label: 'Tutti', title: 'Tutti gli enhancement' },
-  { value: 'missing', label: 'Senza Jira', title: 'Enhancement senza ID Jira in Salesforce' },
+  { value: 'missing', label: 'Senza Jira', title: 'Enhancement senza ID Jira (né in Salesforce né nel nome)' },
   { value: 'outside', label: 'Jira fuori backlog', title: "Con ID Jira, ma la issue non è nel backlog di nessun tuo increment" },
   { value: 'linked', label: 'In un increment', title: 'Con ID Jira nel backlog di un tuo increment' },
 ]
@@ -196,9 +196,10 @@ export function EnhancementsPage() {
       {error && <div className="error-banner">{(error as Error).message}</div>}
       {settings && !settings.jira_field && all.length > 0 && (
         <div className="card" style={{ background: '#fffaf0', borderColor: '#f3dcae', fontSize: 13 }}>
-          In Salesforce le Opportunity non hanno ancora un campo con l'ID Jira: per ora tutti gli enhancement risultano{' '}
-          <b>Senza Jira</b>. Appena il campo verrà creato (con "Jira" nel nome o nell'etichetta), alla prossima lettura
-          gli ID verranno letti e confrontati con il backlog dei tuoi increment, senza altre modifiche.
+          In Salesforce le Opportunity non hanno ancora un campo con l'ID Jira: per ora le chiavi Jira si prendono dal
+          nome dell'enhancement (es. "… - PTBSYS-3993"), gli altri risultano <b>Senza Jira</b>. Appena il campo verrà
+          creato (con "Jira" nel nome o nell'etichetta), alla prossima lettura gli ID verranno letti da lì, senza altre
+          modifiche.
         </div>
       )}
 
@@ -289,7 +290,7 @@ export function EnhancementsPage() {
                   <th>Owner</th>
                   <th>Due date</th>
                   <th>Release</th>
-                  <th style={{ width: 220 }}>Jira</th>
+                  <th style={{ width: 120 }}>Jira</th>
                   <th>Stato Jira</th>
                   <th title="Increment a cui appartiene l'enhancement, scelto a mano">Increment</th>
                   <th>Modificato</th>
@@ -357,28 +358,31 @@ export function EnhancementsPage() {
 // increment, link alla sua Dashboard con lo stato Jira.
 function JiraCell({ enhancement: e }: { enhancement: Enhancement }) {
   if (e.jira.length === 0) {
-    return <span className="badge todo" title="Nessun ID Jira in Salesforce">Senza Jira</span>
+    return (
+      <span className="badge todo" title="Nessun ID Jira, né in Salesforce né nel nome">
+        Senza Jira
+      </span>
+    )
   }
+  // Solo l'ID: stato Jira e increment hanno le loro colonne. Da dove arriva
+  // la chiave (campo Salesforce o nome) resta nel tooltip.
+  const origin =
+    e.jira_source === 'name'
+      ? "letta dal nome dell'enhancement, non dal campo ID Jira di Salesforce"
+      : 'dal campo ID Jira di Salesforce'
   return (
     <div style={{ display: 'grid', gap: 2 }}>
       {e.jira.map((j) => (
-        <div key={j.key} className="nowrap">
-          <a href={`${JIRA_BROWSE}${j.key}`} target="_blank" rel="noreferrer">
-            {j.key}
-          </a>
-          {j.increment_id != null ? (
-            <span className="muted">
-              {' '}
-              · <Link to={`/projects/${j.increment_id}`}>{j.increment_code}</Link>
-              {j.jira_status && ` · ${j.jira_status}`}
-            </span>
-          ) : (
-            <span className="muted" title="La issue non è nel backlog di nessuno dei tuoi increment">
-              {' '}
-              · fuori backlog
-            </span>
-          )}
-        </div>
+        <a
+          key={j.key}
+          className="nowrap"
+          href={`${JIRA_BROWSE}${j.key}`}
+          target="_blank"
+          rel="noreferrer"
+          title={`Apri ${j.key} in Jira (chiave ${origin})`}
+        >
+          {j.key}
+        </a>
       ))}
     </div>
   )
@@ -489,6 +493,7 @@ function EnhancementDetail({ enhancement: e }: { enhancement: Enhancement }) {
     ['Target release', e.target_release],
     ['Case collegati', e.cases],
     ['ID Jira (Salesforce)', e.jira_key],
+    ['ID Jira dal nome', e.jira_source === 'name' ? e.jira.map((j) => j.key).join(', ') : null],
     ['Creato da', e.created_by],
     ['Creato il', e.created_at ? parseBackendDateTime(e.created_at).toLocaleDateString('it-IT') : null],
   ]

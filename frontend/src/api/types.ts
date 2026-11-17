@@ -1024,6 +1024,8 @@ export type Enhancement = {
   // Valore del campo Salesforce con l'ID Jira (quando esistera').
   jira_key: string | null
   jira: EnhancementJiraMatch[]
+  // Origine delle chiavi Jira: campo Salesforce o nome dell'enhancement.
+  jira_source: 'salesforce' | 'name' | null
   // Increment associato a mano dall'utente.
   increment_id: number | null
   increment_code: string | null

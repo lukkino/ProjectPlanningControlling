@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api/tools/enhancements", tags=["tools"])
 # Login + 4 chiamate REST: di solito 10-20 s.
 READ_TIMEOUT_S = 300
 JIRA_KEY_RE = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+# Progetto Jira sempre cercato nel nome, anche con il backlog vuoto.
+DEFAULT_JIRA_PROJECTS = {"PTBSYS"}
 
 _progress: schemas.SyncProgress | None = None
 
@@ -66,6 +68,9 @@ class Enhancement(BaseModel):
     created_by: str | None
     jira_key: str | None
     jira: list[JiraMatch] = []
+    # Da dove vengono le chiavi Jira: "salesforce" (campo con l'ID Jira),
+    # "name" (scritte nel nome dell'enhancement), null se nessuna.
+    jira_source: str | None = None
     # Increment associato a mano (vedi PUT /{id}).
     increment_id: int | None = None
     increment_code: str | None = None
@@ -130,12 +135,68 @@ def _increments(db: Session) -> dict[int, models.Project]:
     return {p.id: p for p in db.query(models.Project).filter(models.Project.owner_id == scope_user_id())}
 
 
-def _out(e: models.SalesforceEnhancement, matches: list[JiraMatch], increments: dict[int, models.Project]) -> Enhancement:
+def _name_key_re(db: Session) -> re.Pattern:
+    """Chiavi Jira scritte nel nome di un enhancement, per i progetti Jira
+    del backlog dell'utente (es. PTBSYS): anche scritte male, "ptbsys-4062",
+    "PTBSYS2421", "PTBSYS - 2419". Solo i prefissi noti, cosi' sigle come
+    "LAB63" o "SPM-27.1" non vengono prese per chiavi."""
+    keys = (
+        db.query(models.BacklogItem.jira_key)
+        .join(models.Project, models.Project.id == models.BacklogItem.project_id)
+        .filter(models.Project.owner_id == scope_user_id())
+        .distinct()
+    )
+    prefixes = DEFAULT_JIRA_PROJECTS | {k.split("-")[0].upper() for (k,) in keys if k and "-" in k}
+    alternatives = "|".join(sorted((re.escape(p) for p in prefixes), key=len, reverse=True))
+    return re.compile(rf"(?<![A-Za-z0-9])({alternatives})\s*[-_]?\s*(\d+)(?!\d)", re.IGNORECASE)
+
+
+def _jira_keys(e: models.SalesforceEnhancement, name_re: re.Pattern) -> tuple[list[str], str | None]:
+    """Chiavi Jira dell'enhancement: dal campo Salesforce con l'ID Jira se
+    valorizzato, se no dal nome."""
+    keys = list(dict.fromkeys(JIRA_KEY_RE.findall((e.jira_key or "").upper())))
+    if keys:
+        return keys, "salesforce"
+    keys = list(dict.fromkeys(f"{p.upper()}-{n}" for p, n in name_re.findall(e.name or "")))
+    return keys, ("name" if keys else None)
+
+
+def _with_jira(db: Session, rows: list[models.SalesforceEnhancement]) -> list[Enhancement]:
+    name_re = _name_key_re(db)
+    keys_of = {e.id: _jira_keys(e, name_re) for e in rows}
+    backlog = _backlog_by_key(db, {k for keys, _ in keys_of.values() for k in keys})
+    increments = _increments(db)
+    out = []
+    for e in rows:
+        keys, source = keys_of[e.id]
+        matches = []
+        for key in keys:
+            item = backlog.get(key)
+            matches.append(
+                JiraMatch(
+                    key=key,
+                    increment_id=item.project_id if item else None,
+                    increment_code=item.project.code if item else None,
+                    summary=item.summary if item else None,
+                    jira_status=item.jira_status if item else None,
+                )
+            )
+        out.append(_out(e, matches, source, increments))
+    return out
+
+
+def _out(
+    e: models.SalesforceEnhancement,
+    matches: list[JiraMatch],
+    source: str | None,
+    increments: dict[int, models.Project],
+) -> Enhancement:
     increment = increments.get(e.increment_id) if e.increment_id else None
     return Enhancement.model_validate(
         {
             **{c.name: getattr(e, c.name) for c in models.SalesforceEnhancement.__table__.columns},
             "jira": matches,
+            "jira_source": source,
             "url": record_url(e.sf_id),
             # Un increment cancellato (o di un altro utente) non conta.
             "increment_id": increment.id if increment else None,
@@ -147,25 +208,7 @@ def _out(e: models.SalesforceEnhancement, matches: list[JiraMatch], increments: 
 @router.get("", response_model=list[Enhancement])
 def list_enhancements(db: Session = Depends(get_db)):
     rows = _owned(db).order_by(models.SalesforceEnhancement.request_id.desc()).all()
-    keys_of = {e.id: JIRA_KEY_RE.findall((e.jira_key or "").upper()) for e in rows}
-    backlog = _backlog_by_key(db, {k for keys in keys_of.values() for k in keys})
-    increments = _increments(db)
-    out = []
-    for e in rows:
-        matches = []
-        for key in keys_of[e.id]:
-            item = backlog.get(key)
-            matches.append(
-                JiraMatch(
-                    key=key,
-                    increment_id=item.project_id if item else None,
-                    increment_code=item.project.code if item else None,
-                    summary=item.summary if item else None,
-                    jira_status=item.jira_status if item else None,
-                )
-            )
-        out.append(_out(e, matches, increments))
-    return out
+    return _with_jira(db, rows)
 
 
 @router.put("/{enhancement_id}", response_model=Enhancement)
@@ -179,19 +222,7 @@ def update_enhancement(enhancement_id: int, payload: EnhancementUpdate, db: Sess
         raise HTTPException(status_code=400, detail="Increment non trovato")
     enh.increment_id = payload.increment_id
     db.commit()
-    keys = JIRA_KEY_RE.findall((enh.jira_key or "").upper())
-    backlog = _backlog_by_key(db, set(keys))
-    matches = [
-        JiraMatch(
-            key=k,
-            increment_id=backlog[k].project_id if k in backlog else None,
-            increment_code=backlog[k].project.code if k in backlog else None,
-            summary=backlog[k].summary if k in backlog else None,
-            jira_status=backlog[k].jira_status if k in backlog else None,
-        )
-        for k in keys
-    ]
-    return _out(enh, matches, increments)
+    return _with_jira(db, [enh])[0]
 
 
 @router.get("/settings", response_model=EnhancementsSettings)
