@@ -33,7 +33,7 @@ import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/complaints', '/complaints/kpi', '/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/workload']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/tools/complaints', '/tools/complaints/kpi', '/tools/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -62,11 +62,18 @@ export default function App() {
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/dashboard" element={<OverviewDashboardPage />} />
-          <Route path="/complaints" element={<ComplaintsLayout />}>
+          <Route path="/tools/complaints" element={<ComplaintsLayout />}>
             <Route index element={<ComplaintsPage />} />
             <Route path="kpi" element={<ComplaintsKpiPage />} />
             <Route path="disallineamenti" element={<ComplaintsMismatchPage />} />
           </Route>
+          {/* Indirizzi di prima che Complaints passasse nei Tools (segnalibri). */}
+          <Route path="/complaints" element={<Navigate to="/tools/complaints" replace />} />
+          <Route path="/complaints/kpi" element={<Navigate to="/tools/complaints/kpi" replace />} />
+          <Route
+            path="/complaints/disallineamenti"
+            element={<Navigate to="/tools/complaints/disallineamenti" replace />}
+          />
           <Route path="/releases" element={<ReleasesPage />} />
           <Route path="/workload" element={<WorkloadPage />} />
           <Route path="/settings" element={can('editor') ? <ConfigurationPage /> : <Navigate to="/" replace />} />

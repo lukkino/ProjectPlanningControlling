@@ -677,6 +677,9 @@ class ProjectUpdate(BaseModel):
     unplanned_done_jql: str | None = None
     status: str | None = None
     scope: str | None = None
+    # Motivo della modifica dello Scope congelato (va nel registro, non
+    # sull'increment).
+    scope_change_note: str | None = None
     scope_narrative: str | None = None
     dev_start_date: dt.date | None = None
     jira_jql: str | None = None
@@ -689,6 +692,29 @@ class ProjectUpdate(BaseModel):
     review_documents_folder: str | None = None
     is_current: bool | None = None
     release_date: dt.date | None = None
+
+
+class ScopeRevision(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    kind: str
+    previous_html: str | None = None
+    html: str | None = None
+    note: str | None = None
+    user_name: str | None = None
+    created_at: dt.datetime
+
+
+class ScopeHistory(BaseModel):
+    frozen_at: dt.datetime | None = None
+    frozen_by: str | None = None
+    baseline: str | None = None
+    # Dal piu' recente.
+    revisions: list[ScopeRevision] = []
+
+
+class ScopeFreeze(BaseModel):
+    note: str | None = None
 
 
 class ProjectListItem(ProjectBase):
@@ -712,6 +738,9 @@ class ProjectListItem(ProjectBase):
     gantt_order: int | None = None
     # Sola lettura qui: si modifica con PUT /api/projects/{id}/pinned.
     sidebar_pinned: bool = False
+    # Sola lettura qui: Scope congelato (POST /api/projects/{id}/scope/freeze).
+    scope_frozen_at: dt.datetime | None = None
+    scope_frozen_by: str | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
 

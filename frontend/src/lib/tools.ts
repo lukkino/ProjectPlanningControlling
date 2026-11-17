@@ -10,6 +10,13 @@ export type ToolInfo = {
 
 export const TOOLS: ToolInfo[] = [
   {
+    path: '/tools/complaints',
+    icon: '📣',
+    name: 'Complaints',
+    description:
+      'I bug Jira nati da un case Salesforce: elenco con i case collegati, KPI e disallineamenti tra Jira e Salesforce, sincronizzati con un clic.',
+  },
+  {
     path: '/tools/rda',
     icon: '🛒',
     name: 'RDA',

@@ -146,6 +146,12 @@ class Project(Base):
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Lo Scope in forma discorsiva, per Change Order e Release Notice.
     scope_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Scope congelato (baseline): da quel momento ogni modifica allo Scope
+    # schematico finisce in ScopeRevision. scope_baseline e' lo Scope al
+    # momento del freeze; None in scope_frozen_at = non congelato.
+    scope_frozen_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    scope_frozen_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scope_baseline: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # start_date, code_freeze_date e planned_finish_date sono copie in sola
     # lettura delle date aggiornate delle fasi scelte per l'increment
@@ -231,6 +237,9 @@ class Project(Base):
         order_by="BacklogItem.priority_order",
     )
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Snapshot.snapshot_date")
+    scope_revisions: Mapped[list["ScopeRevision"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="ScopeRevision.id"
+    )
     forecast_simulations: Mapped[list["ForecastSimulation"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="ForecastSimulation.id"
     )
@@ -238,6 +247,26 @@ class Project(Base):
     # Sotto-progetti collegati a questo rilascio (di progetti non collegati
     # per intero, vedi SubProject).
     sub_projects: Mapped[list["SubProject"]] = relationship(back_populates="project", order_by="SubProject.id")
+
+
+class ScopeRevision(Base):
+    """Registro dello Scope congelato: il freeze (kind "freeze", anche un
+    nuovo freeze che sposta la baseline), ogni modifica dopo il freeze
+    ("change", con lo Scope prima e dopo e il motivo) e lo scongelamento
+    ("unfreeze"). Le sole spunte delle caselle non contano come modifica."""
+
+    __tablename__ = "scope_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    previous_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+    project: Mapped["Project"] = relationship(back_populates="scope_revisions")
 
 
 class Phase(Base):

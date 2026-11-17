@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+import datetime as dt
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -151,9 +154,23 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{project_id}", response_model=schemas.ProjectDetail)
-def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session = Depends(get_db)):
+def update_project(
+    project_id: int, payload: schemas.ProjectUpdate, request: Request, db: Session = Depends(get_db)
+):
     project = _get_project_or_404(db, project_id)
     data = payload.model_dump(exclude_unset=True)
+    note = (data.pop("scope_change_note", None) or "").strip() or None
+    if "scope" in data and project.scope_frozen_at is not None and _scope_content(data["scope"]) != _scope_content(project.scope):
+        db.add(
+            models.ScopeRevision(
+                project_id=project.id,
+                kind="change",
+                previous_html=project.scope,
+                html=data["scope"],
+                note=note,
+                user_name=_user_name(request),
+            )
+        )
     phase_ids = {p.id for p in project.phases}
     for link in DATE_PHASE_LINKS:
         if data.get(link) is not None and data[link] not in phase_ids:
@@ -164,6 +181,82 @@ def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session 
     db.commit()
     db.refresh(project)
     return project
+
+
+# ---------- Scope congelato ----------
+
+_CHECKED_RE = re.compile(r'\s(?:data-checked="(?:true|false)"|checked="checked")')
+
+
+def _scope_content(html: str | None) -> str:
+    """Lo Scope senza lo stato delle caselle: spuntare una voce e' un
+    avanzamento, non una modifica dello Scope congelato."""
+    return _CHECKED_RE.sub("", html or "")
+
+
+def _user_name(request: Request) -> str | None:
+    user = getattr(request.state, "user", None)
+    return (user.display_name or user.username) if user is not None else None
+
+
+def _scope_history(project: models.Project) -> schemas.ScopeHistory:
+    return schemas.ScopeHistory(
+        frozen_at=project.scope_frozen_at,
+        frozen_by=project.scope_frozen_by,
+        baseline=project.scope_baseline,
+        revisions=[schemas.ScopeRevision.model_validate(r) for r in reversed(project.scope_revisions)],
+    )
+
+
+@router.get("/{project_id}/scope/history", response_model=schemas.ScopeHistory)
+def scope_history(project_id: int, db: Session = Depends(get_db)):
+    return _scope_history(_get_project_or_404(db, project_id))
+
+
+@router.post("/{project_id}/scope/freeze", response_model=schemas.ScopeHistory)
+def freeze_scope(
+    project_id: int,
+    payload: schemas.ScopeFreeze,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Congela lo Scope schematico com'e' ora (baseline); se era gia'
+    congelato, la baseline diventa lo Scope attuale. Da qui ogni modifica
+    finisce nel registro."""
+    project = _get_project_or_404(db, project_id)
+    now = dt.datetime.utcnow()
+    project.scope_frozen_at = now
+    project.scope_frozen_by = _user_name(request)
+    project.scope_baseline = project.scope
+    db.add(
+        models.ScopeRevision(
+            project_id=project.id,
+            kind="freeze",
+            html=project.scope,
+            note=(payload.note or "").strip() or None,
+            user_name=project.scope_frozen_by,
+            created_at=now,
+        )
+    )
+    db.commit()
+    db.refresh(project)
+    return _scope_history(project)
+
+
+@router.post("/{project_id}/scope/unfreeze", response_model=schemas.ScopeHistory)
+def unfreeze_scope(project_id: int, request: Request, db: Session = Depends(get_db)):
+    """Scongela lo Scope: le modifiche non si registrano piu'. Il registro
+    resta (con lo scongelamento)."""
+    project = _get_project_or_404(db, project_id)
+    if project.scope_frozen_at is None:
+        raise HTTPException(status_code=400, detail="Lo Scope non è congelato")
+    project.scope_frozen_at = None
+    project.scope_frozen_by = None
+    project.scope_baseline = None
+    db.add(models.ScopeRevision(project_id=project.id, kind="unfreeze", user_name=_user_name(request)))
+    db.commit()
+    db.refresh(project)
+    return _scope_history(project)
 
 
 @router.delete("/{project_id}", status_code=204)

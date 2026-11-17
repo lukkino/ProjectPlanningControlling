@@ -43,10 +43,6 @@ export function Sidebar() {
         📊 Dashboard
       </NavLink>
 
-      <NavLink to="/complaints" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
-        📣 Complaints
-      </NavLink>
-
       <NavLink to="/releases" className={({ isActive }) => `sidebar-dashboard-btn${isActive ? ' active' : ''}`}>
         📦 Releases
       </NavLink>

@@ -697,7 +697,13 @@ export function DashboardPage() {
 
       <PhasesCard projectId={project.id} currentStatus={project.status} />
 
-      <ScopeCard projectId={project.id} scope={project.scope} narrative={project.scope_narrative} />
+      <ScopeCard
+        projectId={project.id}
+        scope={project.scope}
+        narrative={project.scope_narrative}
+        frozenAt={project.scope_frozen_at}
+        frozenBy={project.scope_frozen_by}
+      />
 
       <div className="card">
         <div className="grid-4">

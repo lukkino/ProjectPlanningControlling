@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet } from 'react-router-dom'
 import { api } from '../api/client'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { parseBackendDateTime } from '../lib/dates'
@@ -35,7 +35,10 @@ export function ComplaintsLayout() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Complaints</h1>
+          <div className="sub">
+            <Link to="/tools">Tools</Link> ›
+          </div>
+          <h1>📣 Complaints</h1>
           <div className="sub">
             Bug Jira nati da un case Salesforce · Ultima sync: {formatDateTime(lastSyncedAt) ?? 'mai sincronizzato'}
           </div>
@@ -46,13 +49,13 @@ export function ComplaintsLayout() {
       </div>
 
       <div className="tabs">
-        <NavLink to="/complaints" end className={({ isActive }) => (isActive ? 'active' : '')}>
+        <NavLink to="/tools/complaints" end className={({ isActive }) => (isActive ? 'active' : '')}>
           Elenco
         </NavLink>
-        <NavLink to="/complaints/kpi" className={({ isActive }) => (isActive ? 'active' : '')}>
+        <NavLink to="/tools/complaints/kpi" className={({ isActive }) => (isActive ? 'active' : '')}>
           KPI
         </NavLink>
-        <NavLink to="/complaints/disallineamenti" className={({ isActive }) => (isActive ? 'active' : '')}>
+        <NavLink to="/tools/complaints/disallineamenti" className={({ isActive }) => (isActive ? 'active' : '')}>
           Disallineamenti
         </NavLink>
       </div>

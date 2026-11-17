@@ -4,7 +4,11 @@ import type { Editor } from '@tiptap/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../api/client'
+import type { ScopeHistory } from '../api/types'
+import { formatDateTime } from '../lib/dates'
+import { diffScope, scopeCounts } from '../lib/scopeDiff'
 import { ScopeBacklogCheck } from './ScopeBacklogCheck'
+import { ScopeChanges } from './ScopeChanges'
 import {
   editorToStoredHtml,
   hasEarlierNumberedList,
@@ -86,6 +90,37 @@ export function RichText({ text, onCheck, syncPaused = false, inProgressKeys = N
   return (
     <div ref={wrapperRef}>
       <EditorContent editor={editor} />
+    </div>
+  )
+}
+
+// Totale delle voci dello Scope schematico: e' lo scope confermato, il
+// backlog puo' non essere ancora allineato (vedi "Verifica con il backlog").
+function ScopeTotals({ scope }: { scope: string | null }) {
+  const c = useMemo(() => scopeCounts(scope), [scope])
+  if (c.total === 0) return null
+  const parts: ReactNode[] = []
+  if (c.checkable > 0) {
+    parts.push(
+      <span key="done" style={{ color: 'var(--success)' }}>
+        {c.done} completati
+      </span>,
+      <span key="todo">{c.total - c.done} da fare</span>,
+    )
+  }
+  if (c.mandatory > 0) parts.push(<span key="m" style={{ color: 'var(--danger)' }}>★ {c.mandatory} mandatori</span>)
+  if (c.tentative > 0) parts.push(<span key="t" style={{ color: 'var(--warning)' }}>? {c.tentative} tentative</span>)
+  return (
+    <div
+      style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'baseline', marginBottom: 10, fontSize: 14 }}
+      title="Voci dello Scope confermato, senza contare le voci che raggruppano sotto-voci. Il backlog può non essere ancora allineato: vedi Verifica con il backlog."
+    >
+      <strong>{c.total} item nello scope</strong>
+      {parts.map((part, i) => (
+        <span key={i} className="muted">
+          · {part}
+        </span>
+      ))}
     </div>
   )
 }
@@ -360,13 +395,16 @@ function Toolbar({ editor }: { editor: Editor }) {
 type EditorProps = {
   initialText: string | null
   inProgressKeys: string[]
+  // Scope congelato: la modifica finisce nel registro, con il motivo.
+  frozen: boolean
   saving: boolean
   error: Error | null
-  onSave: (value: string | null) => void
+  onSave: (value: string | null, note: string | null) => void
   onCancel: () => void
 }
 
-function ScopeEditor({ initialText, inProgressKeys, saving, error, onSave, onCancel }: EditorProps) {
+function ScopeEditor({ initialText, inProgressKeys, frozen, saving, error, onSave, onCancel }: EditorProps) {
+  const [note, setNote] = useState('')
   const editor = useEditor({
     extensions: richTextExtensions({ editable: true }),
     content: toEditorHtml(initialText),
@@ -381,6 +419,21 @@ function ScopeEditor({ initialText, inProgressKeys, saving, error, onSave, onCan
         <Toolbar editor={editor} />
         <EditorContent editor={editor} />
       </div>
+      {frozen && (
+        <div style={{ marginTop: 10 }}>
+          <label className="muted" style={{ fontSize: 13 }} htmlFor="scope-change-note">
+            🔒 Lo Scope è congelato: la modifica verrà registrata. Motivo (facoltativo)
+          </label>
+          <input
+            id="scope-change-note"
+            type="text"
+            value={note}
+            placeholder="Es. richiesta del cliente, CR approvata il..."
+            style={{ width: '100%', marginTop: 4 }}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
+      )}
       {error && (
         <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
           Salvataggio non riuscito: {error.message}
@@ -390,7 +443,11 @@ function ScopeEditor({ initialText, inProgressKeys, saving, error, onSave, onCan
         <button className="btn" onClick={onCancel} disabled={saving}>
           Annulla
         </button>
-        <button className="btn btn-primary" onClick={() => onSave(editorToStoredHtml(editor))} disabled={saving}>
+        <button
+          className="btn btn-primary"
+          onClick={() => onSave(editorToStoredHtml(editor), note.trim() || null)}
+          disabled={saving}
+        >
           {saving ? 'Salvataggio...' : 'Salva'}
         </button>
       </div>
@@ -398,7 +455,14 @@ function ScopeEditor({ initialText, inProgressKeys, saving, error, onSave, onCan
   )
 }
 
-type Props = { projectId: number; scope: string | null; narrative: string | null }
+// frozenAt/frozenBy: Scope schematico congelato (vedi ScopeChanges).
+type Props = {
+  projectId: number
+  scope: string | null
+  narrative: string | null
+  frozenAt: string | null
+  frozenBy: string | null
+}
 
 type ScopeTab = 'schematic' | 'narrative'
 
@@ -439,7 +503,7 @@ async function copyRichText(html: string) {
 // Discorsivo tiene una seconda versione, da copiare in Change Order e Release
 // Notice: si parte da una proposta ricavata dal backlog, che resta da
 // rivedere e diventa definitiva solo col Salva.
-export function ScopeCard({ projectId, scope, narrative }: Props) {
+export function ScopeCard({ projectId, scope, narrative, frozenAt, frozenBy }: Props) {
   const [tab, setTab] = useState<ScopeTab>('schematic')
   const [editing, setEditing] = useState(false)
   const [editorText, setEditorText] = useState<string | null>(null)
@@ -447,7 +511,19 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   // Verifica di coerenza tra Scope schematico e backlog.
   const [checking, setChecking] = useState(false)
+  // Pannello delle modifiche dal freeze.
+  const [showChanges, setShowChanges] = useState(false)
   const queryClient = useQueryClient()
+  const frozen = !!frozenAt
+  const { data: history } = useQuery({
+    queryKey: ['scope-history', projectId],
+    queryFn: () => api.projects.scopeHistory(projectId),
+    enabled: frozen,
+  })
+  const changeCount = useMemo(
+    () => (frozen && history ? diffScope(history.baseline, scope).length : 0),
+    [frozen, history, scope],
+  )
   const current = tab === 'schematic' ? scope : narrative
   // Stessa query del backlog della Dashboard: issue in lavorazione ora.
   const { data: backlog } = useQuery({
@@ -460,16 +536,54 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   )
 
   const save = useMutation({
-    mutationFn: (value: string | null) =>
-      api.projects.update(projectId, tab === 'schematic' ? { scope: value } : { scope_narrative: value }),
+    mutationFn: ({ value, note = null }: { value: string | null; note?: string | null }) =>
+      api.projects.update(
+        projectId,
+        tab === 'schematic' ? { scope: value, scope_change_note: note } : { scope_narrative: value },
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       // Lo Scope compare anche nella pagina del Progetto collegato.
       queryClient.invalidateQueries({ queryKey: ['increment'] })
+      queryClient.invalidateQueries({ queryKey: ['scope-history', projectId] })
       setEditing(false)
     },
   })
+
+  const onFrozen = (data: ScopeHistory) => {
+    queryClient.setQueryData(['scope-history', projectId], data)
+    queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['projects'] })
+  }
+  const freeze = useMutation({
+    mutationFn: (note: string | null) => api.projects.freezeScope(projectId, note),
+    onSuccess: (data) => {
+      onFrozen(data)
+      setShowChanges(true)
+    },
+  })
+  const unfreeze = useMutation({
+    mutationFn: () => api.projects.unfreezeScope(projectId),
+    onSuccess: (data) => {
+      onFrozen(data)
+      setShowChanges(false)
+    },
+  })
+  const askFreeze = (again: boolean) => {
+    const note = window.prompt(
+      again
+        ? 'Lo Scope attuale diventa la nuova baseline: le modifiche si conteranno da qui. Nota (facoltativa):'
+        : 'Congela lo Scope com\'è ora: da qui ogni modifica verrà registrata e confrontata con questa baseline. Nota (facoltativa):',
+      '',
+    )
+    if (note !== null) freeze.mutate(note.trim() || null)
+  }
+  const askUnfreeze = () => {
+    if (window.confirm('Scongelare lo Scope? Le modifiche non verranno più registrate (il registro resta).')) {
+      unfreeze.mutate()
+    }
+  }
 
   const startEditing = (text: string | null) => {
     save.reset()
@@ -510,8 +624,39 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: collapsed ? 0 : 10, alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Scope</h3>
+        <h3 style={{ margin: 0 }}>
+          Scope
+          {frozen && (
+            <span
+              className="badge ready"
+              style={{ marginLeft: 8, verticalAlign: 'middle' }}
+              title={`Scope congelato il ${formatDateTime(frozenAt)}${frozenBy ? ` da ${frozenBy}` : ''}: le modifiche vengono registrate`}
+            >
+              🔒 Congelato
+            </span>
+          )}
+        </h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {!editing && !collapsed && tab === 'schematic' && frozen && (
+            <button
+              className={`btn${showChanges ? ' active' : ''}`}
+              title="Cosa è cambiato rispetto alla baseline e registro delle modifiche"
+              aria-expanded={showChanges}
+              onClick={() => setShowChanges((v) => !v)}
+            >
+              Modifiche dal freeze ({changeCount})
+            </button>
+          )}
+          {!editing && !collapsed && tab === 'schematic' && !frozen && (
+            <button
+              className="btn"
+              title="Fissa lo Scope com'è ora come baseline: da qui ogni modifica viene registrata"
+              disabled={freeze.isPending || !scope}
+              onClick={() => askFreeze(false)}
+            >
+              🔒 Congela
+            </button>
+          )}
           {!editing && !collapsed && tab === 'narrative' && narrative && (
             <button className="btn" onClick={() => copy.mutate()} disabled={copy.isPending}>
               {copied ? 'Copiato' : 'Copia'}
@@ -573,6 +718,16 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
         ))}
       </div>
 
+      {!editing && tab === 'schematic' && <ScopeTotals scope={scope} />}
+      {showChanges && frozen && history && !editing && tab === 'schematic' && (
+        <ScopeChanges
+          history={history}
+          scope={scope}
+          busy={freeze.isPending || unfreeze.isPending}
+          onRefreeze={() => askFreeze(true)}
+          onUnfreeze={askUnfreeze}
+        />
+      )}
       {checking && !editing && tab === 'schematic' && (
         <ScopeBacklogCheck projectId={projectId} scope={scope} onClose={() => setChecking(false)} />
       )}
@@ -581,7 +736,7 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
           <RichText
             key={tab}
             text={current}
-            onCheck={tab === 'schematic' ? (value) => save.mutate(value) : undefined}
+            onCheck={tab === 'schematic' ? (value) => save.mutate({ value }) : undefined}
             syncPaused={save.isPending}
             inProgressKeys={inProgressKeys}
           />
@@ -590,9 +745,11 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
             {tab === 'schematic' ? 'Nessuno scope definito.' : 'Nessun testo discorsivo: generalo dal backlog o scrivilo a mano.'}
           </p>
         ))}
-      {!editing && (save.isError || generate.isError || copy.isError) && (
+      {!editing && (save.isError || generate.isError || copy.isError || freeze.isError || unfreeze.isError) && (
         <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
           {save.isError && `Salvataggio non riuscito: ${(save.error as Error).message}`}
+          {freeze.isError && `Congelamento non riuscito: ${(freeze.error as Error).message}`}
+          {unfreeze.isError && `Scongelamento non riuscito: ${(unfreeze.error as Error).message}`}
           {generate.isError && `Generazione non riuscita: ${(generate.error as Error).message}`}
           {copy.isError && `Copia non riuscita: ${(copy.error as Error).message}`}
         </div>
@@ -602,9 +759,10 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
         <ScopeEditor
           initialText={editorText}
           inProgressKeys={inProgressKeys}
+          frozen={frozen && tab === 'schematic'}
           saving={save.isPending}
           error={save.error as Error | null}
-          onSave={(value) => save.mutate(value)}
+          onSave={(value, note) => save.mutate({ value, note })}
           onCancel={() => setEditing(false)}
         />
       )}

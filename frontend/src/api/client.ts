@@ -69,6 +69,7 @@ import type {
   BudgetReviewHours,
   Project,
   ProjectDetail,
+  ScopeHistory,
   ScenariosStatus,
   Snapshot,
   SubProject,
@@ -264,8 +265,13 @@ export const api = {
     list: () => request<Project[]>('/projects'),
     get: (id: number) => request<ProjectDetail>(`/projects/${id}`),
     create: (data: Partial<Project>) => post<ProjectDetail>('/projects', data),
-    update: (id: number, data: Partial<Project>) => put<ProjectDetail>(`/projects/${id}`, data),
+    // scope_change_note: motivo della modifica dello Scope congelato.
+    update: (id: number, data: Partial<Project> & { scope_change_note?: string | null }) =>
+      put<ProjectDetail>(`/projects/${id}`, data),
     remove: (id: number) => del(`/projects/${id}`),
+    scopeHistory: (id: number) => request<ScopeHistory>(`/projects/${id}/scope/history`),
+    freezeScope: (id: number, note: string | null) => post<ScopeHistory>(`/projects/${id}/scope/freeze`, { note }),
+    unfreezeScope: (id: number) => post<ScopeHistory>(`/projects/${id}/scope/unfreeze`),
     // Apre sulla macchina del backend una finestra del browser sul Change
     // Order, gia' sul popup delle attivita' Software.
     openChangeOrderSoftware: (id: number) => post<void>(`/projects/${id}/change-order/open-software`),

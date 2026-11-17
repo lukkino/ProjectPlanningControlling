@@ -398,8 +398,31 @@ export type Project = {
   gantt_order: number | null
   // Fissato nella sidebar (📌 dalla pagina elenco).
   sidebar_pinned: boolean
+  // Scope congelato (sola lettura: si congela con api.projects.freezeScope).
+  scope_frozen_at: string | null
+  scope_frozen_by: string | null
   created_at: string
   updated_at: string
+}
+
+// Registro dello Scope congelato: freeze, modifiche dopo il freeze (con lo
+// Scope prima e dopo) e scongelamento.
+export type ScopeRevision = {
+  id: number
+  kind: 'freeze' | 'change' | 'unfreeze'
+  previous_html: string | null
+  html: string | null
+  note: string | null
+  user_name: string | null
+  created_at: string
+}
+
+export type ScopeHistory = {
+  frozen_at: string | null
+  frozen_by: string | null
+  baseline: string | null
+  // Dalla piu' recente.
+  revisions: ScopeRevision[]
 }
 
 // Sotto-progetto di un progetto, con un suo budget ore: si collega a un

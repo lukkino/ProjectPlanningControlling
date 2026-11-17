@@ -519,7 +519,12 @@ def run_budget_migrations() -> None:
             ("sidebar_pinned", "BOOLEAN DEFAULT 0"),
             ("calc_correction_percent", "FLOAT DEFAULT 100"),
         ],
-        "projects": [("sidebar_pinned", "BOOLEAN DEFAULT 0")],
+        "projects": [
+            ("sidebar_pinned", "BOOLEAN DEFAULT 0"),
+            ("scope_frozen_at", "DATETIME"),
+            ("scope_frozen_by", "VARCHAR(255)"),
+            ("scope_baseline", "TEXT"),
+        ],
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
         "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'"), ("fte_percent", "FLOAT DEFAULT 100")],
         "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],

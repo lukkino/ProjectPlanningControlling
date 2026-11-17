@@ -1574,6 +1574,12 @@ ul.changelog-body { padding-left: 20px; }
 .scope-check ul { margin: 0; padding-left: 18px; }
 .scope-check p { margin: 2px 0; }
 .scope-check details { margin-top: 10px; }
+/* Tipo Jira degli item confrontati (Story, Bug, Activity): colore e icona. */
+.scope-check ul:has(> .scope-check-item) { list-style: none; padding-left: 0; }
+.scope-check-item { border-left: 3px solid; padding: 2px 0 2px 8px; margin: 2px 0; }
+.scope-check-type { display: inline-block; min-width: 74px; margin-right: 8px; padding: 0 6px; border: 1px solid; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; white-space: nowrap; }
+.scope-check-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scope-check-title .scope-check-type { min-width: 0; margin-right: 0; }
 .filter-select-active { border-color: var(--primary); color: var(--primary); font-weight: 600; }
 .fte-input { display: inline-flex; align-items: center; gap: 2px; }
 .fte-input input { width: 64px; }
