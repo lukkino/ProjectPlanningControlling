@@ -4,10 +4,12 @@ Salesforce (di default "Enhancement ProTube"), letti col browser dell'app
 lettura: niente viene modificato in Salesforce.
 
 Il link alla list view e' un'impostazione personale (vuota = quella
-predefinita). Ogni enhancement con l'ID Jira (campo Salesforce che verra'
-aggiunto) viene confrontato con il backlog degli increment dell'utente: si
-vede in quale increment e' e con che stato Jira, e quali enhancement non
-hanno ancora un corrispettivo su Jira."""
+predefinita). Le chiavi Jira di un enhancement vengono dal campo Salesforce
+con l'ID Jira (quando ci sara') o, finche' manca, dal nome. Alla sync si
+leggono da Jira stato e fix version di quelle issue: la fix version dice
+l'increment (le fix version iniziano col codice dell'increment, es.
+"PTBSYS-03-004 - December 26") e vince sulla scelta a mano, che serve per
+gli enhancement senza un increment da Jira."""
 
 import datetime as dt
 import json
@@ -24,6 +26,8 @@ from app import models, schemas
 from app.database import get_db
 from app.ownership import scope_user_id, user_settings, user_settings_for_update
 from app.routers import change_order
+from app.routers.settings import SETTINGS_ROW_ID
+from app.services.jira_client import JiraClientError, fetch_issue_basics
 from app.services.tools.enhancements import DEFAULT_LIST_URL, parse_list_url, record_url
 
 router = APIRouter(prefix="/api/tools/enhancements", tags=["tools"])
@@ -45,6 +49,9 @@ class JiraMatch(BaseModel):
     increment_code: str | None = None
     summary: str | None = None
     jira_status: str | None = None
+    fix_versions: list[str] = []
+    # La issue esiste su Jira (letta all'ultima sync); null = non verificata.
+    found: bool | None = None
 
 
 class Enhancement(BaseModel):
@@ -71,9 +78,14 @@ class Enhancement(BaseModel):
     # Da dove vengono le chiavi Jira: "salesforce" (campo con l'ID Jira),
     # "name" (scritte nel nome dell'enhancement), null se nessuna.
     jira_source: str | None = None
-    # Increment associato a mano (vedi PUT /{id}).
+    # Increment dell'enhancement: quello della fix version Jira o, se manca,
+    # quello scelto a mano (vedi PUT /{id}); increment_source dice quale.
     increment_id: int | None = None
     increment_code: str | None = None
+    increment_source: str | None = None
+    # Increment dalla fix version Jira.
+    jira_increment_id: int | None = None
+    jira_increment_code: str | None = None
     created_at: dt.datetime | None
     modified_at: dt.datetime | None
     synced_at: dt.datetime | None
@@ -99,6 +111,9 @@ class SyncResult(BaseModel):
     total: int
     view: str | None = None
     jira_field: str | None = None
+    # Issue Jira lette (stato e fix version) e, se la lettura e' fallita, perche'.
+    jira_read: int = 0
+    jira_error: str | None = None
 
 
 def _list_url(db: Session) -> str:
@@ -161,6 +176,17 @@ def _jira_keys(e: models.SalesforceEnhancement, name_re: re.Pattern) -> tuple[li
     return keys, ("name" if keys else None)
 
 
+def _increment_of_fix_version(name: str, increments: dict[int, models.Project]) -> models.Project | None:
+    """Increment di una fix version: quello il cui codice apre il nome
+    ("PTBSYS-03-004 - December 26" -> PTBSYS-03-004; non PTBSYS-03-0045)."""
+    upper = name.strip().upper()
+    for p in sorted(increments.values(), key=lambda p: len(p.code), reverse=True):
+        code = p.code.upper()
+        if upper.startswith(code) and not upper[len(code) : len(code) + 1].isalnum():
+            return p
+    return None
+
+
 def _with_jira(db: Session, rows: list[models.SalesforceEnhancement]) -> list[Enhancement]:
     name_re = _name_key_re(db)
     keys_of = {e.id: _jira_keys(e, name_re) for e in rows}
@@ -169,16 +195,21 @@ def _with_jira(db: Session, rows: list[models.SalesforceEnhancement]) -> list[En
     out = []
     for e in rows:
         keys, source = keys_of[e.id]
+        info = json.loads(e.jira_info_json) if e.jira_info_json else None
         matches = []
         for key in keys:
             item = backlog.get(key)
+            jira = (info or {}).get(key)
             matches.append(
                 JiraMatch(
                     key=key,
                     increment_id=item.project_id if item else None,
                     increment_code=item.project.code if item else None,
-                    summary=item.summary if item else None,
-                    jira_status=item.jira_status if item else None,
+                    summary=(jira or {}).get("summary") or (item.summary if item else None),
+                    # Da Jira (ultima sync), se no dal backlog.
+                    jira_status=(jira or {}).get("status") or (item.jira_status if item else None),
+                    fix_versions=(jira or {}).get("fix_versions") or [],
+                    found=None if info is None else key in info,
                 )
             )
         out.append(_out(e, matches, source, increments))
@@ -191,18 +222,60 @@ def _out(
     source: str | None,
     increments: dict[int, models.Project],
 ) -> Enhancement:
-    increment = increments.get(e.increment_id) if e.increment_id else None
+    # Un increment cancellato (o di un altro utente) non conta.
+    manual = increments.get(e.increment_id) if e.increment_id else None
+    from_jira = next(
+        (p for m in matches for v in m.fix_versions if (p := _increment_of_fix_version(v, increments))),
+        None,
+    )
+    # La fix version Jira vince sulla scelta a mano, che vale solo per gli
+    # enhancement le cui issue non hanno fix version (anche una fix version
+    # di un increment che non e' nell'app vince: la pagina la mostra cosi'
+    # com'e').
+    has_fix_version = any(m.fix_versions for m in matches)
+    if has_fix_version:
+        manual = None
+    increment = from_jira or manual
     return Enhancement.model_validate(
         {
             **{c.name: getattr(e, c.name) for c in models.SalesforceEnhancement.__table__.columns},
             "jira": matches,
             "jira_source": source,
             "url": record_url(e.sf_id),
-            # Un increment cancellato (o di un altro utente) non conta.
             "increment_id": increment.id if increment else None,
             "increment_code": increment.code if increment else None,
+            "increment_source": "jira" if from_jira else ("manual" if manual else None),
+            "jira_increment_id": from_jira.id if from_jira else None,
+            "jira_increment_code": from_jira.code if from_jira else None,
         }
     )
+
+
+def _read_jira(db: Session, rows: list[models.SalesforceEnhancement]) -> tuple[int, str | None]:
+    """Stato e fix version da Jira delle issue degli enhancement, salvati
+    in jira_info_json. Una lettura fallita non blocca la sync: i dati Jira
+    precedenti restano."""
+    name_re = _name_key_re(db)
+    keys_of = {e.id: _jira_keys(e, name_re)[0] for e in rows}
+    keys = sorted({k for ks in keys_of.values() for k in ks})
+    if not keys:
+        for e in rows:
+            e.jira_info_json = None
+        return 0, None
+    jira_settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    try:
+        issues = fetch_issue_basics(
+            (jira_settings.jira_base_url if jira_settings else None) or "",
+            (jira_settings.jira_email if jira_settings else None) or "",
+            (jira_settings.jira_api_token if jira_settings else None) or "",
+            keys,
+        )
+    except JiraClientError as exc:
+        return 0, str(exc)
+    for e in rows:
+        ks = keys_of[e.id]
+        e.jira_info_json = json.dumps({k: issues[k] for k in ks if k in issues}, ensure_ascii=False) if ks else None
+    return len(issues), None
 
 
 @router.get("", response_model=list[Enhancement])
@@ -368,6 +441,8 @@ def sync_enhancements(db: Session = Depends(get_db)):
         db.delete(enh)
     settings = user_settings_for_update(db)
     settings.enh_jira_field = outcome.get("jira_field")
+    db.flush()
+    jira_read, jira_error = _read_jira(db, _owned(db).all())
     db.commit()
     return SyncResult(
         created=created,
@@ -376,4 +451,6 @@ def sync_enhancements(db: Session = Depends(get_db)):
         total=len(read),
         view=outcome.get("view"),
         jira_field=outcome.get("jira_field"),
+        jira_read=jira_read,
+        jira_error=jira_error,
     )

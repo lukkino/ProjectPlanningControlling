@@ -1000,6 +1000,9 @@ export type EnhancementJiraMatch = {
   increment_code: string | null
   summary: string | null
   jira_status: string | null
+  fix_versions: string[]
+  // La issue esiste su Jira (ultima sync); null = non ancora verificata.
+  found: boolean | null
 }
 
 export type Enhancement = {
@@ -1026,9 +1029,13 @@ export type Enhancement = {
   jira: EnhancementJiraMatch[]
   // Origine delle chiavi Jira: campo Salesforce o nome dell'enhancement.
   jira_source: 'salesforce' | 'name' | null
-  // Increment associato a mano dall'utente.
+  // Increment: dalla fix version Jira (vince) o, se manca, scelto a mano.
   increment_id: number | null
   increment_code: string | null
+  increment_source: 'manual' | 'jira' | null
+  // Increment dalla fix version Jira.
+  jira_increment_id: number | null
+  jira_increment_code: string | null
   created_at: string | null
   modified_at: string | null
   synced_at: string | null
@@ -1044,6 +1051,8 @@ export type EnhancementsSyncResult = {
   total: number
   view: string | null
   jira_field: string | null
+  jira_read: number
+  jira_error: string | null
 }
 
 export type CommercialCodingSettings = { list_url: string; default_url?: string }

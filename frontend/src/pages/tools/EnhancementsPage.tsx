@@ -26,6 +26,18 @@ function stageClass(e: Enhancement): string {
 
 type JiraFilter = 'all' | 'missing' | 'linked' | 'outside'
 
+// Increment dell'enhancement come si mostra: da Jira (l'increment dell'app
+// della fix version o, se non e' nell'app, la fix version stessa), se no
+// quello scelto a mano.
+const fixVersionsOf = (e: Enhancement) => [...new Set(e.jira.flatMap((j) => j.fix_versions))]
+
+function incrementLabel(e: Enhancement): string | null {
+  if (e.increment_source === 'jira') return e.increment_code
+  const fixVersions = fixVersionsOf(e)
+  if (fixVersions.length > 0) return fixVersions.join(', ')
+  return e.increment_code
+}
+
 const JIRA_FILTERS: { value: JiraFilter; label: string; title: string }[] = [
   { value: 'all', label: 'Tutti', title: 'Tutti gli enhancement' },
   { value: 'missing', label: 'Senza Jira', title: 'Enhancement senza ID Jira (né in Salesforce né nel nome)' },
@@ -53,7 +65,7 @@ const searchable = (e: Enhancement) =>
     e.sf_owner,
     e.created_by,
     e.jira_key,
-    e.increment_code,
+    incrementLabel(e),
     ...e.jira.map((j) => j.increment_code),
     ...e.jira.map((j) => j.jira_status),
   ]
@@ -89,8 +101,10 @@ export function EnhancementsPage() {
   })
   const [hiddenStages, setHiddenStages] = useState<Set<string>>(new Set())
   const [jiraFilter, setJiraFilter] = useState<JiraFilter>('all')
-  // Filtro per increment associato: tutti, nessuno o uno in particolare.
-  const [incrementFilter, setIncrementFilter] = useState<'all' | 'none' | number>('all')
+  // Filtro per increment (come mostrato nella colonna): tutti, nessuno o uno.
+  const [incrementFilter, setIncrementFilter] = useState<{ kind: 'all' | 'none' } | { kind: 'one'; label: string }>({
+    kind: 'all',
+  })
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState<Set<number>>(new Set())
 
@@ -100,28 +114,26 @@ export function EnhancementsPage() {
   const stages = [...stageCounts.entries()].sort(([a], [b]) => a.localeCompare(b))
   const jiraCounts = { all: all.length, missing: 0, outside: 0, linked: 0 }
   for (const e of all) jiraCounts[jiraState(e)] += 1
-  // Increment con almeno un enhancement associato (piu' quello scelto nel
-  // filtro, anche se nel frattempo e' rimasto vuoto), in ordine di codice.
-  const incrementCounts = new Map<number, { code: string; count: number }>()
+  // Increment con almeno un enhancement (piu' quello scelto nel filtro,
+  // anche se nel frattempo e' rimasto vuoto), in ordine alfabetico.
+  const incrementCounts = new Map<string, number>()
   for (const e of all) {
-    if (e.increment_id == null) continue
-    const entry = incrementCounts.get(e.increment_id) ?? { code: e.increment_code ?? String(e.increment_id), count: 0 }
-    entry.count += 1
-    incrementCounts.set(e.increment_id, entry)
+    const label = incrementLabel(e)
+    if (label) incrementCounts.set(label, (incrementCounts.get(label) ?? 0) + 1)
   }
-  if (typeof incrementFilter === 'number' && !incrementCounts.has(incrementFilter)) {
-    const code = increments?.find((p) => p.id === incrementFilter)?.code ?? String(incrementFilter)
-    incrementCounts.set(incrementFilter, { code, count: 0 })
+  if (incrementFilter.kind === 'one' && !incrementCounts.has(incrementFilter.label)) {
+    incrementCounts.set(incrementFilter.label, 0)
   }
-  const incrementOptions = [...incrementCounts.entries()].sort(([, a], [, b]) => a.code.localeCompare(b.code))
-  const withoutIncrement = all.filter((e) => e.increment_id == null).length
+  const incrementOptions = [...incrementCounts.entries()].sort(([a], [b]) => a.localeCompare(b))
+  const withoutIncrement = all.filter((e) => !incrementLabel(e)).length
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const visible = all.filter(
     (e) =>
       !hiddenStages.has(e.stage ?? '-') &&
       (jiraFilter === 'all' || jiraState(e) === jiraFilter) &&
-      (incrementFilter === 'all' ||
-        (incrementFilter === 'none' ? e.increment_id == null : e.increment_id === incrementFilter)) &&
+      (incrementFilter.kind === 'one'
+        ? incrementLabel(e) === incrementFilter.label
+        : incrementFilter.kind === 'all' || !incrementLabel(e)) &&
       words.every((w) => searchable(e).includes(w)),
   )
   const lastSync = all.reduce<string | null>(
@@ -191,7 +203,13 @@ export function EnhancementsPage() {
           Letti {sync.data.total} enhancement{sync.data.view && ` dalla vista "${sync.data.view}"`}: {sync.data.created}{' '}
           nuovi, {sync.data.updated} aggiornati
           {sync.data.removed > 0 && `, ${sync.data.removed} rimossi (non più nella vista)`}.
+          {sync.data.jira_read > 0 && ` Lette da Jira ${sync.data.jira_read} issue (stato e fix version).`}
         </p>
+      )}
+      {sync.isSuccess && sync.data.jira_error && (
+        <div className="error-banner">
+          Stato e fix version non letti da Jira ({sync.data.jira_error}): restano quelli della lettura precedente.
+        </div>
       )}
       {error && <div className="error-banner">{(error as Error).message}</div>}
       {settings && !settings.jira_field && all.length > 0 && (
@@ -248,26 +266,38 @@ export function EnhancementsPage() {
         <div className="filter-group" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
           <span className="filter-group-label">Increment</span>
           {[
-            { value: 'all' as const, label: 'Tutti', count: all.length, title: 'Tutti gli enhancement' },
-            { value: 'none' as const, label: 'Nessuno', count: withoutIncrement, title: 'Enhancement senza increment associato' },
-            ...incrementOptions.map(([id, { code, count }]) => ({
-              value: id,
-              label: code,
+            { key: 'all', label: 'Tutti', count: all.length, title: 'Tutti gli enhancement', value: { kind: 'all' as const } },
+            {
+              key: 'none',
+              label: 'Nessuno',
+              count: withoutIncrement,
+              title: 'Enhancement senza increment (né da Jira né scelto a mano)',
+              value: { kind: 'none' as const },
+            },
+            ...incrementOptions.map(([label, count]) => ({
+              key: `one:${label}`,
+              label,
               count,
-              title: `Enhancement associati a ${code}`,
+              title: `Enhancement di ${label}`,
+              value: { kind: 'one' as const, label },
             })),
-          ].map((f) => (
+          ].map((f) => {
+            const active =
+              incrementFilter.kind === f.value.kind &&
+              (f.value.kind !== 'one' || (incrementFilter.kind === 'one' && incrementFilter.label === f.value.label))
+            return (
             <button
-              key={f.value}
+              key={f.key}
               type="button"
               title={f.title}
-              className={`btn filter-btn${incrementFilter === f.value ? ' active' : ''}`}
-              aria-pressed={incrementFilter === f.value}
+              className={`btn filter-btn${active ? ' active' : ''}`}
+              aria-pressed={active}
               onClick={() => setIncrementFilter(f.value)}
             >
               {f.label} <span className="muted">{f.count}</span>
             </button>
-          ))}
+            )
+          })}
         </div>
 
         {isLoading ? (
@@ -319,8 +349,18 @@ export function EnhancementsPage() {
                           <JiraCell enhancement={e} />
                         </td>
                         <td className="nowrap">
-                          {e.jira.some((j) => j.jira_status)
-                            ? e.jira.map((j) => j.jira_status ?? '-').join(', ')
+                          {e.jira.some((j) => j.jira_status || j.found === false)
+                            ? e.jira.map((j) => (
+                                <div key={j.key}>
+                                  {j.found === false ? (
+                                    <span style={{ color: 'var(--warning)' }} title={`${j.key} non esiste su Jira (o non è visibile)`}>
+                                      ⚠ non trovata
+                                    </span>
+                                  ) : (
+                                    (j.jira_status ?? '-')
+                                  )}
+                                </div>
+                              ))
                             : dash}
                         </td>
                         <td onClick={(ev) => ev.stopPropagation()}>
@@ -388,8 +428,10 @@ function JiraCell({ enhancement: e }: { enhancement: Enhancement }) {
   )
 }
 
-// Increment associato a mano. Se l'ID Jira dell'enhancement e' nel backlog
-// di un altro increment, un avviso lo segnala.
+// Increment dell'enhancement. Con una fix version su Jira vince quella e si
+// scrive come testo: l'increment dell'app che le corrisponde o, se non e'
+// nell'app, la fix version cosi' com'e' (si cambia su Jira). Senza fix
+// version, si sceglie a mano.
 function IncrementSelect({
   enhancement: e,
   increments,
@@ -401,13 +443,20 @@ function IncrementSelect({
   disabled: boolean
   onChange: (incrementId: number | null) => void
 }) {
-  const fromJira = e.jira.filter((j) => j.increment_id != null)
-  const mismatch = e.increment_id != null && fromJira.length > 0 && !fromJira.some((j) => j.increment_id === e.increment_id)
+  const fixVersions = fixVersionsOf(e)
+  if (fixVersions.length > 0) {
+    const app = e.increment_source === 'jira' ? increments.find((p) => p.id === e.increment_id) : undefined
+    return (
+      <span title={`Dalla fix version Jira (${fixVersions.join(', ')}): si cambia su Jira`}>
+        {app ? `${app.code} · ${app.name}` : (e.increment_code ?? fixVersions.join(', '))}
+      </span>
+    )
+  }
   const sorted = [...increments].sort((a, b) => a.code.localeCompare(b.code))
   return (
-    <span className="nowrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <select
+    <select
         aria-label={`Increment dell'enhancement ${e.request_id ?? e.sf_id}`}
+        title={e.increment_source === 'manual' ? 'Scelto a mano (la issue Jira non ha fix version)' : undefined}
         value={e.increment_id ?? ''}
         disabled={disabled}
         onChange={(ev) => onChange(ev.target.value ? Number(ev.target.value) : null)}
@@ -419,15 +468,6 @@ function IncrementSelect({
           </option>
         ))}
       </select>
-      {mismatch && (
-        <span
-          style={{ color: 'var(--warning)' }}
-          title={`L'issue Jira è nel backlog di ${fromJira.map((j) => j.increment_code).join(', ')}, non dell'increment scelto`}
-        >
-          ⚠
-        </span>
-      )}
-    </span>
   )
 }
 
@@ -494,6 +534,7 @@ function EnhancementDetail({ enhancement: e }: { enhancement: Enhancement }) {
     ['Case collegati', e.cases],
     ['ID Jira (Salesforce)', e.jira_key],
     ['ID Jira dal nome', e.jira_source === 'name' ? e.jira.map((j) => j.key).join(', ') : null],
+    ['Fix version Jira', e.jira.flatMap((j) => j.fix_versions).join(', ') || null],
     ['Creato da', e.created_by],
     ['Creato il', e.created_at ? parseBackendDateTime(e.created_at).toLocaleDateString('it-IT') : null],
   ]

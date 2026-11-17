@@ -796,6 +796,44 @@ EXPAND_STATUS_OBSOLETE = "INVALID"
 EXPANDED_BY_PHRASE = "is expanded by"
 
 
+BULK_FETCH_PATH = "/rest/api/3/issue/bulkfetch"
+
+
+def fetch_issue_basics(base_url: str, email: str, api_token: str, keys: list[str]) -> dict[str, dict]:
+    """Stato, fix version e summary di issue Jira date per chiave (fino a
+    100 per chiamata): {chiave: {"status", "fix_versions", "summary"}}. Le
+    chiavi che non esistono (o non visibili) mancano dal risultato, senza
+    errore."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+    base_url = base_url.rstrip("/")
+    result: dict[str, dict] = {}
+    unique = sorted(set(keys))
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            for i in range(0, len(unique), 100):
+                response = client.post(
+                    f"{base_url}{BULK_FETCH_PATH}",
+                    json={"issueIdsOrKeys": unique[i : i + 100], "fields": ["status", "fixVersions", "summary"]},
+                )
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in Configurazione")
+                response.raise_for_status()
+                for raw in response.json().get("issues", []):
+                    f = raw.get("fields") or {}
+                    result[raw.get("key", "")] = {
+                        "status": (f.get("status") or {}).get("name"),
+                        "fix_versions": [v.get("name", "") for v in f.get("fixVersions") or [] if v.get("name")],
+                        "summary": f.get("summary"),
+                    }
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+    return result
+
+
 def fetch_requirement_issues(
     base_url: str, email: str, api_token: str, jira_project: str, issue_type: str
 ) -> list[dict]:

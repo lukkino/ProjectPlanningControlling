@@ -523,7 +523,10 @@ def run_budget_migrations() -> None:
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
         "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'"), ("fte_percent", "FLOAT DEFAULT 100")],
         "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
-        "tool_enhancements": [("increment_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL")],
+        "tool_enhancements": [
+            ("increment_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL"),
+            ("jira_info_json", "TEXT"),
+        ],
     }
     for table, columns in added.items():
         existing = {col["name"] for col in inspector.get_columns(table)}

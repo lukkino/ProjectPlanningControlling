@@ -1241,8 +1241,12 @@ class SalesforceEnhancement(Base):
     sf_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     jira_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Dati Jira delle issue collegate, letti alla sync: JSON {chiave:
+    # {"status", "fix_versions", "summary"}} (chiavi inesistenti assenti).
+    jira_info_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Increment (UI; models.Project) associato a mano dall'utente: non viene
-    # da Salesforce, la sync non lo tocca.
+    # da Salesforce, la sync non lo tocca. Vale solo se la fix version Jira
+    # non indica un increment (quella vince).
     increment_id: Mapped[int | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
