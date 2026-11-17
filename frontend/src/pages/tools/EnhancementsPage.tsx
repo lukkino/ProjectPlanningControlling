@@ -40,7 +40,7 @@ function incrementLabel(e: Enhancement): string | null {
 
 const JIRA_FILTERS: { value: JiraFilter; label: string; title: string }[] = [
   { value: 'all', label: 'Tutti', title: 'Tutti gli enhancement' },
-  { value: 'missing', label: 'Senza Jira', title: 'Enhancement senza ID Jira (né in Salesforce né nel nome)' },
+  { value: 'missing', label: 'Senza Jira', title: 'Enhancement senza ID Jira (né in Salesforce, né inserito a mano, né nel nome)' },
   { value: 'outside', label: 'Jira fuori backlog', title: "Con ID Jira, ma la issue non è nel backlog di nessun tuo increment" },
   { value: 'linked', label: 'In un increment', title: 'Con ID Jira nel backlog di un tuo increment' },
 ]
@@ -320,7 +320,7 @@ export function EnhancementsPage() {
                   <th>Owner</th>
                   <th>Due date</th>
                   <th>Release</th>
-                  <th style={{ width: 120 }}>Jira</th>
+                  <th style={{ width: 140 }}>Jira</th>
                   <th>Stato Jira</th>
                   <th title="Increment a cui appartiene l'enhancement, scelto a mano">Increment</th>
                   <th>Modificato</th>
@@ -346,7 +346,15 @@ export function EnhancementsPage() {
                         <td className="nowrap">{formatIsoDate(e.expected_due_date) ?? '-'}</td>
                         <td className="nowrap">{formatIsoDate(e.release_date) ?? '-'}</td>
                         <td onClick={(ev) => ev.stopPropagation()}>
-                          <JiraCell enhancement={e} />
+                          <JiraCell
+                            enhancement={e}
+                            editable={can('editor')}
+                            onSaved={(saved) =>
+                              queryClient.setQueryData<Enhancement[]>(['enhancements'], (old) =>
+                                old?.map((x) => (x.id === saved.id ? saved : x)),
+                              )
+                            }
+                          />
                         </td>
                         <td className="nowrap">
                           {e.jira.some((j) => j.jira_status || j.found === false)
@@ -394,36 +402,112 @@ export function EnhancementsPage() {
   )
 }
 
-// Issue Jira dell'enhancement: link a Jira e, se e' nel backlog di un tuo
-// increment, link alla sua Dashboard con lo stato Jira.
-function JiraCell({ enhancement: e }: { enhancement: Enhancement }) {
+const JIRA_ORIGIN: Record<string, string> = {
+  salesforce: 'dal campo ID Jira di Salesforce',
+  manual: 'inserita a mano',
+  name: "letta dal nome dell'enhancement",
+}
+
+// Issue Jira dell'enhancement: solo l'ID con il link a Jira (stato e
+// increment hanno le loro colonne; da dove arriva la chiave resta nel
+// tooltip). Finche' non arriva dal campo Salesforce, l'ID si puo' inserire a
+// mano incollando il link alla issue (o scrivendo la chiave): ✎.
+function JiraCell({
+  enhancement: e,
+  editable,
+  onSaved,
+}: {
+  enhancement: Enhancement
+  editable: boolean
+  onSaved: (saved: Enhancement) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const save = useMutation({
+    mutationFn: (value: string) => api.tools.enhancements.setJiraKey(e.id, value),
+    onSuccess: (saved) => {
+      onSaved(saved)
+      setEditing(false)
+    },
+  })
+  const canEdit = editable && e.jira_source !== 'salesforce'
+
+  if (editing) {
+    return (
+      <div style={{ display: 'grid', gap: 4, minWidth: 220 }}>
+        <input
+          autoFocus
+          type="text"
+          value={draft}
+          placeholder="Link o chiave Jira (PTBSYS-1234)"
+          aria-label={`ID Jira dell'enhancement ${e.request_id ?? e.sf_id}`}
+          onChange={(ev) => setDraft(ev.target.value)}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter') save.mutate(draft)
+            if (ev.key === 'Escape') setEditing(false)
+          }}
+        />
+        <span style={{ display: 'flex', gap: 6 }}>
+          <button className="btn" disabled={save.isPending} onClick={() => save.mutate(draft)}>
+            {save.isPending ? 'Salvataggio...' : 'Salva'}
+          </button>
+          {e.manual_jira_key && (
+            <button className="link-btn" disabled={save.isPending} onClick={() => save.mutate('')}>
+              Togli
+            </button>
+          )}
+          <button className="link-btn" onClick={() => setEditing(false)}>
+            Annulla
+          </button>
+        </span>
+        {save.isError && <span style={{ color: 'var(--danger)', fontSize: 12 }}>{(save.error as Error).message}</span>}
+      </div>
+    )
+  }
+
+  const edit = canEdit && (
+    <button
+      type="button"
+      className="link-btn"
+      title={e.manual_jira_key ? "Cambia l'ID Jira inserito a mano" : "Inserisci l'ID Jira: incolla il link alla issue"}
+      aria-label={`Modifica l'ID Jira dell'enhancement ${e.request_id ?? e.sf_id}`}
+      onClick={() => {
+        save.reset()
+        setDraft(e.manual_jira_key ?? '')
+        setEditing(true)
+      }}
+    >
+      ✎
+    </button>
+  )
   if (e.jira.length === 0) {
     return (
-      <span className="badge todo" title="Nessun ID Jira, né in Salesforce né nel nome">
-        Senza Jira
+      <span className="nowrap">
+        <span className="badge todo" title="Nessun ID Jira, né in Salesforce, né inserito a mano, né nel nome">
+          Senza Jira
+        </span>{' '}
+        {edit}
       </span>
     )
   }
-  // Solo l'ID: stato Jira e increment hanno le loro colonne. Da dove arriva
-  // la chiave (campo Salesforce o nome) resta nel tooltip.
-  const origin =
-    e.jira_source === 'name'
-      ? "letta dal nome dell'enhancement, non dal campo ID Jira di Salesforce"
-      : 'dal campo ID Jira di Salesforce'
+  const origin = JIRA_ORIGIN[e.jira_source ?? ''] ?? ''
   return (
-    <div style={{ display: 'grid', gap: 2 }}>
-      {e.jira.map((j) => (
-        <a
-          key={j.key}
-          className="nowrap"
-          href={`${JIRA_BROWSE}${j.key}`}
-          target="_blank"
-          rel="noreferrer"
-          title={`Apri ${j.key} in Jira (chiave ${origin})`}
-        >
-          {j.key}
-        </a>
-      ))}
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, whiteSpace: 'nowrap' }}>
+      <div style={{ display: 'grid', gap: 2, flex: 'none' }}>
+        {e.jira.map((j) => (
+          <a
+            key={j.key}
+            className="nowrap"
+            href={`${JIRA_BROWSE}${j.key}`}
+            target="_blank"
+            rel="noreferrer"
+            title={`Apri ${j.key} in Jira (chiave ${origin})`}
+          >
+            {j.key}
+          </a>
+        ))}
+      </div>
+      {edit}
     </div>
   )
 }
@@ -533,6 +617,7 @@ function EnhancementDetail({ enhancement: e }: { enhancement: Enhancement }) {
     ['Target release', e.target_release],
     ['Case collegati', e.cases],
     ['ID Jira (Salesforce)', e.jira_key],
+    ['ID Jira inserito a mano', e.manual_jira_key],
     ['ID Jira dal nome', e.jira_source === 'name' ? e.jira.map((j) => j.key).join(', ') : null],
     ['Fix version Jira', e.jira.flatMap((j) => j.fix_versions).join(', ') || null],
     ['Creato da', e.created_by],

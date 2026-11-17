@@ -526,6 +526,7 @@ def run_budget_migrations() -> None:
         "tool_enhancements": [
             ("increment_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL"),
             ("jira_info_json", "TEXT"),
+            ("manual_jira_key", "VARCHAR(255)"),
         ],
     }
     for table, columns in added.items():

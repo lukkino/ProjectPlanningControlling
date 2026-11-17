@@ -1244,6 +1244,10 @@ class SalesforceEnhancement(Base):
     # Dati Jira delle issue collegate, letti alla sync: JSON {chiave:
     # {"status", "fix_versions", "summary"}} (chiavi inesistenti assenti).
     jira_info_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ID Jira inserito a mano dall'utente (es. "PTBSYS-4059"), finche'
+    # Salesforce non ha il campo: vince sulla chiave letta dal nome, perde
+    # su quella del campo Salesforce. La sync non lo tocca.
+    manual_jira_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Increment (UI; models.Project) associato a mano dall'utente: non viene
     # da Salesforce, la sync non lo tocca. Vale solo se la fix version Jira
     # non indica un increment (quella vince).

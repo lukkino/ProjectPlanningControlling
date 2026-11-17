@@ -75,8 +75,10 @@ class Enhancement(BaseModel):
     created_by: str | None
     jira_key: str | None
     jira: list[JiraMatch] = []
+    # ID Jira inserito a mano (link o chiave normalizzati in chiave).
+    manual_jira_key: str | None = None
     # Da dove vengono le chiavi Jira: "salesforce" (campo con l'ID Jira),
-    # "name" (scritte nel nome dell'enhancement), null se nessuna.
+    # "manual" (inserita a mano), "name" (scritte nel nome), null se nessuna.
     jira_source: str | None = None
     # Increment dell'enhancement: quello della fix version Jira o, se manca,
     # quello scelto a mano (vedi PUT /{id}); increment_source dice quale.
@@ -93,7 +95,10 @@ class Enhancement(BaseModel):
 
 
 class EnhancementUpdate(BaseModel):
+    # Si cambiano solo i campi presenti nella richiesta.
     increment_id: int | None = None
+    # Link alla issue Jira o chiave (es. "PTBSYS-4059"); vuoto = toglie.
+    manual_jira_key: str | None = None
 
 
 class EnhancementsSettings(BaseModel):
@@ -168,10 +173,13 @@ def _name_key_re(db: Session) -> re.Pattern:
 
 def _jira_keys(e: models.SalesforceEnhancement, name_re: re.Pattern) -> tuple[list[str], str | None]:
     """Chiavi Jira dell'enhancement: dal campo Salesforce con l'ID Jira se
-    valorizzato, se no dal nome."""
+    valorizzato, se no quella inserita a mano, se no dal nome."""
     keys = list(dict.fromkeys(JIRA_KEY_RE.findall((e.jira_key or "").upper())))
     if keys:
         return keys, "salesforce"
+    keys = list(dict.fromkeys(JIRA_KEY_RE.findall((e.manual_jira_key or "").upper())))
+    if keys:
+        return keys, "manual"
     keys = list(dict.fromkeys(f"{p.upper()}-{n}" for p, n in name_re.findall(e.name or "")))
     return keys, ("name" if keys else None)
 
@@ -286,16 +294,41 @@ def list_enhancements(db: Session = Depends(get_db)):
 
 @router.put("/{enhancement_id}", response_model=Enhancement)
 def update_enhancement(enhancement_id: int, payload: EnhancementUpdate, db: Session = Depends(get_db)):
-    """Associa (o toglie, con null) un increment all'enhancement."""
+    """Associa (o toglie, con null) un increment all'enhancement e/o
+    imposta (o toglie) l'ID Jira inserito a mano: con un ID nuovo si leggono
+    subito da Jira stato e fix version."""
     enh = _owned(db).filter(models.SalesforceEnhancement.id == enhancement_id).first()
     if enh is None:
         raise HTTPException(status_code=404, detail="Enhancement non trovato")
-    increments = _increments(db)
-    if payload.increment_id is not None and payload.increment_id not in increments:
-        raise HTTPException(status_code=400, detail="Increment non trovato")
-    enh.increment_id = payload.increment_id
+    if "increment_id" in payload.model_fields_set:
+        increments = _increments(db)
+        if payload.increment_id is not None and payload.increment_id not in increments:
+            raise HTTPException(status_code=400, detail="Increment non trovato")
+        enh.increment_id = payload.increment_id
+    if "manual_jira_key" in payload.model_fields_set:
+        enh.manual_jira_key = _parse_jira_key(payload.manual_jira_key)
+        db.flush()
+        _read_jira(db, [enh])
     db.commit()
     return _with_jira(db, [enh])[0]
+
+
+def _parse_jira_key(value: str | None) -> str | None:
+    """Chiave Jira da un link (".../browse/PTBSYS-4059?...") o dalla chiave
+    scritta a mano (anche minuscola). Vuoto = nessuna; 400 se non si
+    riconosce."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    match = re.search(r"/browse/([A-Za-z][A-Za-z0-9_]*-\d+)", text) or re.fullmatch(
+        r"\s*([A-Za-z][A-Za-z0-9_]*-\d+)\s*", text
+    )
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="ID Jira non riconosciuto: incolla il link alla issue (…/browse/PTBSYS-1234) o scrivi la chiave.",
+        )
+    return match.group(1).upper()
 
 
 @router.get("/settings", response_model=EnhancementsSettings)

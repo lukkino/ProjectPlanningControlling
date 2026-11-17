@@ -649,6 +649,9 @@ export const api = {
       sync: () => post<EnhancementsSyncResult>('/tools/enhancements/sync'),
       setIncrement: (id: number, incrementId: number | null) =>
         put<Enhancement>(`/tools/enhancements/${id}`, { increment_id: incrementId }),
+      // Link o chiave Jira; '' = toglie.
+      setJiraKey: (id: number, value: string) =>
+        put<Enhancement>(`/tools/enhancements/${id}`, { manual_jira_key: value }),
       getSettings: () => request<EnhancementsSettings>('/tools/enhancements/settings'),
       updateSettings: (data: EnhancementsSettings) => put<EnhancementsSettings>('/tools/enhancements/settings', data),
       syncProgress: () => request<SyncProgress>('/tools/enhancements/sync/progress'),
