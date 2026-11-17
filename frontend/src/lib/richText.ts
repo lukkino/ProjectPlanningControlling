@@ -4,8 +4,9 @@ import { Color, TextStyle } from '@tiptap/extension-text-style'
 import { Extension } from '@tiptap/core'
 import { Fragment } from '@tiptap/pm/model'
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { Plugin, TextSelection } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 
@@ -113,8 +114,9 @@ const NumberedList = OrderedList.extend({
   },
 })
 
-// Voci di elenco "Mandatorio" (es. nello Scope): attributo delle voci di
-// elenchi puntati, numerati e di controllo, salvato come data-mandatory.
+// Voci di elenco "Mandatorio" e "Tentative" (es. nello Scope): attributi
+// delle voci di elenchi puntati, numerati e di controllo, salvati come
+// data-mandatory / data-tentative. Una voce e' l'una o l'altra, non entrambe.
 const LIST_ITEM_TYPES = ['listItem', 'taskItem']
 // Link a una issue Jira (".../browse/PTBSYS-3416") il cui testo e' l'indirizzo
 // stesso: si mostra solo la chiave, il link resta. Vale incollando o
@@ -156,24 +158,83 @@ const JiraLinkText = Extension.create({
   },
 })
 
-const Mandatory = Extension.create({
-  name: 'mandatory',
+export type ItemFlag = 'mandatory' | 'tentative'
+
+const flagAttribute = (flag: ItemFlag) => ({
+  default: false,
+  parseHTML: (element: HTMLElement) => element.getAttribute(`data-${flag}`) === 'true',
+  renderHTML: (attributes: Partial<Record<ItemFlag, boolean>>) => (attributes[flag] ? { [`data-${flag}`]: 'true' } : {}),
+})
+
+const ItemFlags = Extension.create({
+  name: 'itemFlags',
   addGlobalAttributes() {
+    return [{ types: LIST_ITEM_TYPES, attributes: { mandatory: flagAttribute('mandatory'), tentative: flagAttribute('tentative') } }]
+  },
+})
+
+// Voci di elenco che citano una issue Jira in lavorazione (stato In Progress
+// nel backlog): un razzo dopo il testo, come nella presentazione. Solo
+// decorazione, non finisce nell'HTML salvato; le chiavi arrivano da fuori
+// (setInProgressKeys). Contano i link alla issue e le chiavi scritte nel
+// testo della voce stessa (non quelle delle sotto-voci).
+const inProgressKey = new PluginKey<Set<string>>('jiraInProgress')
+const BROWSE_KEY_RE = /\/browse\/([A-Z][A-Z0-9_]*-\d+)/i
+const TEXT_KEY_RE = /\b[A-Z][A-Z0-9]+-\d+\b/g
+
+function textblockKeys(block: PMNode): string[] {
+  const keys = new Set<string>()
+  block.descendants((node) => {
+    if (!node.isText) return
+    const link = node.marks.find((m) => m.type.name === 'link')
+    const match = link ? BROWSE_KEY_RE.exec(String(link.attrs.href ?? '')) : null
+    if (match) keys.add(match[1].toUpperCase())
+    for (const m of (node.text ?? '').matchAll(TEXT_KEY_RE)) keys.add(m[0])
+  })
+  return [...keys]
+}
+
+const JiraInProgress = Extension.create({
+  name: 'jiraInProgress',
+  addProseMirrorPlugins() {
     return [
-      {
-        types: LIST_ITEM_TYPES,
-        attributes: {
-          mandatory: {
-            default: false,
-            parseHTML: (element: HTMLElement) => element.getAttribute('data-mandatory') === 'true',
-            renderHTML: (attributes: { mandatory?: boolean }) =>
-              attributes.mandatory ? { 'data-mandatory': 'true' } : {},
+      new Plugin<Set<string>>({
+        key: inProgressKey,
+        state: {
+          init: () => new Set<string>(),
+          apply: (tr, keys) => (tr.getMeta(inProgressKey) as Set<string> | undefined) ?? keys,
+        },
+        props: {
+          decorations: (state) => {
+            const keys = inProgressKey.getState(state)
+            if (!keys?.size) return null
+            const decorations: Decoration[] = []
+            state.doc.descendants((node, pos) => {
+              if (!LIST_ITEM_TYPES.includes(node.type.name)) return
+              const first = node.firstChild
+              if (!first?.isTextblock) return
+              const found = textblockKeys(first).filter((k) => keys.has(k))
+              if (found.length === 0) return
+              const from = pos + 1
+              decorations.push(
+                Decoration.node(from, from + first.nodeSize, {
+                  class: 'scope-in-progress',
+                  title: `In progress su Jira: ${found.join(', ')}`,
+                }),
+              )
+            })
+            return DecorationSet.create(state.doc, decorations)
           },
         },
-      },
+      }),
     ]
   },
 })
+
+export function setInProgressKeys(editor: Editor, keys: Iterable<string>) {
+  if (editor.isDestroyed) return
+  editor.view.dispatch(editor.state.tr.setMeta(inProgressKey, new Set(keys)))
+}
 
 // Voce di elenco piu' interna attorno al cursore.
 export function currentListItem(state: EditorState): { node: PMNode; pos: number } | null {
@@ -185,16 +246,20 @@ export function currentListItem(state: EditorState): { node: PMNode; pos: number
   return null
 }
 
-// Attiva/toglie "Mandatorio" sulla voce del cursore e riordina il suo elenco:
-// prima le voci mandatorie, poi le altre, ognuna nel suo ordine di prima (le
+// Attiva/toglie "Mandatorio" o "Tentative" sulla voce del cursore (attivarne
+// uno toglie l'altro) e riordina il suo elenco: prima le voci mandatorie, poi
+// le normali, in fondo le tentative, ognuna nel suo ordine di prima (le
 // sotto-voci annidate si spostano con la loro voce). Gli elenchi dello stesso
 // tipo attaccati a quello della voce (separati al piu' da righe vuote: capita
 // premendo due volte Invio) vengono prima riuniti in uno solo, cosi' la voce
 // sale davvero in cima; un titolo o un paragrafo con testo li tiene separati.
-export function toggleMandatory(editor: Editor) {
+export function toggleItemFlag(editor: Editor, flag: ItemFlag) {
   const item = currentListItem(editor.state)
   if (!item) return
-  const tr = editor.state.tr.setNodeMarkup(item.pos, undefined, { ...item.node.attrs, mandatory: !item.node.attrs.mandatory })
+  const on = !item.node.attrs[flag]
+  const other: ItemFlag = flag === 'mandatory' ? 'tentative' : 'mandatory'
+  const attrs = { ...item.node.attrs, [flag]: on, ...(on ? { [other]: false } : {}) }
+  const tr = editor.state.tr.setNodeMarkup(item.pos, undefined, attrs)
   const toggled = tr.doc.nodeAt(item.pos)
   const $item = tr.doc.resolve(item.pos)
   const listDepth = $item.depth
@@ -222,7 +287,8 @@ export function toggleMandatory(editor: Editor) {
     const n = container.child(i)
     if (sameList(n)) n.forEach((child) => items.push(child))
   }
-  const sorted = [...items.filter((c) => c.attrs.mandatory), ...items.filter((c) => !c.attrs.mandatory)]
+  const rank = (c: PMNode) => (c.attrs.mandatory ? 0 : c.attrs.tentative ? 2 : 1)
+  const sorted = [0, 1, 2].flatMap((r) => items.filter((c) => rank(c) === r))
 
   // Posizione del primo elenco del gruppo e fine dell'ultimo.
   const containerStart = listDepth - 1 === 0 ? 0 : $item.start(listDepth - 1)
@@ -272,8 +338,9 @@ export function richTextExtensions({ editable, checkable = false }: { editable: 
     TextStyle,
     Color,
     TableKit.configure({ table: { resizable: false } }),
-    Mandatory,
+    ItemFlags,
     JiraLinkText,
+    JiraInProgress,
   ]
 }
 

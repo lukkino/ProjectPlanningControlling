@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../api/client'
 import { ScopeBacklogCheck } from './ScopeBacklogCheck'
@@ -11,9 +11,10 @@ import {
   innermostList,
   richTextExtensions,
   currentListItem,
+  setInProgressKeys,
   setTaskCheckedFromDom,
   toEditorHtml,
-  toggleMandatory,
+  toggleItemFlag,
   toggleContinuedNumbering,
   toggleList,
   toggleNumberedList,
@@ -23,17 +24,28 @@ import {
 // spuntare anche in sola lettura, senza entrare in modifica; riceve il testo
 // aggiornato da salvare. syncPaused sospende il riallineamento al valore di
 // `text` mentre un salvataggio e' in corso, per non far tornare indietro per
-// un attimo una spunta fatta nel frattempo.
+// un attimo una spunta fatta nel frattempo. inProgressKeys: chiavi Jira delle
+// issue in lavorazione, le voci che le citano hanno un razzo.
 type RichTextProps = {
   text: string | null | undefined
   onCheck?: (value: string | null) => void
   syncPaused?: boolean
+  inProgressKeys?: string[]
+}
+
+const NO_KEYS: string[] = []
+
+function useInProgressKeys(editor: Editor, keys: string[]) {
+  const joined = keys.join(',')
+  useEffect(() => {
+    setInProgressKeys(editor, joined ? joined.split(',') : [])
+  }, [editor, joined])
 }
 
 // Sola lettura di un testo formattato (vedi lib/richText): stesso motore e
 // stesso CSS dell'editor, cosi' cio' che si vede modificando e' identico a
 // cio' che resta dopo il salvataggio.
-export function RichText({ text, onCheck, syncPaused = false }: RichTextProps) {
+export function RichText({ text, onCheck, syncPaused = false, inProgressKeys = NO_KEYS }: RichTextProps) {
   const checkable = !!onCheck
   const editor = useEditor(
     {
@@ -49,6 +61,7 @@ export function RichText({ text, onCheck, syncPaused = false }: RichTextProps) {
     if (syncPaused || editorToStoredHtml(editor) === (text || null)) return
     editor.commands.setContent(toEditorHtml(text))
   }, [editor, text, syncPaused])
+  useInProgressKeys(editor, inProgressKeys)
 
   const onCheckRef = useRef(onCheck)
   useEffect(() => {
@@ -211,6 +224,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         canMergeOrSplit: e.can().mergeOrSplit(),
         listItem: !!currentListItem(e.state),
         mandatory: !!currentListItem(e.state)?.node.attrs.mandatory,
+        tentative: !!currentListItem(e.state)?.node.attrs.tentative,
         canUndo: e.can().undo(),
         canRedo: e.can().redo(),
       }
@@ -282,7 +296,14 @@ function Toolbar({ editor }: { editor: Editor }) {
           title="Segna la voce dell'elenco come mandatoria (o togli il segno): le voci mandatorie vanno in cima al loro elenco"
           active={s.mandatory}
           disabled={!s.listItem}
-          onClick={() => toggleMandatory(editor)}
+          onClick={() => toggleItemFlag(editor, 'mandatory')}
+        />
+        <Tool
+          label="? Tentative"
+          title="Segna la voce dell'elenco come tentative, da fare solo se possibile (o togli il segno): le voci tentative vanno in fondo al loro elenco"
+          active={s.tentative}
+          disabled={!s.listItem}
+          onClick={() => toggleItemFlag(editor, 'tentative')}
         />
         <Tool label="⇥" title="Aumenta rientro: annida la voce nell'elenco (Tab)" disabled={!s.canIndent} onClick={indent} />
         <Tool label="⇤" title="Riduci rientro (Shift+Tab)" disabled={!s.canOutdent} onClick={outdent} />
@@ -338,19 +359,21 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 type EditorProps = {
   initialText: string | null
+  inProgressKeys: string[]
   saving: boolean
   error: Error | null
   onSave: (value: string | null) => void
   onCancel: () => void
 }
 
-function ScopeEditor({ initialText, saving, error, onSave, onCancel }: EditorProps) {
+function ScopeEditor({ initialText, inProgressKeys, saving, error, onSave, onCancel }: EditorProps) {
   const editor = useEditor({
     extensions: richTextExtensions({ editable: true }),
     content: toEditorHtml(initialText),
     autofocus: 'end',
     editorProps: { attributes: { class: 'rich-text', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Scope' } },
   })
+  useInProgressKeys(editor, inProgressKeys)
 
   return (
     <>
@@ -426,6 +449,15 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
   const [checking, setChecking] = useState(false)
   const queryClient = useQueryClient()
   const current = tab === 'schematic' ? scope : narrative
+  // Stessa query del backlog della Dashboard: issue in lavorazione ora.
+  const { data: backlog } = useQuery({
+    queryKey: ['backlog', projectId],
+    queryFn: () => api.backlog.list(projectId),
+  })
+  const inProgressKeys = useMemo(
+    () => (backlog ?? []).filter((i) => !i.archived_at && i.status === 'In Progress').map((i) => i.jira_key),
+    [backlog],
+  )
 
   const save = useMutation({
     mutationFn: (value: string | null) =>
@@ -551,6 +583,7 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
             text={current}
             onCheck={tab === 'schematic' ? (value) => save.mutate(value) : undefined}
             syncPaused={save.isPending}
+            inProgressKeys={inProgressKeys}
           />
         ) : (
           <p className="muted" style={{ margin: 0 }}>
@@ -568,6 +601,7 @@ export function ScopeCard({ projectId, scope, narrative }: Props) {
       {editing && (
         <ScopeEditor
           initialText={editorText}
+          inProgressKeys={inProgressKeys}
           saving={save.isPending}
           error={save.error as Error | null}
           onSave={(value) => save.mutate(value)}

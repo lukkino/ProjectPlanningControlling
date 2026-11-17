@@ -1212,6 +1212,45 @@ class CommercialCodingTicket(Base):
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class SalesforceEnhancement(Base):
+    """Tool Enhancements: un Enhancement (Opportunity) di una list view di
+    Salesforce, letto con l'API REST (vedi services/tools/enhancements.py).
+    jira_key: dal campo Salesforce con l'ID Jira, quando esistera'."""
+
+    __tablename__ = "tool_enhancements"
+    __table_args__ = (UniqueConstraint("owner_id", "sf_id", name="uq_enhancements_owner_sf"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # Id del record Opportunity in Salesforce.
+    sf_id: Mapped[str] = mapped_column(String(32))
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    priority: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    enhancement_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    product_line: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_release: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    expected_due_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    release_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accounts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cases: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    sf_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    jira_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Increment (UI; models.Project) associato a mano dall'utente: non viene
+    # da Salesforce, la sync non lo tocca.
+    increment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    modified_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ShippingAddress(Base):
     """Tool Modulo Spedizioni: rubrica indirizzi (mittenti e destinatari)."""
 
@@ -1295,6 +1334,11 @@ class UserSettings(Base):
     # Tool Commercial Coding: link alla lista SharePoint dei ticket (vuoto =
     # quella predefinita, vedi services/tools/commercial_coding.py).
     cc_tickets_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tool Enhancements: link alla list view Salesforce (vuoto = quella
+    # predefinita) e nome del campo con l'ID Jira trovato all'ultima lettura
+    # (vuoto = Salesforce non ha ancora il campo).
+    enh_list_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enh_jira_field: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class PurchaseRequisition(Base):

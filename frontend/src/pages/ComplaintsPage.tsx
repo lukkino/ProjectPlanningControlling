@@ -1081,7 +1081,7 @@ export function ComplaintsPage() {
 
 // Cella "ID Salesforce": link al case (diretto con il Case ID, altrimenti
 // alla ricerca per numero a 8 cifre); i ticket AX restano testo semplice.
-function SalesforceCaseLinks({ complaint: c }: { complaint: Complaint }) {
+export function SalesforceCaseLinks({ complaint: c }: { complaint: Complaint }) {
   // Id del record: dal Case trovato in Salesforce, se no dal campo Jira.
   const recordId = c.sf_record_id ?? c.salesforce_case_id
   if (recordId) {

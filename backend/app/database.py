@@ -152,6 +152,10 @@ def run_lightweight_migrations() -> None:
         if "cc_tickets_url" not in settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE user_settings ADD COLUMN cc_tickets_url TEXT"))
+        for column, ddl in (("enh_list_url", "TEXT"), ("enh_jira_field", "VARCHAR(128)")):
+            if column not in settings_columns:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {column} {ddl}"))
 
     if "complaints" in table_names:
         complaint_columns = {col["name"] for col in inspector.get_columns("complaints")}
@@ -519,6 +523,7 @@ def run_budget_migrations() -> None:
         "increment_resource_types": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
         "increment_team_members": [("company", "VARCHAR(8) DEFAULT 'SpA'"), ("fte_percent", "FLOAT DEFAULT 100")],
         "increment_hours_detail_rows": [("department", "VARCHAR(16)"), ("company", "VARCHAR(8) DEFAULT 'SpA'")],
+        "tool_enhancements": [("increment_id", "INTEGER REFERENCES projects(id) ON DELETE SET NULL")],
     }
     for table, columns in added.items():
         existing = {col["name"] for col in inspector.get_columns(table)}

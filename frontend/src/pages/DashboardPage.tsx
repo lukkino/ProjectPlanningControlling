@@ -21,10 +21,11 @@ import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import { SyncProgressModal } from '../components/SyncProgressModal'
-import type { BacklogItem, Phase } from '../api/types'
+import type { BacklogItem, Complaint, Phase } from '../api/types'
 import { ACTIVITY_PHASES, activityPhaseInfo, normalizePhaseName } from '../lib/activityPhases'
 import { planningLabel } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatDateTime, formatEpochDaysAsDate, formatIsoDate, latestSyncedAt, workingDaysBetween } from '../lib/dates'
+import { SalesforceCaseLinks } from './ComplaintsPage'
 import { useProjectContext } from './useProjectContext'
 
 // Palette categorica validata del progetto (skill data-viz): blu e arancio
@@ -401,6 +402,68 @@ function RecentlyClosedCard({
   )
 }
 
+// Complaint nell'increment: i Bug del backlog (in scope, non archiviati) che
+// sono anche nell'area Complaints, cioe' nati da un case Salesforce (il
+// backlog non ha il campo Jira "source type": si incrocia per chiave). Stato
+// Jira: il piu' recente tra la sync del backlog e quella dei Complaints.
+function ComplaintsCard({ items, complaints }: { items: BacklogItem[] | undefined; complaints: Complaint[] | undefined }) {
+  const byKey = new Map((complaints ?? []).map((c) => [c.jira_key, c]))
+  const rows = (items ?? [])
+    .filter((i) => i.in_scope && !i.archived_at && byKey.has(i.jira_key))
+    .sort((a, b) => a.priority_order - b.priority_order)
+    .map((item) => {
+      const complaint = byKey.get(item.jira_key) as Complaint
+      const complaintNewer = (complaint.last_synced_at ?? '') > (item.last_synced_at ?? '')
+      return { item, complaint, jiraStatus: (complaintNewer ? complaint.jira_status : item.jira_status) ?? item.jira_status }
+    })
+  return (
+    <div className="card">
+      <h3>Complaints in this Increment ({rows.length})</h3>
+      <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
+        Bug in scope nel backlog nati da un case Salesforce (presenti nell'area Complaints: aggiorna da lì se ne manca qualcuno).
+      </p>
+      {rows.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>
+          Nessun complaint nel backlog dell'increment.
+        </p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: 120 }}>ID Jira</th>
+                <th style={{ width: 150 }}>ID Salesforce</th>
+                <th>Summary</th>
+                <th style={{ width: 150 }}>Assignee</th>
+                <th style={{ width: 110 }}>Incluso in code freeze</th>
+                <th style={{ width: 150 }}>Stato Jira</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ item, complaint, jiraStatus }) => (
+                <tr key={item.id}>
+                  <td>
+                    <a href={`https://inpeco.atlassian.net/browse/${item.jira_key}`} target="_blank" rel="noreferrer">
+                      {item.jira_key}
+                    </a>
+                  </td>
+                  <td>
+                    <SalesforceCaseLinks complaint={complaint} />
+                  </td>
+                  <td style={{ whiteSpace: 'normal' }}>{item.summary ?? complaint.summary ?? <span className="muted">-</span>}</td>
+                  <td>{item.assignee ?? <span className="muted">-</span>}</td>
+                  <td>{item.included_in_codefreeze ? 'Yes' : 'No'}</td>
+                  <td>{jiraStatus ?? <span className="muted">-</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Tabella di issue della card qui sopra: le tre sezioni (chiuse, in progress,
 // da fare) cambiano solo nell'ultima colonna. Larghezze fisse sulle colonne
 // strette, cosi' le tre tabelle restano allineate tra loro.
@@ -509,6 +572,8 @@ export function DashboardPage() {
   })
 
   // Stessa query (e cache) della tab Backlog.
+  // Stessa query dell'area Complaints: per la tabella dei complaint nell'increment.
+  const { data: complaints } = useQuery({ queryKey: ['complaints'], queryFn: api.complaints.list })
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
@@ -710,6 +775,8 @@ export function DashboardPage() {
       <EarnedValueCard projectId={project.id} />
 
       <RecentlyClosedCard items={backlogItems} phases={phases} period={closedPeriod} setPeriod={setClosedPeriod} />
+
+      <ComplaintsCard items={backlogItems} complaints={complaints} />
 
       <div className="card">
         <h3>Ore usate nel tempo</h3>

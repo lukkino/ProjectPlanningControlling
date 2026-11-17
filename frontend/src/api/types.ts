@@ -313,7 +313,7 @@ export type ScenariosStatus = {
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
 export type SyncProgress = {
-  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets' | 'requisitions'
+  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets' | 'requisitions' | 'enhancements'
   done: number
   total: number
 }
@@ -990,6 +990,58 @@ export type CommercialCodingTicket = {
   synced_at: string | null
   url: string
   certification_url: string | null
+}
+
+// Tool Enhancements: un Enhancement (Opportunity) di una list view Salesforce.
+export type EnhancementJiraMatch = {
+  key: string
+  // Increment (UI) nel cui backlog c'e' la issue; null = non nel backlog.
+  increment_id: number | null
+  increment_code: string | null
+  summary: string | null
+  jira_status: string | null
+}
+
+export type Enhancement = {
+  id: number
+  sf_id: string
+  request_id: string | null
+  name: string | null
+  stage: string | null
+  priority: string | null
+  enhancement_type: string | null
+  source: string | null
+  product_line: string | null
+  target_release: string | null
+  expected_due_date: string | null
+  release_date: string | null
+  short_description: string | null
+  accounts: string | null
+  cases: string | null
+  is_closed: boolean
+  sf_owner: string | null
+  created_by: string | null
+  // Valore del campo Salesforce con l'ID Jira (quando esistera').
+  jira_key: string | null
+  jira: EnhancementJiraMatch[]
+  // Increment associato a mano dall'utente.
+  increment_id: number | null
+  increment_code: string | null
+  created_at: string | null
+  modified_at: string | null
+  synced_at: string | null
+  url: string
+}
+
+export type EnhancementsSettings = { list_url: string; default_url?: string; jira_field?: string | null }
+
+export type EnhancementsSyncResult = {
+  created: number
+  updated: number
+  removed: number
+  total: number
+  view: string | null
+  jira_field: string | null
 }
 
 export type CommercialCodingSettings = { list_url: string; default_url?: string }

@@ -24,6 +24,13 @@ export const TOOLS: ToolInfo[] = [
       'I tuoi ticket del portale Product Certification (Freshservice): stato, articolo, manufacturer e codici, letti dal portale con un clic.',
   },
   {
+    path: '/tools/enhancements',
+    icon: '💡',
+    name: 'Enhancements',
+    description:
+      'Gli Enhancement di una list view Salesforce (di default Enhancement ProTube) e il loro corrispettivo su Jira: in quale increment sono e quali non ce l\'hanno ancora.',
+  },
+  {
     path: '/tools/commercial-coding',
     icon: '🔖',
     name: 'Commercial Coding',

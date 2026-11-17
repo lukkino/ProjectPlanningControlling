@@ -22,6 +22,9 @@ import type {
   CertificationSyncResult,
   CertificationTicket,
   CommercialCodingSettings,
+  Enhancement,
+  EnhancementsSettings,
+  EnhancementsSyncResult,
   CommercialCodingSyncResult,
   CommercialCodingTicket,
   EarnedValue,
@@ -640,6 +643,15 @@ export const api = {
       updateSettings: (data: CommercialCodingSettings) =>
         put<CommercialCodingSettings>('/tools/commercial-coding/settings', data),
       syncProgress: () => request<SyncProgress>('/tools/commercial-coding/sync/progress'),
+    },
+    enhancements: {
+      list: () => request<Enhancement[]>('/tools/enhancements'),
+      sync: () => post<EnhancementsSyncResult>('/tools/enhancements/sync'),
+      setIncrement: (id: number, incrementId: number | null) =>
+        put<Enhancement>(`/tools/enhancements/${id}`, { increment_id: incrementId }),
+      getSettings: () => request<EnhancementsSettings>('/tools/enhancements/settings'),
+      updateSettings: (data: EnhancementsSettings) => put<EnhancementsSettings>('/tools/enhancements/settings', data),
+      syncProgress: () => request<SyncProgress>('/tools/enhancements/sync/progress'),
     },
     shipping: {
       addresses: () => request<ShippingAddress[]>('/tools/shipping/addresses'),

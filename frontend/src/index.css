@@ -1541,6 +1541,29 @@ ul.changelog-body { padding-left: 20px; }
   background: #fde8e8;
   color: var(--danger);
 }
+.rich-text li[data-tentative='true'] > p:first-child::before,
+.rich-text li[data-tentative='true'] > div > p:first-child::before {
+  content: 'Tentative';
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: 1px;
+  background: #fff2df;
+  color: var(--warning);
+}
+/* Scope: voci che citano una issue In Progress su Jira (razzo, come nella
+   presentazione). inline-block: la barratura delle voci completate non lo
+   attraversa. */
+.rich-text p.scope-in-progress::after {
+  content: '\1F680';
+  margin-left: 6px;
+  display: inline-block;
+}
 
 /* Scope: verifica di coerenza con il backlog. */
 .scope-check { border: 1px solid #f3dcae; background: #fffaf0; border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
