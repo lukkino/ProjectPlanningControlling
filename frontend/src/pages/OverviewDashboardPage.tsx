@@ -1,9 +1,8 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useIsFetching, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -689,35 +688,119 @@ function CycleTimeCard() {
   )
 }
 
-// Bucket mensili per il grafico Throughput, dal mese del primo al mese
-// dell'ultimo PBI completato presente nei punti del Cycle Time - cosi' il
-// totale delle barre torna sempre uguale al numero di punti dello scatter
-// (invece di un fisso "ultimi 12 mesi solari" che potrebbe tagliare fuori il
-// mese piu' vecchio, dato che la finestra Jira e' "AFTER -365d" a giorni,
-// non a mesi solari).
-function buildMonthBuckets(points: { finish_date: string }[]): { key: string; label: string }[] {
-  if (points.length === 0) return []
-  const monthKeys = points.map((p) => p.finish_date.slice(0, 7)).sort()
-  const [minYear, minMonth] = monthKeys[0].split('-').map(Number)
-  const [maxYear, maxMonth] = monthKeys[monthKeys.length - 1].split('-').map(Number)
-  const cursor = new Date(Date.UTC(minYear, minMonth - 1, 1))
-  const end = new Date(Date.UTC(maxYear, maxMonth - 1, 1))
-  const buckets: { key: string; label: string }[] = []
-  while (cursor <= end) {
+// Mesi (chiave YYYY-MM e data del primo del mese) da quello di `fromIso` a
+// quello di `toIso`, estremi compresi: anche i mesi senza PBI completati.
+function monthsBetween(fromIso: string, toIso: string): { key: string; date: string }[] {
+  const [fy, fm] = fromIso.slice(0, 7).split('-').map(Number)
+  const [ty, tm] = toIso.slice(0, 7).split('-').map(Number)
+  const cursor = new Date(Date.UTC(fy, fm - 1, 1))
+  const end = new Date(Date.UTC(ty, tm - 1, 1))
+  const months: { key: string; date: string }[] = []
+  while (cursor <= end && months.length < 600) {
     const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`
-    const label = cursor.toLocaleDateString('it-IT', { month: 'short', year: '2-digit', timeZone: 'UTC' })
-    buckets.push({ key, label })
+    months.push({ key, date: `${key}-01` })
     cursor.setUTCMonth(cursor.getUTCMonth() + 1)
   }
-  return buckets
+  return months
+}
+
+// Primo del mese spostato di `delta` mesi (negativo = indietro).
+function shiftMonths(firstOfMonth: string, delta: number): string {
+  const [y, m] = firstOfMonth.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
+}
+
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function monthLabel(date: string, long = false): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString('it-IT', {
+    month: long ? 'long' : 'short',
+    year: long ? 'numeric' : '2-digit',
+    timeZone: 'UTC',
+  })
+}
+
+// Media mobile sugli ultimi 3 mesi (il mese stesso e i due precedenti).
+const MOVING_AVERAGE_MONTHS = 3
+const THROUGHPUT_LINE = 'Throughput mensile'
+const THROUGHPUT_AVERAGE = `Media mobile (${MOVING_AVERAGE_MONTHS} mesi)`
+
+type ThroughputMonth = { date: string; count: number; average: number | null }
+
+function ThroughputTooltip({ active, payload }: { active?: boolean; payload?: { payload: ThroughputMonth }[] }) {
+  if (!active || !payload || !payload.length) return null
+  const m = payload[0].payload
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{monthLabel(m.date, true)}</div>
+      <div>
+        Completati: <b>{m.count}</b>
+      </div>
+      {m.average != null && <div>Media mobile: {m.average.toFixed(1)}</div>}
+    </div>
+  )
+}
+
+// Riga di riepilogo della card Throughput: etichetta a sinistra, valori e
+// spiegazione (icona ⓘ) a destra.
+function ThroughputStatRow({ label, info, children }: { label: string; info: string; children: ReactNode }) {
+  return (
+    <div className="tp-row">
+      <div className="tp-row-label">{label}</div>
+      <div className="tp-row-body">{children}</div>
+      <span className="tp-info" title={info}>
+        ⓘ
+      </span>
+    </div>
+  )
+}
+
+function ThroughputStat({ icon, value, label }: { icon: string; value: string; label: string }) {
+  return (
+    <div className="tp-stat">
+      <div>
+        <span className="tp-stat-icon">{icon}</span> <b>{value}</b>
+      </div>
+      <div className="muted">{label}</div>
+    </div>
+  )
 }
 
 // Throughput: PBI completati per mese, sugli stessi PBI del Cycle Time -
 // stessa query ['dashboard','cycle-time'] (React Query la condivide tra i
 // due componenti, un'unica chiamata a Jira per entrambi i grafici), solo
-// aggregata qui per mese invece che mostrata punto per punto.
+// aggregata qui per mese. Periodo scelto con Dal/Al (default ultimi 12
+// mesi), dentro i dati disponibili.
 function ThroughputCard() {
   const [team, setTeam] = useState<Team>('sw')
+  const defaultFrom = (() => {
+    const d = new Date()
+    d.setFullYear(d.getFullYear() - 1)
+    return isoDate(d)
+  })()
+  const today = isoDate(new Date())
+  const [from, setFrom] = useState(defaultFrom)
+  const [to, setTo] = useState(today)
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set())
   const { data, refetch, isFetching, isSnapshot } = useChartData(
     team,
     ['dashboard', 'cycle-time', team],
@@ -728,7 +811,27 @@ function ThroughputCard() {
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ marginTop: 0, marginBottom: 0 }}>Throughput</h3>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label className="tp-date">
+          Dal
+          <input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} />
+        </label>
+        <label className="tp-date">
+          Al
+          <input type="date" value={to} min={from} onChange={(e) => e.target.value && setTo(e.target.value)} />
+        </label>
+        {(from !== defaultFrom || to !== today) && (
+          <button
+            className="link-btn"
+            style={{ fontSize: 12 }}
+            onClick={() => {
+              setFrom(defaultFrom)
+              setTo(today)
+            }}
+          >
+            Ultimi 12 mesi
+          </button>
+        )}
         <TeamSelector team={team} onChange={setTeam} />
         {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
@@ -744,47 +847,181 @@ function ThroughputCard() {
     )
   }
 
-  const points = lastYearPoints(data.points)
-  const buckets = buildMonthBuckets(points)
-  const countsByMonth: Record<string, Record<string, number>> = {}
-  for (const b of buckets) countsByMonth[b.key] = Object.fromEntries(SERIES.map((s) => [s.key, 0]))
-  for (const p of points) {
-    const key = p.finish_date.slice(0, 7)
-    const seriesKey = seriesKeyFor(p)
-    countsByMonth[key][seriesKey] = (countsByMonth[key][seriesKey] ?? 0) + 1
+  const points = data.points.filter((p) => p.finish_date >= from && p.finish_date <= to)
+  const firstAvailable = data.points.reduce<string | null>(
+    (min, p) => (min === null || p.finish_date < min ? p.finish_date : min),
+    null,
+  )
+  const months = monthsBetween(from, to)
+  const counts: Record<string, number> = Object.fromEntries(months.map((m) => [m.key, 0]))
+  for (const p of points) counts[p.finish_date.slice(0, 7)] = (counts[p.finish_date.slice(0, 7)] ?? 0) + 1
+  // La media mobile dei primi mesi usa anche i mesi prima di "Dal", se ci
+  // sono dati: cosi' la linea parte dall'inizio del periodo scelto.
+  const firstMonth = firstAvailable?.slice(0, 7) ?? months[0]?.key ?? ''
+  const allCounts: Record<string, number> = {}
+  for (const p of data.points) allCounts[p.finish_date.slice(0, 7)] = (allCounts[p.finish_date.slice(0, 7)] ?? 0) + 1
+  const extended = months.length ? monthsBetween(shiftMonths(months[0].date, 1 - MOVING_AVERAGE_MONTHS), to) : []
+  const monthly: ThroughputMonth[] = months.map((m, i) => {
+    const window = extended.slice(i, i + MOVING_AVERAGE_MONTHS)
+    return {
+      date: m.date,
+      count: counts[m.key],
+      average:
+        window[0].key < firstMonth
+          ? null
+          : window.reduce((sum, w) => sum + (counts[w.key] ?? allCounts[w.key] ?? 0), 0) / window.length,
+    }
+  })
+  const values = monthly.map((m) => m.count)
+  const total = points.length
+  const average = values.length ? total / values.length : 0
+  const med = median(values)
+  const atOrAboveMedian = values.filter((v) => v >= med).length
+  let longestGap = 0
+  let run = 0
+  for (const v of values) {
+    run = v === 0 ? run + 1 : 0
+    longestGap = Math.max(longestGap, run)
   }
-  const chartData = buckets.map((b) => ({ label: b.label, ...countsByMonth[b.key] }))
+  const mix = SERIES.map((s) => ({ ...s, count: points.filter((p) => seriesKeyFor(p) === s.key).length })).filter(
+    (s) => s.count > 0,
+  )
+  const months_ = (n: number) => `${n} ${n === 1 ? 'mese' : 'mesi'}`
+  const fmt = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 1, minimumFractionDigits: 1 })
 
   return (
     <div className="card">
       {header}
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        PBI completati per mese (stessi PBI del grafico Cycle Time), ultimi 12 mesi.
+        Quanti PBI si chiudono ogni mese (stessi PBI del grafico Cycle Time): un throughput costante rende le
+        previsioni più affidabili.
+        {firstAvailable && from.slice(0, 7) < firstAvailable.slice(0, 7) && (
+          <> Dati disponibili dal {formatIsoDate(firstAvailable)}: i mesi precedenti risultano a zero.</>
+        )}
       </p>
 
       {data.error ? (
         <p className="muted">{data.error}</p>
-      ) : points.length === 0 ? (
-        <p className="muted">Nessun PBI completato negli ultimi 12 mesi.</p>
+      ) : total === 0 ? (
+        <p className="muted">Nessun PBI completato nel periodo scelto.</p>
       ) : (
-        <div style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-              <YAxis
-                allowDecimals={false}
-                tick={{ fontSize: 12 }}
-                label={{ value: 'PBI', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
-              />
-              <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              {SERIES.map((s) => (
-                <Bar key={s.key} dataKey={s.key} name={s.key} stackId="throughput" fill={s.color} fillOpacity={s.opacity} />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <>
+          <ThroughputStatRow
+            label="Volume"
+            info={
+              'PBI completati nel periodo scelto e, mese per mese, media, mediana e minimo-massimo. ' +
+              'Il primo e l’ultimo mese possono essere parziali se Dal/Al non cadono a inizio/fine mese.'
+            }
+          >
+            <ThroughputStat icon="✓" value={`${total} PBI`} label={`Completati nel periodo (${months_(values.length)})`} />
+            <ThroughputStat icon="#" value={`${fmt(average)} PBI`} label="Media mensile" />
+            <ThroughputStat icon="#" value={`${fmt(med)} PBI`} label="Mediana mensile" />
+            <ThroughputStat icon="↕" value={`${Math.min(...values)}–${Math.max(...values)} PBI`} label="Minimo–massimo mensile" />
+          </ThroughputStatRow>
+          <ThroughputStatRow
+            label="Regolarità"
+            info={
+              'Mesi con throughput pari o sopra la mediana (più sono, più la consegna è regolare) e ' +
+              'la serie più lunga di mesi consecutivi senza nessun PBI completato.'
+            }
+          >
+            <ThroughputStat
+              icon="↥"
+              value={`${months_(atOrAboveMedian)} (${Math.round((100 * atOrAboveMedian) / values.length)}%)`}
+              label="Pari o sopra la mediana"
+            />
+            <ThroughputStat icon="◷" value={months_(longestGap)} label="Pausa più lunga senza consegne" />
+          </ThroughputStatRow>
+          <ThroughputStatRow
+            label="Mix"
+            info="PBI completati nel periodo per tipo. I Bug CVE sono quelli chiusi in automatico dal bot di security scan."
+          >
+            <div className="tp-mix">
+              {mix.map((s) => {
+                const pct = Math.round((100 * s.count) / total)
+                return (
+                  <div
+                    key={s.key}
+                    className="tp-mix-seg"
+                    style={{
+                      flexGrow: s.count,
+                      background: s.color,
+                      opacity: s.opacity < 1 ? 0.55 : 1,
+                    }}
+                    title={`${s.key}: ${s.count} (${pct}%)`}
+                  >
+                    {pct >= 6 ? `${s.key}: ${s.count} (${pct}%)` : pct >= 3 ? s.count : ''}
+                  </div>
+                )
+              })}
+            </div>
+          </ThroughputStatRow>
+
+          <div style={{ height: 320, marginTop: 12 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={monthly} margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(d: string) => monthLabel(d)} tick={{ fontSize: 12 }} />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 12 }}
+                  label={{
+                    value: 'PBI al mese',
+                    angle: -90,
+                    position: 'insideLeft',
+                    style: { fontSize: 12, fill: 'var(--text-muted)' },
+                  }}
+                />
+                <Tooltip content={<ThroughputTooltip />} />
+                <Legend
+                  wrapperStyle={{ fontSize: 12, cursor: 'pointer' }}
+                  itemSorter={(item) => (item.value === THROUGHPUT_LINE ? 0 : 1)}
+                  onClick={(entry) => {
+                    const key = String(entry.value)
+                    setHidden((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(key)) next.delete(key)
+                      else next.add(key)
+                      return next
+                    })
+                  }}
+                  formatter={(value: string) => (
+                    <span style={{ textDecoration: hidden.has(value) ? 'line-through' : undefined, opacity: hidden.has(value) ? 0.5 : 1 }}>
+                      {value}
+                    </span>
+                  )}
+                />
+                <ReferenceLine y={med} stroke="var(--text-muted)" strokeDasharray="2 4" ifOverflow="extendDomain" />
+                <Line
+                  type="linear"
+                  dataKey="count"
+                  name={THROUGHPUT_LINE}
+                  stroke="var(--primary)"
+                  strokeWidth={2}
+                  dot={{ r: 4, fill: 'var(--primary)' }}
+                  activeDot={{ r: 6 }}
+                  hide={hidden.has(THROUGHPUT_LINE)}
+                  isAnimationActive={false}
+                />
+                <Line
+                  type="linear"
+                  dataKey="average"
+                  name={THROUGHPUT_AVERAGE}
+                  stroke="var(--text-muted)"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  dot={false}
+                  connectNulls={false}
+                  hide={hidden.has(THROUGHPUT_AVERAGE)}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+            Linea grigia puntinata: mediana mensile. Clic su una voce della legenda per nasconderla o mostrarla.
+          </p>
+        </>
       )}
     </div>
   )

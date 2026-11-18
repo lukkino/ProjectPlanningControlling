@@ -125,9 +125,31 @@ export function EarnedValueCard({ projectId }: { projectId: number }) {
 
 type SortKey = 'sv' | 'cpi' | 'completion' | 'budget'
 
+// Dettaglio per PBI nascosto o visibile: preferenza del browser, uguale per
+// tutti gli increment.
+const PBI_DETAIL_STORAGE_KEY = 'ev-pbi-detail-hidden'
+
+function readDetailHidden(): boolean {
+  try {
+    return localStorage.getItem(PBI_DETAIL_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function EarnedValueSection({ projectId }: { projectId: number }) {
   const { data: ev, isLoading, isError } = useEarnedValue(projectId)
   const [sort, setSort] = useState<SortKey>('sv')
+  const [detailHidden, setDetailHidden] = useState(readDetailHidden)
+  const toggleDetail = () => {
+    const next = !detailHidden
+    setDetailHidden(next)
+    try {
+      localStorage.setItem(PBI_DETAIL_STORAGE_KEY, next ? '1' : '0')
+    } catch {
+      // localStorage non disponibile: la scelta vale solo per questa visita
+    }
+  }
 
   const chartData = useMemo(
     () =>
@@ -245,7 +267,20 @@ export function EarnedValueSection({ projectId }: { projectId: number }) {
             è aperto).
           </p>
 
-          <h4 style={{ marginBottom: 6 }}>Dettaglio per PBI</h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, marginBottom: 6 }}>
+            <h4 style={{ margin: 0 }}>Dettaglio per PBI ({rows.length})</h4>
+            <button
+              type="button"
+              className="btn"
+              aria-expanded={!detailHidden}
+              title={detailHidden ? 'Mostra la tabella con il dettaglio dei PBI' : 'Nascondi la tabella con il dettaglio dei PBI'}
+              onClick={toggleDetail}
+            >
+              {detailHidden ? '▼ Mostra' : '▲ Nascondi'}
+            </button>
+          </div>
+          {!detailHidden && (
+          <>
           <div className="table-wrap">
             <table className="ev-table">
               <thead>
@@ -297,6 +332,8 @@ export function EarnedValueSection({ projectId }: { projectId: number }) {
             </table>
           </div>
           <p className="muted" style={{ fontSize: 12 }}>* budget dal Sizing (gg × 8 h): manca la stima dev + test.</p>
+          </>
+          )}
         </>
       )}
     </div>

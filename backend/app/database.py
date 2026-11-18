@@ -139,6 +139,9 @@ def run_lightweight_migrations() -> None:
                     ("last_action_by", "VARCHAR(255)"),
                 ):
                     conn.execute(text(f"ALTER TABLE tool_purchase_requisitions ADD COLUMN {column} {kind}"))
+        if "dynamics_url" not in rda_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE tool_purchase_requisitions ADD COLUMN dynamics_url TEXT"))
 
     if "user_settings" in table_names:
         settings_columns = {col["name"] for col in inspector.get_columns("user_settings")}

@@ -1,10 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Snapshot } from '../api/types'
 import { countBacklogStats } from '../lib/backlogStats'
 import { useProjectContext } from './useProjectContext'
 import { DateInput } from '../components/DateInput'
 import { EarnedValueSection } from '../components/EarnedValue'
+import { formatIsoDate } from '../lib/dates'
+
+// Oggi in ora locale, "yyyy-mm-dd" (toISOString darebbe la data UTC).
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export function SnapshotsPage() {
   const { project } = useProjectContext()
@@ -33,6 +41,12 @@ export function SnapshotsPage() {
     queryFn: () => api.dashboard.get(project.id),
   })
   const progettiHours = metrics?.logged_hours_source === 'progetti' ? metrics.logged_hours_total : null
+  // Le ore dei progetti sono aggiornate alla data del loro ultimo snapshot
+  // dello Storico: se non e' oggi, vanno aggiornate dal progetto (non a mano
+  // qui).
+  const today = todayIso()
+  const staleProgetti =
+    progettiHours === null ? [] : (metrics?.progetti_hours ?? []).filter((p) => p.last_snapshot_date !== today)
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['snapshots', project.id] })
@@ -46,7 +60,7 @@ export function SnapshotsPage() {
   const add = useMutation({
     mutationFn: () =>
       api.snapshots.create(project.id, {
-        snapshot_date: new Date().toISOString().slice(0, 10),
+        snapshot_date: todayIso(),
         logged_hours: loggedHoursTotal,
         actual_hours: progettiHours,
         pbi_total: codefreezeCount,
@@ -59,6 +73,20 @@ export function SnapshotsPage() {
     onSuccess: invalidate,
   })
 
+  const createSnapshot = () => {
+    if (staleProgetti.length > 0) {
+      const list = staleProgetti
+        .map((p) => `• ${p.code}: ${p.last_snapshot_date ? `ultimo snapshot del ${formatIsoDate(p.last_snapshot_date)}` : 'nessuno snapshot'}`)
+        .join('\n')
+      const ok = window.confirm(
+        `Le ore usate dei progetti collegati non sono aggiornate a oggi:\n${list}\n\n` +
+          'Aggiornale dallo Storico del progetto, poi crea lo snapshot. Crearlo comunque con le ore attuali?',
+      )
+      if (!ok) return
+    }
+    add.mutate()
+  }
+
   return (
     <>
       <EarnedValueSection projectId={project.id} />
@@ -68,8 +96,39 @@ export function SnapshotsPage() {
           Registra periodicamente una fotografia dello stato dell'increment per tracciarne l'andamento nel tempo (mostrato
           nel grafico della Dashboard).
           {progettiHours !== null &&
-            ` Un nuovo snapshot prende le Ore usate dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h): restano modificabili.`}
+            ` Le Ore usate vengono dagli ultimi Actual ore dei progetti collegati (oggi ${progettiHours.toLocaleString('it-IT')} h) e si aggiornano solo dallo Storico del progetto.`}
         </p>
+        {staleProgetti.length > 0 && (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 12,
+              padding: '10px 14px',
+              border: '1px solid #f1d8a8',
+              borderRadius: 'var(--radius)',
+              background: '#fffaf0',
+              color: '#8a5300',
+              fontSize: 13,
+            }}
+          >
+            ⚠ Le ore usate dei progetti collegati non sono aggiornate a oggi: aggiornale dallo Storico del progetto prima
+            di creare un nuovo snapshot.
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {staleProgetti.map((p) => (
+                <li key={p.id}>
+                  <Link to={`/increments/${p.id}`}>
+                    {p.code}
+                    {p.name && ` · ${p.name}`}
+                  </Link>
+                  :{' '}
+                  {p.last_snapshot_date
+                    ? `ultimo snapshot del ${formatIsoDate(p.last_snapshot_date)}`
+                    : 'nessuno snapshot nello Storico'}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="table-wrap">
           <table>
             <thead>
@@ -93,13 +152,22 @@ export function SnapshotsPage() {
                       onChange={(value) => value && update.mutate({ id: s.id, data: { snapshot_date: value } })}
                     />
                   </td>
-                  <td className="editable-cell">
-                    <input
-                      type="number"
-                      defaultValue={s.actual_hours ?? ''}
-                      onBlur={(e) => update.mutate({ id: s.id, data: { actual_hours: e.target.value ? Number(e.target.value) : null } })}
-                    />
-                  </td>
+                  {progettiHours !== null ? (
+                    <td
+                      className="num"
+                      title="Dalle ore dei progetti collegati al momento dello snapshot: si aggiornano dallo Storico del progetto, non a mano"
+                    >
+                      {s.actual_hours == null ? <span className="muted">-</span> : s.actual_hours.toLocaleString('it-IT')}
+                    </td>
+                  ) : (
+                    <td className="editable-cell">
+                      <input
+                        type="number"
+                        defaultValue={s.actual_hours ?? ''}
+                        onBlur={(e) => update.mutate({ id: s.id, data: { actual_hours: e.target.value ? Number(e.target.value) : null } })}
+                      />
+                    </td>
+                  )}
                   <td className="editable-cell">
                     <input
                       type="number"
@@ -146,7 +214,7 @@ export function SnapshotsPage() {
           </table>
         </div>
         <div style={{ marginTop: 10 }}>
-          <button className="btn btn-primary" onClick={() => add.mutate()}>
+          <button className="btn btn-primary" onClick={createSnapshot} disabled={add.isPending}>
             + Nuovo snapshot
           </button>
         </div>

@@ -15,6 +15,8 @@ import type {
   TeamResource,
   TeamRole,
   RequisitionSettings,
+  RequisitionLinesPreview,
+  RequisitionLinesWriteResult,
   RequisitionSyncResult,
   ComplaintsSettings,
   CycleTimeMetrics,
@@ -636,6 +638,18 @@ export const api = {
       updateSettings: (data: RequisitionSettings) =>
         put<RequisitionSettings>('/tools/purchase-requisitions/settings', data),
       syncProgress: () => request<SyncProgress>('/tools/purchase-requisitions/sync/progress'),
+      // Modello Excel delle righe da caricare su una RDA in bozza.
+      linesTemplate: () => downloadFile('/tools/purchase-requisitions/lines-template'),
+      previewLines: (id: number, file: File) =>
+        request<RequisitionLinesPreview>(`/tools/purchase-requisitions/${id}/lines/preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file,
+        }),
+      writeLines: (id: number, lines: RequisitionLinesPreview['lines']) =>
+        post<RequisitionLinesWriteResult>(`/tools/purchase-requisitions/${id}/lines`, { lines }),
+      // Link alla RDA in Dynamics (la prima volta lo chiede a Dynamics: ~30 s).
+      link: (id: number) => post<{ url: string }>(`/tools/purchase-requisitions/${id}/link`),
     },
     certifications: {
       list: () => request<CertificationTicket[]>('/tools/certification-tickets'),

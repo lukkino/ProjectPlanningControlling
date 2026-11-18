@@ -313,7 +313,18 @@ export type ScenariosStatus = {
 
 // Avanzamento della sync Backlog in corso (vedi SyncProgress nel backend).
 export type SyncProgress = {
-  phase: 'idle' | 'search' | 'changelog' | 'details' | 'saving' | 'salesforce' | 'tickets' | 'requisitions' | 'enhancements'
+  phase:
+    | 'idle'
+    | 'search'
+    | 'changelog'
+    | 'details'
+    | 'saving'
+    | 'salesforce'
+    | 'tickets'
+    | 'requisitions'
+    | 'enhancements'
+    | 'lines'
+    | 'link'
   done: number
   total: number
 }
@@ -712,6 +723,9 @@ export type DashboardMetrics = {
   completion_source: 'backlog' | 'snapshot'
   // 'progetti': somma delle ore usate dei progetti e sotto-progetti collegati.
   logged_hours_source: 'backlog' | 'snapshot' | 'progetti'
+  // Progetti collegati da cui vengono le Ore usate, con la data del loro
+  // ultimo snapshot dello Storico.
+  progetti_hours: { id: number; code: string; name: string | null; last_snapshot_date: string | null }[]
   last_snapshot_date: string | null
   phases: Phase[]
 }
@@ -968,6 +982,34 @@ export type PurchaseRequisition = {
   last_action_at: string | null
   last_action_by: string | null
   synced_at: string | null
+  // Link alla RDA in Dynamics (chiesto a Dynamics la prima volta).
+  dynamics_url: string | null
+}
+
+// Riga dell'Excel "Righe RDA" letta e controllata dal backend.
+export type RequisitionExcelLine = {
+  row: number
+  category: string | null
+  product: string | null
+  quantity: number | null
+  unit: string | null
+  price: number | null
+  currency: string
+  vendor: string | null
+  requested_date: string | null
+  errors: string[]
+}
+
+export type RequisitionLinesPreview = {
+  lines: RequisitionExcelLine[]
+  valid: number
+  total: number
+  vendor_names: Record<string, string>
+}
+
+export type RequisitionLinesWriteResult = {
+  results: { row: number; ok: boolean; line: number | null; error: string | null }[]
+  requisition: PurchaseRequisition
 }
 
 // Tool Ticket certificazioni: un ticket del portale Product Certification.

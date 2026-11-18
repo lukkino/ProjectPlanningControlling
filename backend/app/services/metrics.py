@@ -119,6 +119,18 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
     # (actual_hours) alle ore loggate, perche' queste ultime possono essere
     # solo un sottoinsieme rendicontato su Jira.
     logged_hours_source = "backlog"
+    progetti_hours: list[schemas.ProgettoHoursSource] = []
+    for progetto in [*project.progetti, *(s.increment for s in project.sub_projects)]:
+        if any(p.id == progetto.id for p in progetti_hours):
+            continue
+        progetti_hours.append(
+            schemas.ProgettoHoursSource(
+                id=progetto.id,
+                code=progetto.code,
+                name=progetto.notes,
+                last_snapshot_date=progetto.snapshots[-1].snapshot_date if progetto.snapshots else None,
+            )
+        )
     if project.progetti or project.sub_projects:
         logged_hours_total = sum(_used_hours_total(p) for p in project.progetti) + sum(
             s.actual_hours for s in project.sub_projects
@@ -171,6 +183,7 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         spi=spi,
         completion_source=completion_source,
         logged_hours_source=logged_hours_source,
+        progetti_hours=progetti_hours,
         last_snapshot_date=last_snapshot_date,
         phases=list(project.phases),
     )

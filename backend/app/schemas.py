@@ -1052,6 +1052,18 @@ class PprGenerateRequest(BaseModel):
 
 # ---------- Dashboard ----------
 
+class ProgettoHoursSource(BaseModel):
+    """Progetto collegato da cui vengono le Ore usate dell'increment, con la
+    data del suo ultimo snapshot dello Storico (le ore sono aggiornate a
+    quella data)."""
+
+    id: int
+    code: str
+    # Descrizione breve del progetto (Increment.notes).
+    name: str | None = None
+    last_snapshot_date: dt.date | None = None
+
+
 class DashboardMetrics(BaseModel):
     backlog_total: int
     backlog_in_scope: int
@@ -1068,6 +1080,8 @@ class DashboardMetrics(BaseModel):
     completion_source: str
     # "progetti" (somma dei progetti collegati), "snapshot" o "backlog".
     logged_hours_source: str
+    # Con logged_hours_source "progetti": i progetti da cui vengono le ore.
+    progetti_hours: list[ProgettoHoursSource] = []
     last_snapshot_date: dt.date | None
     phases: list[Phase]
 

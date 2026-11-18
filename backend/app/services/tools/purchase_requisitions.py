@@ -94,6 +94,31 @@ def _get(context, base_url: str, path: str) -> list[dict]:
     return records
 
 
+def _vendors(context, base_url: str, accounts) -> dict[tuple[str, str], str]:
+    """Nomi dei fornitori per (societa', codice). Lo stesso codice puo'
+    esistere in piu' societa' con fornitori diversi (es. F00320): il nome va
+    preso nella societa' della riga, non in una qualsiasi."""
+    accounts = sorted(set(accounts))
+    vendors: dict[tuple[str, str], str] = {}
+    for i in range(0, len(accounts), CHUNK):
+        filter_ = " or ".join(f"VendorAccountNumber eq {_quote(a)}" for a in accounts[i:i + CHUNK])
+        select = ["dataAreaId", "VendorAccountNumber", "VendorOrganizationName"]
+        for v in _get(context, base_url, _query("VendorsV2", filter_, select)):
+            vendors[((v.get("dataAreaId") or "").lower(), v["VendorAccountNumber"])] = v.get("VendorOrganizationName") or ""
+    return vendors
+
+
+def _vendor_name(vendors: dict[tuple[str, str], str], entity: str | None, account: str | None) -> str | None:
+    """Nome del fornitore nella societa' della riga; senza societa', solo se
+    il codice ha lo stesso nome ovunque (altrimenti resta il solo codice)."""
+    if not account:
+        return None
+    if entity:
+        return vendors.get((entity.lower(), account)) or None
+    names = {name for (_entity, code), name in vendors.items() if code == account and name}
+    return names.pop() if len(names) == 1 else None
+
+
 def _query(entity: str, filter_: str, select: list[str] | None = None) -> str:
     params = {"cross-company": "true", "$filter": filter_}
     if select:
@@ -257,13 +282,11 @@ def fetch_requisitions(list_url: str) -> tuple[list[dict], str | None]:
                 _progress(min(i + CHUNK, total), total)
 
             # Nomi dei fornitori (best effort: senza permesso resta il codice).
-            vendors: dict[str, str] = {}
-            accounts = sorted({l["VendorAccountNumber"] for ls in lines.values() for l in ls if l.get("VendorAccountNumber")})
+            vendors: dict[tuple[str, str], str] = {}
             try:
-                for i in range(0, len(accounts), CHUNK):
-                    filter_ = " or ".join(f"VendorAccountNumber eq {_quote(a)}" for a in accounts[i:i + CHUNK])
-                    for v in _get(context, base_url, _query("VendorsV2", filter_, ["VendorAccountNumber", "VendorOrganizationName"])):
-                        vendors[v["VendorAccountNumber"]] = v.get("VendorOrganizationName") or ""
+                vendors = _vendors(
+                    context, base_url, (l["VendorAccountNumber"] for ls in lines.values() for l in ls if l.get("VendorAccountNumber"))
+                )
             except RuntimeError:
                 pass
 
@@ -320,7 +343,11 @@ def fetch_requisitions(list_url: str) -> tuple[list[dict], str | None]:
                                 "amount": l.get("LineAmount"),
                                 "currency": l.get("CurrencyCode") or None,
                                 "vendor_account": l.get("VendorAccountNumber") or None,
-                                "vendor_name": vendors.get(l.get("VendorAccountNumber") or "") or None,
+                                "vendor_name": _vendor_name(
+                                    vendors,
+                                    l.get("BuyingLegalEntityId") or h.get("ProjectBuyingLegalEntityId"),
+                                    l.get("VendorAccountNumber"),
+                                ),
                                 "project_id": l.get("ProjectId") or None,
                                 "requested_date": _date(l.get("RequestedDate")),
                             }

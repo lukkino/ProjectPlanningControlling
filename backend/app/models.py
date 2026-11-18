@@ -1413,6 +1413,9 @@ class PurchaseRequisition(Base):
     last_action_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     last_action_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Link alla RDA in Dynamics, chiesto a Dynamics la prima volta che la si
+    # apre dall'app (e' cifrato: non si costruisce dal numero).
+    dynamics_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class TeamRole(Base):

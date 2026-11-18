@@ -1,16 +1,16 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api } from '../../api/client'
-import type { Increment, PurchaseRequisition, RequisitionSettings } from '../../api/types'
+import { api, saveBlob } from '../../api/client'
+import type { Increment, PurchaseRequisition, RequisitionLinesPreview, RequisitionSettings } from '../../api/types'
 import { SyncProgressModal } from '../../components/SyncProgressModal'
 import { useAuth } from '../../components/authContext'
 import { formatDateTime, formatIsoDate } from '../../lib/dates'
 
 // Tool RDA: le richieste di acquisto preparate dall'utente in Dynamics 365,
 // lette con il browser dell'app (vedi backend/app/services/tools/
-// purchase_requisitions.py). Solo consultazione: le RDA si creano e si
-// modificano in Dynamics.
+// purchase_requisitions.py). Le RDA si creano in Dynamics; le righe di una
+// RDA in bozza si possono caricare da un Excel (modello scaricabile qui).
 
 
 // Stati Dynamics -> etichetta e colore del badge.
@@ -90,6 +90,10 @@ export function PurchaseRequisitionsPage() {
     queryFn: api.tools.requisitions.getSettings,
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const template = useMutation({
+    mutationFn: api.tools.requisitions.linesTemplate,
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+  })
   const sync = useMutation({
     mutationFn: api.tools.requisitions.sync,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['purchase-requisitions'] }),
@@ -97,6 +101,10 @@ export function PurchaseRequisitionsPage() {
   // Stati mostrati: all'inizio solo le RDA in corso (se ce ne sono).
   const [shownStatuses, setShownStatuses] = useState<Set<string> | null>(null)
   const [search, setSearch] = useState('')
+  // Progetto: il progetto dell'app (PTIH-PT13) se l'ID progetto Dynamics ne
+  // fa parte, se no le prime due parti dell'ID (PTIH-PTB6-002 -> PTIH-PTB6);
+  // '' = tutti.
+  const [projectFilter, setProjectFilter] = useState('')
   const [open, setOpen] = useState<Set<number>>(new Set())
 
   const all = data ?? []
@@ -109,9 +117,31 @@ export function PurchaseRequisitionsPage() {
     ? new Set(statuses.filter((s) => OPEN_STATUSES.has(s)))
     : new Set(statuses)
   const shown = shownStatuses ?? defaultShown
+  const projectOf = (r: PurchaseRequisition) =>
+    incrementOf(r.project_id, increments ?? [])?.code ?? (r.project_id ?? '').toUpperCase().split('-').slice(0, 2).join('-')
+  const projectCounts = new Map<string, number>()
+  for (const r of all) projectCounts.set(projectOf(r), (projectCounts.get(projectOf(r)) ?? 0) + 1)
+  const projects = [...projectCounts.keys()].filter(Boolean).sort()
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const visible = all.filter((r) => shown.has(r.status ?? '-') && words.every((w) => searchable(r).includes(w)))
+  const visible = all.filter(
+    (r) =>
+      shown.has(r.status ?? '-') &&
+      (!projectFilter || projectOf(r) === projectFilter) &&
+      words.every((w) => searchable(r).includes(w)),
+  )
   const visibleTotal = visible.reduce((sum, r) => sum + totalOf(r), 0)
+  // Filtro diverso da quello iniziale (solo le RDA in corso): i totali in
+  // alto seguono le RDA filtrate.
+  const statusesChanged = shown.size !== defaultShown.size || [...shown].some((s) => !defaultShown.has(s))
+  const filtered = statusesChanged || !!projectFilter || words.length > 0
+  const filterDescription = [
+    projectFilter && `progetto ${projectFilter}`,
+    statusesChanged &&
+      (shown.size === statuses.length ? 'tutti gli stati' : `stati: ${[...shown].map(statusLabel).join(', ') || 'nessuno'}`),
+    words.length > 0 && `ricerca «${search.trim()}»`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const openRequisitions = all.filter((r) => OPEN_STATUSES.has(r.status ?? ''))
   const lastSync = all.reduce<string | null>(
     (latest, r) => (r.synced_at && (!latest || r.synced_at > latest) ? r.synced_at : latest),
@@ -159,6 +189,14 @@ export function PurchaseRequisitionsPage() {
           >
             ⚙ Link Dynamics
           </button>
+          <button
+            className="btn"
+            title="Modello Excel per le righe di una RDA: compilalo e caricalo su una RDA in bozza (Carica righe da Excel)"
+            onClick={() => template.mutate()}
+            disabled={template.isPending}
+          >
+            📄 Modello Excel righe
+          </button>
           {can('editor') && (
             <button className="btn btn-primary" onClick={() => sync.mutate()} disabled={sync.isPending}>
               {sync.isPending ? 'Lettura...' : '⟳ Aggiorna da Dynamics'}
@@ -177,6 +215,7 @@ export function PurchaseRequisitionsPage() {
         />
       )}
       {sync.isError && <div className="error-banner">{(sync.error as Error).message}</div>}
+      {template.isError && <div className="error-banner">{(template.error as Error).message}</div>}
       {sync.isSuccess && (
         <p className="muted" style={{ marginTop: 0 }}>
           Lette {sync.data.total} RDA: {sync.data.created} nuove, {sync.data.updated} aggiornate
@@ -188,19 +227,37 @@ export function PurchaseRequisitionsPage() {
 
       {all.length > 0 && (
         <div className="rda-kpis">
-          <div className="card rda-kpi">
-            <div className="rda-kpi-value">{openRequisitions.length}</div>
-            <div className="muted">RDA in corso (bozza, in revisione, approvate)</div>
+          <div className={`card rda-kpi${filtered ? ' rda-kpi--filtered' : ''}`}>
+            <div className="rda-kpi-value">{filtered ? visible.length : openRequisitions.length}</div>
+            <div className="muted">{filtered ? 'RDA filtrate' : 'RDA in corso (bozza, in revisione, approvate)'}</div>
           </div>
-          <div className="card rda-kpi">
-            <div className="rda-kpi-value">{money(openRequisitions.reduce((s, r) => s + totalOf(r), 0))}</div>
-            <div className="muted">Importo delle RDA in corso</div>
+          <div className={`card rda-kpi${filtered ? ' rda-kpi--filtered' : ''}`}>
+            <div className="rda-kpi-value">
+              {money(filtered ? visibleTotal : openRequisitions.reduce((s, r) => s + totalOf(r), 0))}
+            </div>
+            <div className="muted">{filtered ? 'Importo delle RDA filtrate' : 'Importo delle RDA in corso'}</div>
           </div>
           <div className="card rda-kpi">
             <div className="rda-kpi-value">{all.length}</div>
             <div className="muted">RDA totali</div>
           </div>
         </div>
+      )}
+      {all.length > 0 && filtered && (
+        <p className="muted rda-filter-note">
+          Totali secondo il filtro: {filterDescription}.{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              setSearch('')
+              setProjectFilter('')
+              setShownStatuses(null)
+            }}
+          >
+            Togli i filtri
+          </button>
+        </p>
       )}
 
       <div className="card">
@@ -212,6 +269,17 @@ export function PurchaseRequisitionsPage() {
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Cerca nelle RDA"
           />
+          <label className="filter-group">
+            <span className="filter-group-label">Progetto</span>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Filtra per progetto">
+              <option value="">Tutti</option>
+              {projects.map((p) => (
+                <option key={p} value={p}>
+                  {p} ({projectCounts.get(p)})
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="filter-group">
             <span className="filter-group-label">Stato</span>
             {statuses.map((status) => (
@@ -269,7 +337,7 @@ export function PurchaseRequisitionsPage() {
                       <tr className="cert-row" onClick={() => toggleOpen(r.id)}>
                         <td className="nowrap">
                           <span className="wl-caret">{isOpen ? '▾' : '▸'}</span>
-                          <b>{r.number}</b>
+                          <b>{r.number}</b> <DynamicsLink requisition={r} />
                         </td>
                         <td>{r.name ?? <span className="muted">-</span>}</td>
                         <td className="nowrap">
@@ -397,9 +465,11 @@ function LinkSettings({ settings, onClose }: { settings: RequisitionSettings; on
 }
 
 function RequisitionDetail({ requisition: r }: { requisition: PurchaseRequisition }) {
+  const { can } = useAuth()
   const number = (value: number | null) => (value == null ? '-' : value.toLocaleString('it-IT'))
   return (
     <div className="rda-detail">
+      {r.status === 'Draft' && can('editor') && <ExcelLinesImport requisition={r} />}
       <dl className="cert-fields">
         <dt>Giustificazione</dt>
         <dd>
@@ -491,6 +561,230 @@ function RequisitionDetail({ requisition: r }: { requisition: PurchaseRequisitio
           )}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+
+// Link alla RDA in Dynamics. Il link e' cifrato da Dynamics e non si
+// costruisce dal numero: la prima volta l'app lo chiede a Dynamics (~30 s,
+// col browser dell'app) e lo salva; dopo si apre subito.
+function DynamicsLink({ requisition: r }: { requisition: PurchaseRequisition }) {
+  const queryClient = useQueryClient()
+  const { can } = useAuth()
+  const link = useMutation({
+    mutationFn: () => api.tools.requisitions.link(r.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['purchase-requisitions'] }),
+  })
+  if (r.dynamics_url) {
+    return (
+      <a
+        className="rda-dyn-link"
+        href={r.dynamics_url}
+        target="_blank"
+        rel="noreferrer"
+        title={`Apri ${r.number} in Dynamics 365`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        ↗
+      </a>
+    )
+  }
+  if (!can('editor')) return null
+  const open = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    // La scheda si apre subito (dopo l'attesa il browser bloccherebbe il
+    // popup) e va alla RDA quando arriva il link.
+    const tab = window.open('', '_blank')
+    tab?.document.write(
+      `<p style="font-family:sans-serif">Apertura di ${r.number} in Dynamics 365: l'app chiede il link a Dynamics (circa 30 secondi)…</p>`,
+    )
+    link.mutate(undefined, {
+      onSuccess: ({ url }) => {
+        if (tab) tab.location.href = url
+        else window.open(url, '_blank')
+      },
+      onError: (error) => {
+        tab?.close()
+        window.alert(`Link alla RDA non ottenuto: ${(error as Error).message}`)
+      },
+    })
+  }
+  return (
+    <button
+      type="button"
+      className="rda-dyn-link"
+      onClick={open}
+      disabled={link.isPending}
+      title={`Apri ${r.number} in Dynamics 365 (la prima volta l'app chiede il link a Dynamics: circa 30 secondi)`}
+    >
+      {link.isPending ? '…' : '↗'}
+    </button>
+  )
+}
+
+// Righe da Excel su una RDA in bozza: si carica il modello compilato,
+// l'app mostra l'anteprima con gli errori e, solo dopo la conferma, scrive
+// in Dynamics le righe senza errori.
+function ExcelLinesImport({ requisition: r }: { requisition: PurchaseRequisition }) {
+  const queryClient = useQueryClient()
+  const [preview, setPreview] = useState<RequisitionLinesPreview | null>(null)
+  const [fileName, setFileName] = useState('')
+  const load = useMutation({
+    mutationFn: (file: File) => api.tools.requisitions.previewLines(r.id, file),
+    onSuccess: (data) => {
+      setPreview(data)
+      write.reset()
+    },
+  })
+  const write = useMutation({
+    mutationFn: () => api.tools.requisitions.writeLines(r.id, preview?.lines ?? []),
+    onSuccess: () => {
+      setPreview(null)
+      queryClient.invalidateQueries({ queryKey: ['purchase-requisitions'] })
+    },
+  })
+  const confirmWrite = () => {
+    if (!preview) return
+    const skipped = preview.lines.length - preview.valid
+    const ok = window.confirm(
+      `Aggiungere ${preview.valid} righe (${money(preview.total)}) alla RDA ${r.number} in Dynamics?` +
+        (skipped > 0 ? `\n\n${skipped} righe con errori non verranno scritte.` : '') +
+        (r.lines.length > 0 ? `\n\nLa RDA ha già ${r.lines.length} righe: le nuove si aggiungono dopo.` : ''),
+    )
+    if (ok) write.mutate()
+  }
+  const vendorLabel = (code: string | null) =>
+    code ? `${code}${preview?.vendor_names[code] ? ` · ${preview.vendor_names[code]}` : ''}` : '-'
+
+  return (
+    <div className="rda-excel">
+      <div className="rda-excel-head">
+        <b>📥 Righe da Excel</b>
+        <label className="btn" style={{ cursor: 'pointer' }}>
+          {load.isPending ? 'Lettura…' : 'Carica righe da Excel'}
+          <input
+            type="file"
+            accept=".xlsx"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (!file) return
+              setFileName(file.name)
+              load.mutate(file)
+            }}
+          />
+        </label>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Compila il <b>📄 Modello Excel righe</b> (in alto) e caricalo: vedi l'anteprima prima di scrivere in Dynamics.
+        </span>
+      </div>
+      {load.isError && <div className="error-banner">{(load.error as Error).message}</div>}
+      {write.isError && <div className="error-banner">{(write.error as Error).message}</div>}
+      {write.isPending && (
+        <SyncProgressModal
+          title={`Righe della ${r.number}`}
+          queryKey={['purchase-requisitions-progress', 'lines']}
+          fetchProgress={api.tools.requisitions.syncProgress}
+        />
+      )}
+      {write.isSuccess && (
+        <div style={{ marginTop: 8 }}>
+          <b className="rda-excel-ok">
+            Scritte {write.data.results.filter((x) => x.ok).length} righe in Dynamics
+          </b>
+          {write.data.results.some((x) => !x.ok) && (
+            <ul className="rda-excel-error" style={{ margin: '4px 0 0' }}>
+              {write.data.results
+                .filter((x) => !x.ok)
+                .map((x) => (
+                  <li key={x.row}>
+                    Riga Excel {x.row}: {x.error}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {preview && (
+        <>
+          <div className="table-wrap">
+            <table className="rda-lines">
+              <thead>
+                <tr>
+                  <th title="Riga del foglio Excel">Riga</th>
+                  <th>Categoria</th>
+                  <th>Prodotto</th>
+                  <th className="num">Quantità</th>
+                  <th className="num">Prezzo</th>
+                  <th className="num">Importo</th>
+                  <th>Fornitore</th>
+                  <th>Data</th>
+                  <th>Controllo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.lines.map((l) => (
+                  <tr key={l.row} className={l.errors.length > 0 ? 'rda-excel-bad' : undefined}>
+                    <td>{l.row}</td>
+                    <td>{l.category ?? '-'}</td>
+                    <td>{l.product ?? '-'}</td>
+                    <td className="num nowrap">
+                      {l.quantity == null ? '-' : l.quantity.toLocaleString('it-IT')} {l.unit ?? ''}
+                    </td>
+                    <td className="num nowrap">{l.price == null ? '-' : money(l.price, l.currency)}</td>
+                    <td className="num nowrap">
+                      {l.price == null || l.quantity == null ? '-' : money(l.price * l.quantity, l.currency)}
+                    </td>
+                    <td>{vendorLabel(l.vendor)}</td>
+                    <td className="nowrap">
+                      {l.requested_date ? (
+                        formatIsoDate(l.requested_date)
+                      ) : (
+                        <span className="muted">{formatIsoDate(r.requested_date) ?? '-'}</span>
+                      )}
+                    </td>
+                    <td>
+                      {l.errors.length === 0 ? (
+                        <span className="rda-excel-ok">✓</span>
+                      ) : (
+                        <span className="rda-excel-error">{l.errors.join('; ')}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="rda-excel-head" style={{ marginTop: 10 }}>
+            <span>
+              <b>{fileName}</b>: {preview.valid} righe da scrivere su {preview.lines.length} · {money(preview.total)}
+              {preview.valid < preview.lines.length && (
+                <span className="rda-excel-error"> · {preview.lines.length - preview.valid} con errori (saltate)</span>
+              )}
+            </span>
+            <button className="btn btn-primary" disabled={preview.valid === 0 || write.isPending} onClick={confirmWrite}>
+              Scrivi {preview.valid} righe in Dynamics
+            </button>
+            <button className="link-btn" onClick={() => setPreview(null)}>
+              Annulla
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
+            Tutte le righe prendono dall'intestazione della RDA il progetto <b>{r.project_id ?? '-'}</b> e il motivo{' '}
+            <b>{[r.justification_code, r.justification].filter(Boolean).join(' – ') || '-'}</b>
+            {!r.justification_code && (
+              <span className="rda-excel-error">
+                {' '}
+                (vuoto: compilalo nell'intestazione in Dynamics e premi ⟳ Aggiorna da Dynamics prima di scrivere)
+              </span>
+            )}
+            ; in grigio la data dell'intestazione. Le righe si aggiungono in bozza: l'invio all'approvazione resta
+            da fare in Dynamics.
+          </p>
+        </>
+      )}
     </div>
   )
 }

@@ -12,6 +12,8 @@ const PHASE_LABEL: Record<SyncProgress['phase'], string> = {
   tickets: 'Lettura dei ticket dal portale',
   requisitions: 'Lettura delle RDA da Dynamics 365',
   enhancements: 'Lettura degli Enhancement da Salesforce',
+  lines: 'Scrittura delle righe della RDA in Dynamics 365',
+  link: 'Richiesta del link della RDA a Dynamics 365',
 }
 
 // Percentuale complessiva. Backlog: quasi tutto il tempo va nei changelog
@@ -37,6 +39,8 @@ function percentOf(progress: SyncProgress | undefined): number {
       return progress.total > 0 ? 5 + Math.floor((93 * progress.done) / progress.total) : 3
     case 'enhancements':
       return progress.total > 0 ? 5 + Math.floor((93 * progress.done) / progress.total) : 3
+    case 'lines':
+      return progress.total > 0 ? 10 + Math.floor((88 * progress.done) / progress.total) : 5
     default:
       return 0
   }
@@ -108,6 +112,7 @@ export function SyncProgressModal({
             progress.done > 0 &&
             (progress.total > 0 ? `${progress.done} di circa ${progress.total} issue · ` : `${progress.done} issue trovate · `)}
           {phase === 'changelog' && progress && `${progress.done} di ${progress.total} issue · `}
+          {phase === 'lines' && progress && progress.total > 0 && `${progress.done} di ${progress.total} righe · `}
           Trascorso {formatSeconds((now - startedAt.current) / 1000)}
           {remaining !== null && ` · circa ${formatSeconds(remaining)} rimanenti`}
         </div>

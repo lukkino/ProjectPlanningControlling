@@ -1439,6 +1439,19 @@ ul.changelog-body { padding-left: 20px; }
 .rda-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .rda-kpis .card + .card, .rda-kpi { margin: 0; }
 .rda-kpi-value { font-size: 22px; font-weight: 700; }
+/* Totali che seguono il filtro: bordo blu per ricordare che non sono tutte le RDA. */
+.rda-kpi--filtered { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.rda-filter-note { margin: -8px 0 12px; font-size: 13px; }
+/* Link alla RDA in Dynamics accanto al numero. */
+.rda-dyn-link { border: 0; background: none; padding: 0 2px; color: var(--primary); cursor: pointer; font: inherit; text-decoration: none; }
+.rda-dyn-link:disabled { color: var(--muted, #888); cursor: wait; }
+/* Righe da Excel su una RDA in bozza. */
+.rda-excel { margin-bottom: 14px; padding: 10px 12px; border: 1px dashed var(--border, #d0d7e2); border-radius: var(--radius); }
+.rda-excel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.rda-excel table { margin-top: 10px; }
+.rda-excel-error { color: #b42318; }
+.rda-excel-ok { color: #1a7f37; }
+.rda-excel tr.rda-excel-bad td { background: #fff4f2; }
 .badge.rda-rejected { background: #fde8e8; color: var(--danger); }
 .cert-table td .badge + .badge { margin-left: 4px; }
 .rda-detail { display: grid; gap: 10px; padding: 4px 8px; }
@@ -1586,3 +1599,16 @@ ul.changelog-body { padding-left: 20px; }
 .capacity-add-member { padding: 2px 10px; font-size: 12px; white-space: nowrap; }
 .company-select { min-width: 72px; }
 .capacity-pending { color: var(--warning); font-size: 11px; font-weight: 600; margin-top: 2px; white-space: nowrap; }
+/* Card Throughput della dashboard: righe di riepilogo e mix per tipo. */
+.tp-date { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.tp-date input { font-size: 12px; padding: 3px 6px; }
+.tp-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.tp-row-label { width: 90px; flex-shrink: 0; padding-right: 12px; border-right: 1px solid var(--border); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.tp-row-body { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 16px; min-width: 0; }
+.tp-stat { font-size: 13px; line-height: 1.35; }
+.tp-stat .muted { font-size: 12px; }
+.tp-stat-icon { color: var(--primary); }
+.tp-info { color: var(--primary); cursor: help; font-size: 15px; }
+.tp-mix { display: flex; height: 22px; border-radius: 4px; overflow: hidden; grid-column: 1 / -1; }
+.tp-mix-seg { display: flex; align-items: center; justify-content: center; min-width: 4px; color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--surface); }
+.tp-mix-seg:last-child { border-right: 0; }

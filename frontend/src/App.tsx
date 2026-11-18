@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './components/authContext'
+import { DocumentTitle } from './components/DocumentTitle'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { BacklogPage } from './pages/BacklogPage'
@@ -50,6 +51,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <DocumentTitle />
       <Sidebar />
       <div className="main-column">
         <TopBar />
