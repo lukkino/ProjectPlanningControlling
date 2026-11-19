@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import update
 from sqlalchemy.orm import Session, object_session
@@ -8,6 +10,8 @@ from app.ownership import scope_user_id
 from app.services.budget import apply_to_snapshot, default_department, ensure_category_lines
 from app.services.metrics import compute_increment_metrics
 from app.services.workload import team_key
+from app.services import wrike
+from app.services.requisition_actuals import has_requisitions, requisition_actuals
 
 router = APIRouter(prefix="/api/increments", tags=["increments"])
 
@@ -138,6 +142,13 @@ def update_increment(increment_id: int, payload: schemas.IncrementUpdate, db: Se
                 "scollegali prima di collegare il progetto intero."
             ),
         )
+    if "wrike_url" in data:
+        data["wrike_url"] = (data["wrike_url"] or "").strip() or None
+        if data["wrike_url"]:
+            try:
+                wrike.parse_folder_url(data["wrike_url"])
+            except wrike.WrikeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     for field, value in data.items():
         setattr(increment, field, value)
     db.commit()
@@ -295,6 +306,7 @@ def create_snapshot(increment_id: int, payload: schemas.IncrementSnapshotCreate,
                 budget_line_id=line.id,
                 budget_value=prev_value.budget_value if prev_value else 0,
                 actual_value=prev_value.actual_value if prev_value else 0,
+                requisitions_json=prev_value.requisitions_json if prev_value else None,
                 # Anche la ripartizione dell'Actual riparte dal precedente.
                 entries=[
                     models.IncrementSnapshotValueEntry(name=e.name, hours=e.hours)
@@ -412,6 +424,83 @@ def delete_value_split(value_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(value)
     return value
+
+
+@router.post("/snapshots/{snapshot_id}/wrike", response_model=schemas.IncrementSnapshot)
+def read_snapshot_hours_from_wrike(snapshot_id: int, db: Session = Depends(get_db)):
+    """Actual ore dello snapshot da Wrike: ore registrate fino alla data
+    dello snapshot, ripartite in Project Management/Develop/Testing/System
+    Testing, con le ore per persona dallo snapshot precedente (non per
+    Project Management)."""
+    snapshot = _get_snapshot_or_404(db, snapshot_id)
+    increment = snapshot.increment
+    if not increment.wrike_url:
+        raise HTTPException(status_code=400, detail="Il progetto non è collegato a Wrike: incolla prima il link")
+    value = next((v for v in snapshot.values if v.budget_line.is_hours), None)
+    if value is None:
+        raise HTTPException(status_code=400, detail="Il progetto non ha una voce in ore (es. Hours)")
+    previous = (
+        db.query(models.IncrementSnapshot)
+        .filter(
+            models.IncrementSnapshot.increment_id == increment.id,
+            models.IncrementSnapshot.snapshot_date < snapshot.snapshot_date,
+        )
+        .order_by(models.IncrementSnapshot.snapshot_date.desc())
+        .first()
+    )
+    try:
+        hours = wrike.read_hours(increment.wrike_url, snapshot.snapshot_date, previous.snapshot_date if previous else None)
+    except wrike.WrikeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Wrike non raggiungibile: {exc}") from exc
+
+    # La struttura e' sempre quella delle quattro voci: quelle mancanti si
+    # aggiungono, le altre (rinominate a mano) restano a 0.
+    by_name = {e.name: e for e in value.entries}
+    for name in wrike.CATEGORIES:
+        if name not in by_name:
+            entry = models.IncrementSnapshotValueEntry(value_id=value.id, name=name, hours=0)
+            db.add(entry)
+            value.entries.append(entry)
+            by_name[name] = entry
+    for entry in value.entries:
+        entry.hours = hours["categories"].get(entry.name, 0.0)
+        people = hours["people"].get(entry.name, []) if entry.name != wrike.PROJECT_MANAGEMENT else []
+        entry.people_json = json.dumps(people, ensure_ascii=False) if people else None
+    db.flush()
+    value.actual_value = round(sum(e.hours for e in value.entries), 2)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+@router.post("/snapshots/{snapshot_id}/requisitions", response_model=schemas.IncrementSnapshot)
+def read_snapshot_materials_from_requisitions(snapshot_id: int, only_if_any: bool = False, db: Session = Depends(get_db)):
+    """Actual delle voci di spesa dello snapshot dalle RDA del progetto
+    (tool RDA) con data entro quella dello snapshot, tranne rifiutate e
+    annullate (regole in services/requisition_actuals.py). Sostituisce
+    l'Actual di tutte le voci in euro. only_if_any: senza RDA per il progetto
+    lascia lo snapshot com'e' (usato a ogni nuovo snapshot)."""
+    snapshot = _get_snapshot_or_404(db, snapshot_id)
+    increment = snapshot.increment
+    if not has_requisitions(db, increment):
+        if only_if_any:
+            return snapshot
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nessuna RDA per il progetto {increment.code} nel tool RDA: aggiorna le RDA da Dynamics",
+        )
+    by_line = requisition_actuals(db, increment, snapshot.snapshot_date)
+    for value in snapshot.values:
+        if value.budget_line.is_hours:
+            continue
+        rdas = by_line.get(value.budget_line_id, [])
+        value.actual_value = round(sum(r["amount"] for r in rdas), 2)
+        value.requisitions_json = json.dumps(rdas, ensure_ascii=False) if rdas else None
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
 
 
 @router.put(

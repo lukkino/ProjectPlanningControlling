@@ -375,6 +375,56 @@ def fetch_created_and_status(base_url: str, email: str, api_token: str, jql: str
     return results
 
 
+def fetch_types_and_versions(base_url: str, email: str, api_token: str, jql: str) -> dict[str, tuple[str, str | None, list[dict]]]:
+    """Tipo, email del reporter e fix version (key -> (issuetype, reporter,
+    [{"name", "released", "releaseDate"}])) delle issue di una JQL: usata dal
+    grafico "PBI chiusi per increment" della Dashboard generale."""
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+
+    base_url = base_url.rstrip("/")
+    results: dict[str, tuple[str, str | None, list[dict]]] = {}
+    next_page_token: str | None = None
+
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=30.0) as client:
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": ["issuetype", "reporter", "fixVersions"]}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in .env")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+
+                for raw in data.get("issues", []):
+                    fields = raw.get("fields") or {}
+                    results[raw.get("key", "")] = (
+                        (fields.get("issuetype") or {}).get("name", ""),
+                        (fields.get("reporter") or {}).get("emailAddress"),
+                        [
+                            {"name": v["name"], "released": bool(v.get("released")), "releaseDate": v.get("releaseDate")}
+                            for v in fields.get("fixVersions") or []
+                            if v.get("name")
+                        ],
+                    )
+
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+
+    return results
+
+
 # Account bot che apre e chiude automaticamente i Bug generati dallo scan di
 # sicurezza (CVE su pacchetti/OS, vedi reporter delle issue): scoperto
 # investigando perche' giugno 2026 avesse 35 Bug Done, quando 34 erano in

@@ -37,6 +37,8 @@ const money = (value: number, currency = 'EUR') =>
 // Stati in cui la RDA e' ancora "di qualcuno" (in carico a un approvatore o
 // rimandata al preparatore): per le chiuse/annullate il dato non serve.
 const ACTIVE_STATUSES = new Set(['Draft', 'InReview', 'Approved', 'Rejected'])
+// RDA che non impegnano budget del progetto.
+const NOT_COMMITTED_STATUSES = new Set(['Rejected', 'Cancelled'])
 
 // Data/ora dell'ultima azione: ora locale di Dynamics, senza fuso.
 const formatLocalDateTime = (value: string) => {
@@ -147,6 +149,23 @@ export function PurchaseRequisitionsPage() {
     (latest, r) => (r.synced_at && (!latest || r.synced_at > latest) ? r.synced_at : latest),
     null,
   )
+  // Budget del progetto filtrato (se e' un progetto dell'app): budget
+  // materiali come nella pagina del progetto, contro le RDA del progetto
+  // che impegnano budget (tutte tranne rifiutate e annullate), qualunque
+  // sia il filtro Stato.
+  const selectedIncrement = projectFilter ? (increments ?? []).find((i) => i.code === projectFilter) : undefined
+  const { data: incrementDetail } = useQuery({
+    queryKey: ['increment', selectedIncrement?.id],
+    queryFn: () => api.increments.get(selectedIncrement!.id),
+    enabled: !!selectedIncrement,
+  })
+  const projectRequisitions = all.filter(
+    (r) => projectFilter && projectOf(r) === projectFilter && !NOT_COMMITTED_STATUSES.has(r.status ?? ''),
+  )
+  const projectRequisitionsTotal = projectRequisitions.reduce((sum, r) => sum + totalOf(r), 0)
+  const projectInProgressTotal = projectRequisitions
+    .filter((r) => r.status === 'Draft' || r.status === 'InReview')
+    .reduce((sum, r) => sum + totalOf(r), 0)
   const toggleStatus = (status: string) => {
     const next = new Set(shown)
     if (next.has(status)) next.delete(status)
@@ -241,6 +260,48 @@ export function PurchaseRequisitionsPage() {
             <div className="rda-kpi-value">{all.length}</div>
             <div className="muted">RDA totali</div>
           </div>
+        </div>
+      )}
+      {selectedIncrement && (
+        <div className="card rda-budget">
+          <div className="rda-budget-title">
+            Budget materiali di{' '}
+            <Link to={`/increments/${selectedIncrement.id}`}>
+{selectedIncrement.code}</Link>
+          </div>
+          {!incrementDetail ? (
+            <p className="muted">Caricamento…</p>
+          ) : (
+            <div className="rda-kpis">
+              <div>
+                <div className="rda-kpi-value">{money(incrementDetail.budget_material_total)}</div>
+                <div className="muted">Budget progetto</div>
+              </div>
+              <div>
+                <div className="rda-kpi-value">{money(projectRequisitionsTotal)}</div>
+                <div className="muted">
+                  RDA sul progetto ({projectRequisitions.length}, escluse rifiutate e annullate)
+                  {projectInProgressTotal > 0 && <>, di cui {money(projectInProgressTotal)} in bozza o in revisione</>}
+                </div>
+              </div>
+              <div>
+                <div
+                  className="rda-kpi-value"
+                  style={{
+                    color:
+                      incrementDetail.budget_material_total - projectRequisitionsTotal < 0 ? 'var(--danger)' : undefined,
+                  }}
+                >
+                  {money(incrementDetail.budget_material_total - projectRequisitionsTotal)}
+                </div>
+                <div className="muted">
+                  Rimanenza
+                  {incrementDetail.budget_material_total > 0 &&
+                    ` (${Math.round((projectRequisitionsTotal / incrementDetail.budget_material_total) * 100)}% del budget impegnato)`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {all.length > 0 && filtered && (

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     jira_email: str = ""
     jira_api_token: str = ""
 
+    # Token permanente Wrike (solo nel .env): ore registrate dei progetti
+    # negli snapshot del Consumo risorse progetto (services/wrike.py).
+    wrike_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

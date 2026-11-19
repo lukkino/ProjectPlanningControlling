@@ -6,6 +6,7 @@ import type {
   AppSettingsUpdate,
   BacklogItem,
   BugsOpenedMetrics,
+  DoneByIncrementMetrics,
   Complaint,
   ComplaintMismatches,
   DoneCounts,
@@ -330,6 +331,11 @@ export const api = {
     update: (id: number, data: Partial<IncrementSnapshot>) =>
       put<IncrementSnapshot>(`/increments/snapshots/${id}`, data),
     remove: (id: number) => del(`/increments/snapshots/${id}`),
+    // Actual ore dello snapshot letto da Wrike (ripartizione e ore per persona).
+    readWrike: (snapshotId: number) => post<IncrementSnapshot>(`/increments/snapshots/${snapshotId}/wrike`),
+    // Actual delle voci di spesa dalle RDA del progetto (tool RDA).
+    readRequisitions: (snapshotId: number, onlyIfAny = false) =>
+      post<IncrementSnapshot>(`/increments/snapshots/${snapshotId}/requisitions?only_if_any=${onlyIfAny}`),
     setSubProjectHours: (snapshotId: number, subProjectId: number, actualHours: number) =>
       put<{ sub_project_id: number; actual_hours: number }>(
         `/increments/snapshots/${snapshotId}/sub-projects/${subProjectId}`,
@@ -502,6 +508,7 @@ export const api = {
     importCycleTime: (team: Team, filename: string, content: string) =>
       post<CycleTimeMetrics>(`/dashboard/cycle-time/import?team=${team}`, { filename, content }),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
+    doneByIncrement: (team: Team) => request<DoneByIncrementMetrics>(`/dashboard/done-by-increment?team=${team}`),
   },
   dashboardSnapshots: {
     list: () => request<DashboardSnapshotSummary[]>('/dashboard/snapshots'),

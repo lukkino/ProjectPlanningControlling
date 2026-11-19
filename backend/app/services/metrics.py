@@ -1,5 +1,6 @@
 import datetime as dt
 import math
+import re
 from collections.abc import Callable
 
 from sqlalchemy.orm import Session
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.services.budget import has_hours_budget, has_material_budget, hours_budget, material_budget_by_category
 from app.routers.settings import SETTINGS_ROW_ID
-from app.ownership import user_settings
+from app.ownership import scope_user_id, user_settings
 from app.services.jira_client import (
     CVE_BUG_REPORTER_EMAIL,
     JiraClientError,
@@ -15,6 +16,7 @@ from app.services.jira_client import (
     count_issues_by_type,
     fetch_created_and_status,
     fetch_cycle_times,
+    fetch_types_and_versions,
 )
 
 # Custom field Jira "Source Type" (dropdown): distingue i Bug segnalati da
@@ -238,6 +240,7 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
         budget_frozen_at=increment.budget_frozen_at,
         budget_corrected_at=increment.budget_corrected_at,
         sidebar_pinned=bool(increment.sidebar_pinned),
+        wrike_url=increment.wrike_url,
         created_at=increment.created_at,
         updated_at=increment.updated_at,
         sub_projects=list(increment.sub_projects),
@@ -396,6 +399,105 @@ def cycle_time_metrics_from_points(points: list[schemas.CycleTimePoint]) -> sche
         p85=_percentile(durations, 85),
         p95=_percentile(durations, 95),
     )
+
+
+# Fix version di un increment: chiave del progetto Jira, numero di linea e
+# progressivo (es. PTBSYS-03-003, anche "PTBSYS-03-004 - December 26").
+# Restano fuori i rilasci di altri prodotti (DASC_2.0.0...) e i contenitori
+# come PTBSYS-02-NEXT.
+_INCREMENT_VERSION = re.compile(r"^([A-Z][A-Z0-9]*)-\d+-\d+")
+DONE_BY_INCREMENT_COUNT = 12
+
+
+def _increment_versions(key: str, versions: list[dict]) -> list[dict]:
+    project_key = key.split("-")[0]
+    return [v for v in versions if (m := _INCREMENT_VERSION.match(v["name"])) and m.group(1) == project_key]
+
+
+def compute_done_by_increment_metrics(db: Session, team: str = "sw") -> schemas.DoneByIncrementMetrics:
+    """PBI chiusi (stato Done) per increment, cioe' per fix version, sulla
+    JQL base del team: Story, Bug, Bug Complaint, Bug CVE e Activity, per gli ultimi
+    DONE_BY_INCREMENT_COUNT increment. Gli increment sono quelli con PBI
+    chiusi negli ultimi due anni; i conteggi invece sono completi, anche per
+    i PBI chiusi prima."""
+    settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    base_jql = _team_base_jql(user_settings(db), team)
+    if not base_jql.strip():
+        return schemas.DoneByIncrementMetrics(
+            increments=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
+        )
+
+    base_url = (settings.jira_base_url if settings else None) or ""
+    email = (settings.jira_email if settings else None) or ""
+    api_token = (settings.jira_api_token if settings else None) or ""
+    done_jql = f"{base_jql} AND statusCategory = Done"
+
+    try:
+        recent = fetch_types_and_versions(
+            base_url, email, api_token, f"{done_jql} AND fixVersion is not EMPTY AND status CHANGED TO Done AFTER -730d"
+        )
+        versions: dict[str, dict] = {}
+        for key, (_, _, issue_versions) in recent.items():
+            for v in _increment_versions(key, issue_versions):
+                versions[v["name"]] = v
+        names = sorted(versions)[-DONE_BY_INCREMENT_COUNT:]
+        if not names:
+            return schemas.DoneByIncrementMetrics(increments=[])
+        in_versions = ", ".join('"' + n.replace('"', '\\"') + '"' for n in names)
+        issues = fetch_types_and_versions(base_url, email, api_token, f"{done_jql} AND fixVersion in ({in_versions})")
+        complaint_keys = set(
+            fetch_types_and_versions(
+                base_url,
+                email,
+                api_token,
+                f"{done_jql} AND issuetype = Bug AND {BUG_COMPLAINT_JQL_CLAUSE} AND fixVersion in ({in_versions})",
+            )
+        )
+    except JiraClientError as exc:
+        return schemas.DoneByIncrementMetrics(increments=[], error=str(exc))
+
+    counts = {n: {"story": 0, "bug": 0, "bug_complaint": 0, "bug_cve": 0, "activity": 0} for n in names}
+    for key, (issue_type, reporter, issue_versions) in issues.items():
+        if issue_type == "Story":
+            bucket = "story"
+        elif issue_type == "Activity":
+            bucket = "activity"
+        elif issue_type == "Bug":
+            if key in complaint_keys:
+                bucket = "bug_complaint"
+            elif reporter == CVE_BUG_REPORTER_EMAIL:
+                bucket = "bug_cve"
+            else:
+                bucket = "bug"
+        else:
+            continue
+        for v in _increment_versions(key, issue_versions):
+            if v["name"] in counts:
+                counts[v["name"]][bucket] += 1
+
+    # Increment gestiti nell'app: il codice e' l'inizio del nome della fix
+    # version, per il link e il nome (es. "Novembre 2026").
+    projects = db.query(models.Project).filter(models.Project.owner_id == scope_user_id()).all()
+
+    def project_for(name: str) -> models.Project | None:
+        return next((p for p in projects if p.code and name.startswith(p.code)), None)
+
+    result = []
+    for n in names:
+        if not any(counts[n].values()):
+            continue
+        project = project_for(n)
+        result.append(
+            schemas.DoneByIncrement(
+                version=n,
+                released=versions[n]["released"],
+                release_date=versions[n]["releaseDate"],
+                project_id=project.id if project else None,
+                project_name=project.name if project else None,
+                **counts[n],
+            )
+        )
+    return schemas.DoneByIncrementMetrics(increments=result)
 
 
 def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOpenedMetrics:

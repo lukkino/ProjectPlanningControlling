@@ -128,6 +128,19 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE increment_member_absences ADD COLUMN kind VARCHAR(32) DEFAULT 'Ferie'"))
 
+    if "increments" in table_names:
+        if "wrike_url" not in {col["name"] for col in inspector.get_columns("increments")}:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increments ADD COLUMN wrike_url TEXT"))
+    if "increment_snapshot_values" in table_names:
+        if "requisitions_json" not in {col["name"] for col in inspector.get_columns("increment_snapshot_values")}:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_snapshot_values ADD COLUMN requisitions_json TEXT"))
+    if "increment_snapshot_value_entries" in table_names:
+        if "people_json" not in {col["name"] for col in inspector.get_columns("increment_snapshot_value_entries")}:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE increment_snapshot_value_entries ADD COLUMN people_json TEXT"))
+
     if "tool_purchase_requisitions" in table_names:
         rda_columns = {col["name"] for col in inspector.get_columns("tool_purchase_requisitions")}
         if "approvers_json" not in rda_columns:

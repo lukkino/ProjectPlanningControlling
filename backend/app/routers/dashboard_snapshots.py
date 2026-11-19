@@ -13,6 +13,7 @@ from app.services.metrics import (
     TEAM_LABELS,
     compute_bugs_opened_metrics,
     compute_cycle_time_metrics,
+    compute_done_by_increment_metrics,
     compute_overview_metrics,
 )
 
@@ -30,6 +31,7 @@ def _collect_team_data(team: str) -> schemas.DashboardSnapshotTeamData:
             overview_previous=compute_overview_metrics(db, team, "previous"),
             cycle_time=compute_cycle_time_metrics(db, team),
             bugs_opened=compute_bugs_opened_metrics(db, team),
+            done_by_increment=compute_done_by_increment_metrics(db, team),
         )
     finally:
         db.close()
@@ -39,7 +41,10 @@ def _has_errors(teams: dict[str, schemas.DashboardSnapshotTeamData]) -> bool:
     return any(
         chart.error
         for data in teams.values()
-        for chart in (data.overview_current, data.overview_previous, data.cycle_time, data.bugs_opened)
+        for chart in (
+            data.overview_current, data.overview_previous, data.cycle_time, data.bugs_opened, data.done_by_increment
+        )
+        if chart is not None
     )
 
 

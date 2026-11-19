@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import re
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -53,6 +54,9 @@ class Increment(Base):
     budget_corrected_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     # Fissato nella sidebar (scelto dalla pagina elenco).
     sidebar_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Link della cartella/progetto Wrike: gli snapshot del Consumo risorse
+    # ne leggono le ore registrate (services/wrike.py).
+    wrike_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -683,6 +687,13 @@ class IncrementSnapshotValue(Base):
         cascade="all, delete-orphan",
         order_by="IncrementSnapshotValueEntry.id",
     )
+    # Voci di spesa lette dalle RDA (services/requisition_actuals.py): le
+    # RDA che compongono l'Actual, [{"number", "name", "status", "amount"}].
+    requisitions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def requisitions(self) -> list[dict]:
+        return json.loads(self.requisitions_json) if self.requisitions_json else []
 
 
 class IncrementSnapshotValueEntry(Base):
@@ -696,8 +707,15 @@ class IncrementSnapshotValueEntry(Base):
     value_id: Mapped[int] = mapped_column(ForeignKey("increment_snapshot_values.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(128), default="")
     hours: Mapped[float] = mapped_column(Float, default=0)
+    # Ore per persona registrate su Wrike tra lo snapshot precedente e
+    # questo ([{"name", "hours"}]): solo se lette da Wrike.
+    people_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     value: Mapped["IncrementSnapshotValue"] = relationship(back_populates="entries")
+
+    @property
+    def people(self) -> list[dict]:
+        return json.loads(self.people_json) if self.people_json else []
 
 
 # Bug di vulnerabilita' (es. "[CVE-2026-9256] The remote Red Hat host is

@@ -45,12 +45,24 @@ export type IncrementSnapshotValue = {
   // Ripartizione dell'Actual (voci in ore: Project Management, Develop,
   // ...): se presente, actual_value ne e' la somma, calcolata dal backend.
   entries: IncrementSnapshotValueEntry[]
+  // Voci di spesa lette dalle RDA: le RDA che compongono l'Actual.
+  requisitions: {
+    number: string
+    name: string | null
+    status: string | null
+    // ID progetto Dynamics (es. PTIH-PT13-004): il suffisso decide la voce.
+    project_id?: string | null
+    amount: number
+  }[]
 }
 
 export type IncrementSnapshotValueEntry = {
   id: number
   name: string
   hours: number
+  // Ore per persona rendicontate su Wrike dallo snapshot precedente (vuoto
+  // se lo snapshot non e' stato letto da Wrike).
+  people: { name: string; hours: number }[]
 }
 
 export type IncrementSnapshot = {
@@ -469,6 +481,8 @@ export type Increment = {
   budget_corrected_at: string | null
   // Fissato nella sidebar (📌 dalla pagina elenco).
   sidebar_pinned: boolean
+  // Link della cartella/progetto Wrike da cui gli snapshot leggono le ore.
+  wrike_url: string | null
   created_at: string
   updated_at: string
   sub_projects: SubProject[]
@@ -777,6 +791,27 @@ export type BugsOpenedMetrics = {
   error: string | null
 }
 
+// PBI chiusi di un increment (fix version Jira), per tipo.
+export type DoneByIncrement = {
+  version: string
+  released: boolean
+  release_date: string | null
+  // Increment dell'app con quel codice, se c'e'.
+  project_id: number | null
+  project_name: string | null
+  story: number
+  // Bug non Complaint e non CVE.
+  bug: number
+  bug_complaint: number
+  bug_cve: number
+  activity: number
+}
+
+export type DoneByIncrementMetrics = {
+  increments: DoneByIncrement[]
+  error: string | null
+}
+
 export type CycleTimeMetrics = {
   points: CycleTimePoint[]
   p50: number | null
@@ -828,6 +863,8 @@ export type DashboardSnapshotTeamData = {
   overview_previous: OverviewMetrics
   cycle_time: CycleTimeMetrics
   bugs_opened: BugsOpenedMetrics
+  // Assente negli snapshot creati prima del grafico.
+  done_by_increment?: DoneByIncrementMetrics | null
 }
 
 export type DashboardSnapshotSummary = {

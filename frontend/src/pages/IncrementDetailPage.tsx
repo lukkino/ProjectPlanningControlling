@@ -196,7 +196,11 @@ export function IncrementDetailPage() {
 
       <BudgetReviewsCard incrementId={increment.id} frozen={!!increment.budget_frozen_at} />
 
-      <IncrementHistoryCard incrementId={increment.id} subProjects={increment.sub_projects} />
+      <IncrementHistoryCard
+        incrementId={increment.id}
+        subProjects={increment.sub_projects}
+        wrikeUrl={increment.wrike_url}
+      />
 
       <HoursCalculatorCard
         incrementId={increment.id}

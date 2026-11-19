@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useIsFetching, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -25,6 +28,7 @@ import type {
   CycleTimePoint,
   DashboardSnapshotDetail,
   DashboardSnapshotTeamData,
+  DoneByIncrement,
   OverviewMetrics,
   OverviewPeriod,
   Phase,
@@ -1187,6 +1191,198 @@ function BugsOpenedCard() {
   )
 }
 
+// Serie del grafico PBI chiusi per increment, impilate dal basso: Story e
+// Bug con i colori di sempre, Bug Complaint con l'arancio della palette
+// (validata per il daltonismo), CVE come negli altri grafici (rosso a
+// opacita' ridotta) e nascosti di default: chiusi in blocco dal bot.
+// Activity col viola di sempre, nascoste di default (non sono sviluppo).
+const DONE_BY_INCREMENT_SERIES = [
+  { key: 'story', name: 'Story', color: PBI_TYPE_COLORS.Story, opacity: 1 },
+  { key: 'bug', name: 'Bug', color: PBI_TYPE_COLORS.Bug, opacity: 1 },
+  { key: 'bug_complaint', name: 'Bug Complaint', color: PBI_TYPE_COLORS.Task, opacity: 1 },
+  { key: 'activity', name: 'Activity', color: PBI_TYPE_COLORS.Activity, opacity: 1 },
+  { key: 'bug_cve', name: 'Bug CVE (bot)', color: PBI_TYPE_COLORS.Bug, opacity: 0.35 },
+] as const
+type DoneByIncrementSeries = (typeof DONE_BY_INCREMENT_SERIES)[number]
+
+// topKey: serie del segmento piu' alto non vuoto, su cui va il totale.
+type DoneByIncrementPoint = DoneByIncrement & { label: string; total: number; topKey?: string }
+
+// "PTBSYS-03-004 - December 26" -> "03-004": la chiave del progetto e' la
+// stessa per tutti.
+function shortVersion(version: string): string {
+  const match = version.match(/^[A-Z][A-Z0-9]*-(\d+-\d+)/)
+  return match ? match[1] : version
+}
+
+function DoneByIncrementTooltip({
+  active,
+  payload,
+  series,
+}: {
+  active?: boolean
+  payload?: { payload: DoneByIncrementPoint }[]
+  series: DoneByIncrementSeries[]
+}) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{p.version}</div>
+      <div className="muted" style={{ marginBottom: 4 }}>
+        {p.project_name ? `${p.project_name} · ` : ''}
+        {p.released ? 'rilasciato' : 'non rilasciato'}
+        {p.release_date ? ` · ${formatIsoDate(p.release_date)}` : ''}
+      </div>
+      {[...series].reverse().map((s) => (
+        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: s.color }}>{s.name}</span>
+          <span>{p[s.key]}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontWeight: 600 }}>
+        <span>Totale</span>
+        <span>{p.total}</span>
+      </div>
+      {p.project_id !== null && <div className="muted" style={{ marginTop: 4 }}>Clic per aprire l'increment</div>}
+    </div>
+  )
+}
+
+// PBI chiusi (Done) per increment, cioe' per fix version Jira, sulla JQL
+// base del team: barre impilate per tipo, dagli increment piu' vecchi ai
+// piu' recenti (ultimi 12).
+function DoneByIncrementCard() {
+  const [team, setTeam] = useState<Team>('sw')
+  const [showCve, setShowCve] = useState(false)
+  const [showActivity, setShowActivity] = useState(false)
+  const navigate = useNavigate()
+  const { data, refetch, isFetching, isSnapshot } = useChartData(
+    team,
+    ['dashboard', 'done-by-increment', team],
+    () => api.dashboard.doneByIncrement(team),
+    (d) => d.done_by_increment ?? { increments: [], error: 'Grafico non presente in questo snapshot (creato prima).' },
+  )
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>PBI chiusi per increment</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showActivity} onChange={(e) => setShowActivity(e.target.checked)} />
+          Mostra Activity
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showCve} onChange={(e) => setShowCve(e.target.checked)} />
+          Mostra CVE
+        </label>
+        <TeamSelector team={team} onChange={setTeam} />
+        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
+      </div>
+    </div>
+  )
+
+  if (!data) {
+    return (
+      <div className="card">
+        {header}
+        <p className="muted">Caricamento...</p>
+      </div>
+    )
+  }
+
+  const series: DoneByIncrementSeries[] = DONE_BY_INCREMENT_SERIES.filter(
+    (s) => (s.key !== 'bug_cve' || showCve) && (s.key !== 'activity' || showActivity),
+  )
+  // Gli increment senza nessun PBI dei tipi mostrati (es. solo Activity,
+  // con le Activity nascoste) restano fuori.
+  const chartData: DoneByIncrementPoint[] = data.increments
+    .map((i) => ({
+      ...i,
+      // Snapshot creati prima delle Activity: 0.
+      activity: i.activity ?? 0,
+      label: shortVersion(i.version),
+      total: series.reduce((sum, s) => sum + (i[s.key] ?? 0), 0),
+      topKey: [...series].reverse().find((s) => (i[s.key] ?? 0) > 0)?.key,
+    }))
+    .filter((p) => p.total > 0)
+  const cveTotal = data.increments.reduce((sum, i) => sum + i.bug_cve, 0)
+
+  return (
+    <div className="card">
+      {header}
+      <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+        PBI in Done per fix version (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}), ultimi{' '}
+        {chartData.length} increment. I Bug Complaint sono quelli con Source Type = Complaint
+        {cveTotal > 0 && !showCve && (
+          <>
+            ; nascosti <strong>{cveTotal}</strong> Bug CVE del bot di security scan
+          </>
+        )}
+        .{showActivity ? ' I Task non sono contati.' : ' Activity (nascoste) e Task non sono contati.'}
+      </p>
+      {data.error ? (
+        <p className="muted">{data.error}</p>
+      ) : chartData.length === 0 ? (
+        <p className="muted">Nessun PBI chiuso con una fix version di increment.</p>
+      ) : (
+        <div style={{ height: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 20, right: 16, left: 8, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={0} />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 12 }}
+                label={{ value: 'PBI', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+              />
+              <Tooltip content={<DoneByIncrementTooltip series={series} />} cursor={{ fill: 'var(--bg)' }} />
+              <Legend
+                wrapperStyle={{ fontSize: 12 }}
+                itemSorter={(item) => DONE_BY_INCREMENT_SERIES.findIndex((s) => s.name === item.value)}
+              />
+              {series.map((s) => (
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  name={s.name}
+                  stackId="done"
+                  fill={s.color}
+                  fillOpacity={s.opacity}
+                  maxBarSize={56}
+                  style={{ cursor: 'pointer' }}
+                  onClick={(entry: { payload?: DoneByIncrementPoint }) => {
+                    const id = entry.payload?.project_id
+                    if (id != null) navigate(`/projects/${id}`)
+                  }}
+                >
+                  {/* Totale sopra la barra: sul segmento piu' alto non vuoto. */}
+                  <LabelList
+                    position="top"
+                    style={{ fontSize: 12, fill: 'var(--text)' }}
+                    valueAccessor={(entry: { payload: DoneByIncrementPoint }) =>
+                      entry.payload.topKey === s.key ? entry.payload.total : null
+                    }
+                  />
+                </Bar>
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Tabellina a fianco del grafico Bug aperti: gli stessi Bug (ultimi 12 mesi,
 // CVE esclusi) per stato Jira attuale - "aperti" nel grafico vuol dire
 // segnalati nel mese, qui si vede quanti sono poi stati chiusi o scartati.
@@ -1390,6 +1586,7 @@ function RefreshAllRow() {
   const fetchingOverview = useIsFetching({ queryKey: ['dashboard', 'overview'] })
   const fetchingCycleTime = useIsFetching({ queryKey: ['dashboard', 'cycle-time'] })
   const fetchingBugsOpened = useIsFetching({ queryKey: ['dashboard', 'bugs-opened'] })
+  const fetchingDoneByIncrement = useIsFetching({ queryKey: ['dashboard', 'done-by-increment'] })
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1398,8 +1595,9 @@ function RefreshAllRow() {
           queryClient.refetchQueries({ queryKey: ['dashboard', 'overview'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'cycle-time'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'bugs-opened'] })
+          queryClient.refetchQueries({ queryKey: ['dashboard', 'done-by-increment'] })
         }}
-        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened > 0}
+        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened + fetchingDoneByIncrement > 0}
         label="Aggiorna tutti i grafici"
       />
     </div>
@@ -1430,6 +1628,7 @@ function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
       <MetricsCard />
       <CycleTimeCard />
       <ThroughputCard />
+      <DoneByIncrementCard />
       <BugsOpenedCard />
     </SnapshotContext.Provider>
   )

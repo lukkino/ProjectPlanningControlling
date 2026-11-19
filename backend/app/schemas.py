@@ -94,11 +94,28 @@ class IncrementBudgetLine(IncrementBudgetLineBase):
 
 # ---------- IncrementSnapshot (Storico progetto) ----------
 
+class SnapshotRequisition(BaseModel):
+    number: str
+    name: str | None = None
+    status: str | None = None
+    # ID progetto Dynamics della riga (es. PTIH-PT13-004): il suffisso
+    # decide la voce.
+    project_id: str | None = None
+    amount: float
+
+
+class SnapshotPersonHours(BaseModel):
+    name: str
+    hours: float
+
+
 class IncrementSnapshotValueEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     hours: float
+    # Ore per persona registrate su Wrike dallo snapshot precedente.
+    people: list[SnapshotPersonHours] = []
 
 
 class IncrementSnapshotValueEntryUpdate(BaseModel):
@@ -114,6 +131,8 @@ class IncrementSnapshotValue(BaseModel):
     # Ripartizione dell'Actual (voci in ore: Project Management, Develop,
     # ...): se presente, actual_value ne e' la somma.
     entries: list[IncrementSnapshotValueEntry] = []
+    # Voci di spesa lette dalle RDA: le RDA che compongono l'Actual.
+    requisitions: list[SnapshotRequisition] = []
 
 
 class IncrementSnapshotValueUpdate(BaseModel):
@@ -783,6 +802,8 @@ class IncrementBase(BaseModel):
     estimated_budget_hours: float = 0
     estimated_budget_material: float = 0
     project_id: int | None = None
+    # Link della cartella/progetto Wrike da cui leggere le ore.
+    wrike_url: str | None = None
 
 
 class IncrementCreate(IncrementBase):
@@ -797,6 +818,7 @@ class IncrementUpdate(BaseModel):
     estimated_budget_hours: float | None = None
     estimated_budget_material: float | None = None
     project_id: int | None = None
+    wrike_url: str | None = None
 
 
 class SubProjectCreate(BaseModel):
@@ -1177,6 +1199,28 @@ class BugsOpenedMetrics(BaseModel):
     error: str | None = None
 
 
+class DoneByIncrement(BaseModel):
+    # Fix version Jira dell'increment (es. "PTBSYS-03-003").
+    version: str
+    released: bool = False
+    release_date: dt.date | None = None
+    # Increment dell'app con quel codice, se c'e'.
+    project_id: int | None = None
+    project_name: str | None = None
+    story: int = 0
+    # Bug non Complaint e non CVE.
+    bug: int = 0
+    bug_complaint: int = 0
+    bug_cve: int = 0
+    activity: int = 0
+
+
+class DoneByIncrementMetrics(BaseModel):
+    # PBI chiusi per increment, dal piu' vecchio al piu' recente.
+    increments: list[DoneByIncrement]
+    error: str | None = None
+
+
 # ---------- Configurazione ----------
 
 class AppSettingsPublic(BaseModel):
@@ -1221,6 +1265,8 @@ class DashboardSnapshotTeamData(BaseModel):
     overview_previous: OverviewMetrics
     cycle_time: CycleTimeMetrics
     bugs_opened: BugsOpenedMetrics
+    # Assente negli snapshot creati prima del grafico.
+    done_by_increment: DoneByIncrementMetrics | None = None
 
 
 class DashboardSnapshotCreate(BaseModel):

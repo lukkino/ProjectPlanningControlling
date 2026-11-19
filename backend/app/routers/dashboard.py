@@ -13,6 +13,7 @@ from app.services.metrics import (
     compute_bugs_opened_metrics,
     compute_cycle_time_metrics,
     compute_dashboard_metrics,
+    compute_done_by_increment_metrics,
     compute_overview_metrics,
 )
 from app.services.cycle_time_file import CycleTimeFileError, parse_cycle_time_file
@@ -190,3 +191,8 @@ def get_cycle_time_progress(team: Team = "sw"):
 @router.get("/api/dashboard/bugs-opened", response_model=schemas.BugsOpenedMetrics)
 def get_bugs_opened_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
     return compute_bugs_opened_metrics(db, team)
+
+
+@router.get("/api/dashboard/done-by-increment", response_model=schemas.DoneByIncrementMetrics)
+def get_done_by_increment_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
+    return compute_done_by_increment_metrics(db, team)

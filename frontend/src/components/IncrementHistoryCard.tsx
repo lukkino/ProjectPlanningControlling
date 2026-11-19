@@ -19,8 +19,8 @@ import { formatIsoDate } from '../lib/dates'
 import { DateInput } from './DateInput'
 
 // subProjects: i sotto-progetti del progetto, di cui ogni snapshot raccoglie
-// anche l'Actual ore.
-type Props = { incrementId: number; subProjects: SubProject[] }
+// anche l'Actual ore. wrikeUrl: cartella Wrike da cui leggere le ore.
+type Props = { incrementId: number; subProjects: SubProject[]; wrikeUrl: string | null }
 
 // Stesso blu/arancio gia' usato altrove nell'app per confrontare due serie
 // (es. DashboardPage): qui budget vs actual (dell'ultimo snapshot).
@@ -130,7 +130,7 @@ function SplitTrendChart({ snapshotsAsc, lines }: { snapshotsAsc: IncrementSnaps
   )
 }
 
-export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
+export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Props) {
   const [showAll, setShowAll] = useState(false)
   const [chartMode, setChartMode] = useState<ChartMode>('budget')
   const queryClient = useQueryClient()
@@ -146,7 +146,37 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['increment-budget-lines', incrementId] })
     queryClient.invalidateQueries({ queryKey: ['increment-snapshots', incrementId] })
-    queryClient.invalidateQueries({ queryKey: ['increment', incrementId] })
+    queryClient.invalidateQueries({ queryKey: ['increment'] })
+  }
+
+  // Ore da Wrike: a ogni nuovo snapshot (se il progetto e' collegato) o a
+  // richiesta su uno snapshot esistente. Si apre la ripartizione della
+  // voce in ore, per vedere subito il dettaglio.
+  const linkWrike = useMutation({
+    mutationFn: (url: string) => api.increments.update(incrementId, { wrike_url: url }),
+    onSuccess: invalidate,
+  })
+  const readWrike = useMutation({
+    mutationFn: (snapshotId: number) => api.incrementSnapshots.readWrike(snapshotId),
+    onSuccess: (snap) => {
+      const hoursLine = lines?.find((l) => l.is_hours)
+      if (hoursLine) setExpanded((prev) => new Set(prev).add(`${snap.id}-${hoursLine.id}`))
+      invalidate()
+    },
+  })
+  // Actual delle voci di spesa dalle RDA del progetto: a ogni nuovo
+  // snapshot (se il progetto ha RDA) o a richiesta.
+  const readRequisitions = useMutation({
+    mutationFn: ({ snapshotId, onlyIfAny }: { snapshotId: number; onlyIfAny: boolean }) =>
+      api.incrementSnapshots.readRequisitions(snapshotId, onlyIfAny),
+    onSuccess: invalidate,
+  })
+  const askWrikeUrl = () => {
+    const url = window.prompt(
+      'Link della cartella/progetto Wrike (copialo dalla barra del browser, es. https://app-eu.wrike.com/…#/folder/4561663327/…).\nVuoto = scollega.',
+      wrikeUrl ?? '',
+    )
+    if (url !== null) linkWrike.mutate(url)
   }
 
   const updateLine = useMutation({
@@ -176,7 +206,11 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   const addSnapshot = useMutation({
     mutationFn: () =>
       api.incrementSnapshots.create(incrementId, { snapshot_date: new Date().toISOString().slice(0, 10) }),
-    onSuccess: invalidate,
+    onSuccess: (snap) => {
+      invalidate()
+      if (wrikeUrl) readWrike.mutate(snap.id)
+      readRequisitions.mutate({ snapshotId: snap.id, onlyIfAny: true })
+    },
   })
   const removeSnapshot = useMutation({
     mutationFn: (id: number) => api.incrementSnapshots.remove(id),
@@ -217,6 +251,9 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
   })
 
   const error =
+    linkWrike.error ??
+    readWrike.error ??
+    readRequisitions.error ??
     setSubHours.error ??
     updateLine.error ??
     addLine.error ??
@@ -248,7 +285,25 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
     <div className="card">
       <div className="page-header" style={{ marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>Consumo risorse progetto</h3>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {wrikeUrl ? (
+            <>
+              <a className="btn" href={wrikeUrl} target="_blank" rel="noreferrer" title="Apri il progetto in Wrike">
+                Wrike ↗
+              </a>
+              <button className="link-btn" title="Cambia o togli il link a Wrike" onClick={askWrikeUrl}>
+                ✎
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn"
+              title="Collega la cartella Wrike del progetto: ogni nuovo snapshot ne legge le ore registrate"
+              onClick={askWrikeUrl}
+            >
+              🔗 Collega Wrike
+            </button>
+          )}
           <button className="btn" onClick={() => addLine.mutate()}>
             + Aggiungi voce
           </button>
@@ -261,7 +316,18 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
         Budget e Actual sono entrambi il totale cumulativo ad oggi per quella voce, non solo del periodo: un nuovo
         snapshot riparte dai valori del precedente (il budget di solito resta costante, ma può cambiare per una
         revisione budget).
+        {wrikeUrl && (
+          <>
+            {' '}
+            Collegato a Wrike: un nuovo snapshot legge le ore rendicontate fino a quel giorno, ripartite in Project
+            Management, Develop, Testing e System Testing, con le ore di ogni persona dallo snapshot precedente.
+          </>
+        )}{' '}
+        L'Actual delle voci in € viene dalle RDA del progetto (tool RDA) fino alla data dello snapshot, tranne
+        rifiutate e annullate, sulla voce del sottoprogetto Dynamics: -001 Feasibility, -002 Prototype, -003
+        Preserie, -004 Consultancies, -005 Travels.
       </p>
+      {readWrike.isPending && <p className="muted">Lettura delle ore da Wrike…</p>}
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
 
       <div className="grid-3-2">
@@ -306,6 +372,34 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                       }
                     />
                   </div>
+                  {wrikeUrl && (
+                    <button
+                      className="btn"
+                      style={{ flex: '0 0 auto' }}
+                      disabled={readWrike.isPending}
+                      title={`Rileggi da Wrike le ore rendicontate fino al ${formatIsoDate(snap.snapshot_date)}: sostituisce l'Actual ore e la sua ripartizione`}
+                      onClick={() =>
+                        window.confirm(
+                          `Rileggere da Wrike le ore fino al ${formatIsoDate(snap.snapshot_date)}? L'Actual ore di questo snapshot viene sostituito.`,
+                        ) && readWrike.mutate(snap.id)
+                      }
+                    >
+                      ⟳ Wrike
+                    </button>
+                  )}
+                  <button
+                    className="btn"
+                    style={{ flex: '0 0 auto' }}
+                    disabled={readRequisitions.isPending}
+                    title={`Rileggi dalle RDA l'Actual delle voci in € fino al ${formatIsoDate(snap.snapshot_date)}`}
+                    onClick={() =>
+                      window.confirm(
+                        `Rileggere dalle RDA l'Actual delle voci in € fino al ${formatIsoDate(snap.snapshot_date)}? I valori inseriti a mano vengono sostituiti.`,
+                      ) && readRequisitions.mutate({ snapshotId: snap.id, onlyIfAny: false })
+                    }
+                  >
+                    ⟳ RDA
+                  </button>
                   <button className="btn btn-danger" style={{ flex: '0 0 auto' }} onClick={() => removeSnapshot.mutate(snap.id)}>
                     ✕
                   </button>
@@ -436,8 +530,9 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                           entries.map((entry) => {
                             const entryDiff = entry.hours - (prevEntryHours.get(entry.name) ?? 0)
                             return (
-                              // key: campi non controllati, vanno ricreati quando i valori salvati cambiano.
-                              <tr key={`entry-${entry.id}-${entry.hours}`} style={{ background: 'var(--bg)' }}>
+                              <Fragment key={`entry-${entry.id}-${entry.hours}`}>
+                              {/* key: campi non controllati, vanno ricreati quando i valori salvati cambiano. */}
+                              <tr style={{ background: 'var(--bg)' }}>
                                 <td style={{ paddingLeft: 24, whiteSpace: 'normal' }}>{entry.name}</td>
                                 <td />
                                 <td className="editable-cell">
@@ -455,6 +550,18 @@ export function IncrementHistoryCard({ incrementId, subProjects }: Props) {
                                 <td>{formatDiff(entryDiff, true)}</td>
                                 <td colSpan={2} />
                               </tr>
+                              {/* Ore per persona rendicontate su Wrike dallo
+                                  snapshot precedente: nella colonna Diff,
+                                  di cui sono il dettaglio. */}
+                              {entry.people.map((person) => (
+                                <tr key={person.name} className="snapshot-person">
+                                  <td style={{ paddingLeft: 44, whiteSpace: 'normal' }}>{person.name}</td>
+                                  <td colSpan={2} />
+                                  <td>{formatDiff(person.hours, true)}</td>
+                                  <td colSpan={2} />
+                                </tr>
+                              ))}
+                              </Fragment>
                             )
                           })}
                         {isExpanded && value && (

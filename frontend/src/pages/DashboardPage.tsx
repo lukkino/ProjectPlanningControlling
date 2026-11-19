@@ -699,6 +699,7 @@ export function DashboardPage() {
 
       <ScopeCard
         projectId={project.id}
+        title={`${project.code} – ${project.name}`}
         scope={project.scope}
         narrative={project.scope_narrative}
         frozenAt={project.scope_frozen_at}

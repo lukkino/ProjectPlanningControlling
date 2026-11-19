@@ -3,9 +3,10 @@ import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
 import type { ScopeHistory } from '../api/types'
 import { formatDateTime } from '../lib/dates'
+import { scopeExportDocument, scopeExportHtml } from '../lib/scopeExport'
 import { diffScope, scopeCounts } from '../lib/scopeDiff'
 import { ScopeBacklogCheck } from './ScopeBacklogCheck'
 import { ScopeChanges } from './ScopeChanges'
@@ -412,10 +413,21 @@ function ScopeEditor({ initialText, inProgressKeys, frozen, saving, error, onSav
     editorProps: { attributes: { class: 'rich-text', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Scope' } },
   })
   useInProgressKeys(editor, inProgressKeys)
+  const save = () => onSave(editorToStoredHtml(editor), note.trim() || null)
 
   return (
-    <>
-      <div className="rich-text-editor">
+    // Ctrl+S (Cmd+S su Mac) salva senza dover scendere al pulsante.
+    <div
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+          e.preventDefault()
+          if (!saving) save()
+        }
+      }}
+    >
+      {/* Barra degli strumenti e pulsanti restano a vista (sticky) mentre
+          si scorre uno Scope lungo. */}
+      <div className="rich-text-editor rich-text-editor--sticky">
         <Toolbar editor={editor} />
         <EditorContent editor={editor} />
       </div>
@@ -439,25 +451,26 @@ function ScopeEditor({ initialText, inProgressKeys, frozen, saving, error, onSav
           Salvataggio non riuscito: {error.message}
         </div>
       )}
-      <div className="form-actions">
+      <div className="form-actions form-actions--sticky">
+        <span className="muted" style={{ fontSize: 12, marginRight: 'auto' }}>
+          Ctrl+S per salvare
+        </span>
         <button className="btn" onClick={onCancel} disabled={saving}>
           Annulla
         </button>
-        <button
-          className="btn btn-primary"
-          onClick={() => onSave(editorToStoredHtml(editor), note.trim() || null)}
-          disabled={saving}
-        >
+        <button className="btn btn-primary" onClick={save} disabled={saving} title="Salva (Ctrl+S)">
           {saving ? 'Salvataggio...' : 'Salva'}
         </button>
       </div>
-    </>
+    </div>
   )
 }
 
 // frozenAt/frozenBy: Scope schematico congelato (vedi ScopeChanges).
+// title: intestazione e nome del file dello Scope esportato.
 type Props = {
   projectId: number
+  title: string
   scope: string | null
   narrative: string | null
   frozenAt: string | null
@@ -503,7 +516,7 @@ async function copyRichText(html: string) {
 // Discorsivo tiene una seconda versione, da copiare in Change Order e Release
 // Notice: si parte da una proposta ricavata dal backlog, che resta da
 // rivedere e diventa definitiva solo col Salva.
-export function ScopeCard({ projectId, scope, narrative, frozenAt, frozenBy }: Props) {
+export function ScopeCard({ projectId, title, scope, narrative, frozenAt, frozenBy }: Props) {
   const [tab, setTab] = useState<ScopeTab>('schematic')
   const [editing, setEditing] = useState(false)
   const [editorText, setEditorText] = useState<string | null>(null)
@@ -604,6 +617,32 @@ export function ScopeCard({ projectId, scope, narrative, frozenAt, frozenBy }: P
     },
   })
 
+  // Esportazione dello Scope schematico com'e' mostrato (etichette, razzi,
+  // spunte e link a Jira): file HTML o copia per Outlook/Word.
+  const scopeRef = useRef<HTMLDivElement>(null)
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
+  const exportedScope = () => {
+    const source = scopeRef.current?.querySelector<HTMLElement>('.rich-text')
+    if (!source) throw new Error('Scope non visibile')
+    return scopeExportHtml(source, settings?.jira_base_url ?? null)
+  }
+  const exportNote = () =>
+    `Scope esportato il ${new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}` +
+    (inProgressKeys.length ? ' · 🚀 = issue In Progress su Jira' : '')
+  const [scopeCopied, setScopeCopied] = useState(false)
+  const copyScope = useMutation({
+    mutationFn: () => copyRichText(`<p><b>${title}</b></p>${exportedScope()}`),
+    onSuccess: () => {
+      setScopeCopied(true)
+      setTimeout(() => setScopeCopied(false), 2000)
+    },
+  })
+  const downloadScope = () => {
+    const html = scopeExportDocument(exportedScope(), `Scope ${title}`, exportNote())
+    const day = new Date().toISOString().slice(0, 10)
+    saveBlob(new Blob([html], { type: 'text/html' }), `Scope ${title.replace(/[\\/:*?"<>|]/g, '_')} ${day}.html`)
+  }
+
   const chooseTab = (value: ScopeTab) => {
     save.reset()
     generate.reset()
@@ -656,6 +695,25 @@ export function ScopeCard({ projectId, scope, narrative, frozenAt, frozenBy }: P
             >
               🔒 Congela
             </button>
+          )}
+          {!editing && !collapsed && tab === 'schematic' && scope && (
+            <>
+              <button
+                className="btn"
+                title="Scarica lo Scope come pagina HTML (etichette, razzi, spunte e link a Jira), da aprire nel browser o allegare a una mail"
+                onClick={downloadScope}
+              >
+                ⬇ Esporta
+              </button>
+              <button
+                className="btn"
+                title="Copia lo Scope formattato, da incollare in Outlook, Word o Teams"
+                onClick={() => copyScope.mutate()}
+                disabled={copyScope.isPending}
+              >
+                {scopeCopied ? 'Copiato' : 'Copia'}
+              </button>
+            </>
           )}
           {!editing && !collapsed && tab === 'narrative' && narrative && (
             <button className="btn" onClick={() => copy.mutate()} disabled={copy.isPending}>
@@ -733,25 +791,28 @@ export function ScopeCard({ projectId, scope, narrative, frozenAt, frozenBy }: P
       )}
       {!editing &&
         (current ? (
-          <RichText
-            key={tab}
-            text={current}
-            onCheck={tab === 'schematic' ? (value) => save.mutate({ value }) : undefined}
-            syncPaused={save.isPending}
-            inProgressKeys={inProgressKeys}
-          />
+          <div ref={scopeRef}>
+            <RichText
+              key={tab}
+              text={current}
+              onCheck={tab === 'schematic' ? (value) => save.mutate({ value }) : undefined}
+              syncPaused={save.isPending}
+              inProgressKeys={inProgressKeys}
+            />
+          </div>
         ) : (
           <p className="muted" style={{ margin: 0 }}>
             {tab === 'schematic' ? 'Nessuno scope definito.' : 'Nessun testo discorsivo: generalo dal backlog o scrivilo a mano.'}
           </p>
         ))}
-      {!editing && (save.isError || generate.isError || copy.isError || freeze.isError || unfreeze.isError) && (
+      {!editing && (save.isError || generate.isError || copy.isError || copyScope.isError || freeze.isError || unfreeze.isError) && (
         <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
           {save.isError && `Salvataggio non riuscito: ${(save.error as Error).message}`}
           {freeze.isError && `Congelamento non riuscito: ${(freeze.error as Error).message}`}
           {unfreeze.isError && `Scongelamento non riuscito: ${(unfreeze.error as Error).message}`}
           {generate.isError && `Generazione non riuscita: ${(generate.error as Error).message}`}
           {copy.isError && `Copia non riuscita: ${(copy.error as Error).message}`}
+          {copyScope.isError && `Copia non riuscita: ${(copyScope.error as Error).message}`}
         </div>
       )}
 
