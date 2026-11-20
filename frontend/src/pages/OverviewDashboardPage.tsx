@@ -7,6 +7,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   LabelList,
   Legend,
   Line,
@@ -1191,6 +1192,418 @@ function BugsOpenedCard() {
   )
 }
 
+// ---------- Flusso: WIP, Throughput e Cycle Time ----------
+
+// Colori del grafico Flusso: tre misure diverse, prese dalla palette gia'
+// usata (viola Activity, blu Story, arancio Task) per restare distinguibili.
+const FLOW_WIP_COLOR = PBI_TYPE_COLORS.Activity
+const FLOW_THROUGHPUT_COLOR = PBI_TYPE_COLORS.Story
+const FLOW_CYCLE_TIME_COLOR = PBI_TYPE_COLORS.Task
+
+type FlowGranularity = 'month' | 'week'
+type FlowPeriod = {
+  label: string
+  // Periodo ancora in corso: fuori dalle correlazioni (throughput parziale).
+  partial: boolean
+  wip: number
+  throughput: number
+  cycleTime: number | null
+}
+
+// Lunedi' della settimana di un giorno (epoch day 0 = giovedi' 1/1/1970).
+const mondayOf = (day: number) => day - ((day + 3) % 7)
+
+// Periodi del grafico Flusso (ultimi 12 mesi o 52 settimane fino a oggi),
+// come intervalli [from, to) in epoch days.
+function flowPeriods(granularity: FlowGranularity, today: number): { from: number; to: number; label: string }[] {
+  if (granularity === 'week') {
+    const start = mondayOf(today) - 51 * 7
+    return Array.from({ length: 52 }, (_, i) => {
+      const from = start + i * 7
+      const d = epochDaysToDate(from)
+      return {
+        from,
+        to: from + 7,
+        label: d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }),
+      }
+    })
+  }
+  const thisMonth = `${isoDate(new Date()).slice(0, 7)}-01`
+  return Array.from({ length: 12 }, (_, i) => {
+    const first = shiftMonths(thisMonth, i - 11)
+    return {
+      from: dateStrToEpochDays(first) as number,
+      to: dateStrToEpochDays(shiftMonths(first, 1)) as number,
+      label: monthLabel(first),
+    }
+  })
+}
+
+// Correlazione di Pearson (null con meno di 3 coppie o senza variazione).
+function pearson(pairs: [number, number][]): number | null {
+  if (pairs.length < 3) return null
+  const n = pairs.length
+  const mx = pairs.reduce((s, [x]) => s + x, 0) / n
+  const my = pairs.reduce((s, [, y]) => s + y, 0) / n
+  let sxy = 0
+  let sxx = 0
+  let syy = 0
+  for (const [x, y] of pairs) {
+    sxy += (x - mx) * (y - my)
+    sxx += (x - mx) ** 2
+    syy += (y - my) ** 2
+  }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null
+}
+
+function strength(r: number): string {
+  const a = Math.abs(r)
+  return a >= 0.6 ? 'forte' : a >= 0.3 ? 'moderata' : 'debole'
+}
+
+// Lettura in parole delle due correlazioni: il WIP allunga il cycle time?
+// e il throughput intanto cala o tiene?
+function flowVerdict(rCt: number | null, rTp: number | null): string {
+  if (rCt === null || rTp === null) return 'Dati insufficienti per una lettura.'
+  const ct =
+    rCt >= 0.3
+      ? 'Quando ci sono più PBI in parallelo il cycle time tende ad allungarsi'
+      : rCt <= -0.3
+        ? 'Quando ci sono più PBI in parallelo il cycle time tende ad accorciarsi'
+        : 'Il cycle time non segue in modo chiaro il WIP'
+  const tp =
+    rTp >= 0.3
+      ? 'il throughput sale insieme al WIP: si chiude comunque di più.'
+      : rTp <= -0.3
+        ? 'il throughput cala quando il WIP sale: il parallelismo sta frenando il flusso.'
+        : 'il throughput non cambia molto col WIP: più parallelismo non porta più PBI chiusi.'
+  return `${ct}; ${tp}`
+}
+
+function FlowTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: { payload: FlowPeriod }[]
+}) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  const row = (label: string, value: string, color: string) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+      <span style={{ color }}>{label}</span>
+      <span>{value}</span>
+    </div>
+  )
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        {p.label}
+        {p.partial ? ' (in corso)' : ''}
+      </div>
+      {row('WIP medio', p.wip.toLocaleString('it-IT', { maximumFractionDigits: 1 }), FLOW_WIP_COLOR)}
+      {row('PBI chiusi', String(p.throughput), FLOW_THROUGHPUT_COLOR)}
+      {row(
+        'Cycle time mediano',
+        p.cycleTime === null ? '—' : `${p.cycleTime.toLocaleString('it-IT', { maximumFractionDigits: 1 })} gg`,
+        FLOW_CYCLE_TIME_COLOR,
+      )}
+    </div>
+  )
+}
+
+// Piccolo grafico a dispersione: un punto per periodo, WIP medio in X.
+function FlowScatter({
+  title,
+  points,
+  yName,
+  color,
+  r,
+}: {
+  title: string
+  points: { x: number; y: number; label: string }[]
+  yName: string
+  color: string
+  r: number | null
+}) {
+  return (
+    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+        {r === null ? 'correlazione non calcolabile' : `correlazione ${strength(r)} (r = ${r.toFixed(2).replace('.', ',')})`}
+      </div>
+      <div style={{ height: 200 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart margin={{ top: 8, right: 12, left: 0, bottom: 16 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              type="number"
+              dataKey="x"
+              name="WIP medio"
+              tick={{ fontSize: 11 }}
+              domain={['auto', 'auto']}
+              label={{ value: 'WIP medio', position: 'insideBottom', offset: -8, style: { fontSize: 11, fill: 'var(--text-muted)' } }}
+            />
+            <YAxis type="number" dataKey="y" name={yName} tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={36} />
+            <Tooltip
+              cursor={{ strokeDasharray: '3 3' }}
+              content={({ active, payload }) =>
+                active && payload?.length ? (
+                  <div
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      padding: '4px 8px',
+                      fontSize: 12,
+                    }}
+                  >
+                    <b>{(payload[0].payload as { label: string }).label}</b>
+                    <div>WIP medio {Number(payload[0].payload.x).toLocaleString('it-IT', { maximumFractionDigits: 1 })}</div>
+                    <div>
+                      {yName} {Number(payload[0].payload.y).toLocaleString('it-IT', { maximumFractionDigits: 1 })}
+                    </div>
+                  </div>
+                ) : null
+              }
+            />
+            <Scatter data={points} fill={color} />
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+// WIP, Throughput e Cycle Time nello stesso grafico, per periodo: il WIP e'
+// la media giornaliera dei PBI in lavorazione (da inizio In Progress a
+// Done), il throughput i PBI chiusi, il cycle time la mediana di quelli
+// chiusi nel periodo. Sotto, WIP contro cycle time e contro throughput,
+// con la correlazione: per capire se il parallelismo allunga i tempi e se
+// intanto si chiude di piu' o di meno. Bug CVE del bot esclusi.
+function FlowCard() {
+  const [team, setTeam] = useState<Team>('sw')
+  const [granularity, setGranularity] = useState<FlowGranularity>('month')
+  const [includeStale, setIncludeStale] = useState(false)
+  const cycle = useChartData(team, ['dashboard', 'cycle-time', team], () => api.dashboard.cycleTime(team), (d) => d.cycle_time)
+  const wip = useChartData(
+    team,
+    ['dashboard', 'wip', team],
+    () => api.dashboard.wip(team),
+    (d) => d.wip ?? { in_progress: [], error: 'Grafico non presente in questo snapshot (creato prima).' },
+  )
+
+  const header = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Flusso: WIP, Throughput e Cycle Time</h3>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 2, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 2 }}>
+          {(
+            [
+              ['month', 'Mesi'],
+              ['week', 'Settimane'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setGranularity(key)}
+              style={{
+                border: 'none',
+                borderRadius: 6,
+                padding: '3px 10px',
+                fontSize: 12,
+                cursor: 'pointer',
+                background: granularity === key ? 'var(--primary)' : 'transparent',
+                color: granularity === key ? 'white' : 'var(--text)',
+                fontWeight: granularity === key ? 600 : 400,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <TeamSelector team={team} onChange={setTeam} />
+        {cycle.data && wip.data && !cycle.isSnapshot && (
+          <RefreshButton
+            onClick={() => {
+              cycle.refetch()
+              wip.refetch()
+            }}
+            isFetching={cycle.isFetching || wip.isFetching}
+          />
+        )}
+      </div>
+    </div>
+  )
+
+  if (!cycle.data || !wip.data) {
+    return (
+      <div className="card">
+        {header}
+        <p className="muted">Caricamento... (la prima lettura dei PBI in corso da Jira richiede qualche secondo)</p>
+      </div>
+    )
+  }
+  const error = cycle.data.error ?? wip.data.error
+  if (error) {
+    return (
+      <div className="card">
+        {header}
+        <p className="muted">{error}</p>
+      </div>
+    )
+  }
+
+  const today = dateStrToEpochDays(isoDate(new Date())) as number
+  const periods = flowPeriods(granularity, today)
+  const rangeStart = periods[0].from
+  // PBI chiusi: inizio = fine - cycle time. PBI aperti: fine ancora da venire.
+  const closed = cycle.data.points
+    .filter((p) => !p.is_cve)
+    .map((p) => {
+      const finish = dateStrToEpochDays(p.finish_date) as number
+      return { start: finish - p.cycle_time_days, finish, cycleTime: p.cycle_time_days }
+    })
+  const openAll = wip.data.in_progress.filter((i) => !i.is_cve)
+  const stale = openAll.filter((i) => (dateStrToEpochDays(i.start_date) as number) < rangeStart)
+  const open = openAll
+    .filter((i) => includeStale || (dateStrToEpochDays(i.start_date) as number) >= rangeStart)
+    .map((i) => ({ start: dateStrToEpochDays(i.start_date) as number }))
+
+  // WIP di ogni giorno dall'inizio del primo periodo a oggi: +1 dal giorno
+  // di inizio, -1 dal giorno di chiusura (somme prefisse).
+  const days = today - rangeStart + 1
+  const delta = new Array<number>(days + 1).fill(0)
+  const addSpan = (start: number, end: number) => {
+    const s = Math.max(start, rangeStart)
+    const e = Math.min(end, today + 1)
+    if (e <= s) return
+    delta[s - rangeStart] += 1
+    delta[e - rangeStart] -= 1
+  }
+  for (const c of closed) addSpan(c.start, c.finish)
+  for (const o of open) addSpan(o.start, today + 1)
+  const wipByDay: number[] = []
+  let running = 0
+  for (let i = 0; i < days; i++) {
+    running += delta[i]
+    wipByDay.push(running)
+  }
+
+  const data: FlowPeriod[] = periods.map((p) => {
+    const lastDay = Math.min(p.to, today + 1)
+    const span = wipByDay.slice(p.from - rangeStart, lastDay - rangeStart)
+    const finished = closed.filter((c) => c.finish >= p.from && c.finish < p.to)
+    return {
+      label: p.label,
+      partial: p.to > today + 1,
+      wip: span.length ? span.reduce((s, v) => s + v, 0) / span.length : 0,
+      throughput: finished.length,
+      cycleTime: finished.length ? median(finished.map((c) => c.cycleTime)) : null,
+    }
+  })
+  const complete = data.filter((d) => !d.partial)
+  const ctPoints = complete.filter((d) => d.cycleTime !== null).map((d) => ({ x: d.wip, y: d.cycleTime as number, label: d.label }))
+  const tpPoints = complete.map((d) => ({ x: d.wip, y: d.throughput, label: d.label }))
+  const rCt = pearson(ctPoints.map((p) => [p.x, p.y]))
+  const rTp = pearson(tpPoints.map((p) => [p.x, p.y]))
+  const w =
+    granularity === 'month'
+      ? { per: 'mese', the: 'il mese', inThe: 'nel mese', a: 'un mese' }
+      : { per: 'settimana', the: 'la settimana', inThe: 'nella settimana', a: 'una settimana' }
+
+  return (
+    <div className="card">
+      {header}
+      <p className="muted" style={{ marginTop: 8, marginBottom: 8 }}>
+        Per {w.per}: <b style={{ color: FLOW_WIP_COLOR }}>WIP medio</b> (PBI contemporaneamente in lavorazione, da
+        In Progress a Done, media dei giorni), <b style={{ color: FLOW_THROUGHPUT_COLOR }}>PBI chiusi</b> e{' '}
+        <b style={{ color: FLOW_CYCLE_TIME_COLOR }}>cycle time mediano</b> dei PBI chiusi {w.inThe}. Bug CVE del bot
+        esclusi; {w.the} in corso è nel grafico (più chiara) ma non nelle correlazioni.
+      </p>
+      {stale.length > 0 && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 8 }}>
+          <input type="checkbox" checked={includeStale} onChange={(e) => setIncludeStale(e.target.checked)} />
+          Includi {stale.length} PBI ancora aperti ma iniziati prima del periodo (fermi da tempo: alzano il WIP di{' '}
+          {stale.length} per tutto il periodo)
+        </label>
+      )}
+      <div style={{ height: 320 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={granularity === 'week' ? 3 : 0} />
+            <YAxis
+              yAxisId="pbi"
+              allowDecimals={false}
+              tick={{ fontSize: 12 }}
+              label={{ value: 'PBI', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+            />
+            <YAxis
+              yAxisId="days"
+              orientation="right"
+              tick={{ fontSize: 12 }}
+              label={{ value: 'giorni', angle: 90, position: 'insideRight', style: { fontSize: 12, fill: 'var(--text-muted)' } }}
+            />
+            <Tooltip content={<FlowTooltip />} cursor={{ fill: 'var(--bg)' }} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar yAxisId="pbi" dataKey="throughput" name="PBI chiusi" fill={FLOW_THROUGHPUT_COLOR} fillOpacity={0.55} maxBarSize={40}>
+              {data.map((d) => (
+                <Cell key={d.label} fillOpacity={d.partial ? 0.25 : 0.55} />
+              ))}
+            </Bar>
+            <Line
+              yAxisId="pbi"
+              type="linear"
+              dataKey="wip"
+              name="WIP medio"
+              stroke={FLOW_WIP_COLOR}
+              strokeWidth={2.5}
+              dot={{ r: 3, fill: FLOW_WIP_COLOR }}
+            />
+            <Line
+              yAxisId="days"
+              type="linear"
+              dataKey="cycleTime"
+              name="Cycle time mediano (giorni)"
+              stroke={FLOW_CYCLE_TIME_COLOR}
+              strokeWidth={2}
+              strokeDasharray="5 3"
+              dot={{ r: 3, fill: FLOW_CYCLE_TIME_COLOR }}
+              connectNulls
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flow-verdict">{flowVerdict(rCt, rTp)}</div>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+        <FlowScatter
+          title="WIP → Cycle time"
+          points={ctPoints}
+          yName="Cycle time mediano (gg)"
+          color={FLOW_CYCLE_TIME_COLOR}
+          r={rCt}
+        />
+        <FlowScatter title="WIP → PBI chiusi" points={tpPoints} yName="PBI chiusi" color={FLOW_THROUGHPUT_COLOR} r={rTp} />
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+        Un punto per {w.per} {granularity === 'month' ? 'completo' : 'completa'}. Correlazione: vicino a +1 le due misure crescono insieme, vicino a −1 una
+        cresce mentre l'altra cala, vicino a 0 non c'è legame. È un indizio, non una prova: il cycle time di {w.a}{' '}
+        risente anche del WIP dei periodi precedenti, in cui quei PBI erano in lavorazione.
+      </p>
+    </div>
+  )
+}
+
 // Serie del grafico PBI chiusi per increment, impilate dal basso: Story e
 // Bug con i colori di sempre, Bug Complaint con l'arancio della palette
 // (validata per il daltonismo), CVE come negli altri grafici (rosso a
@@ -1587,6 +2000,7 @@ function RefreshAllRow() {
   const fetchingCycleTime = useIsFetching({ queryKey: ['dashboard', 'cycle-time'] })
   const fetchingBugsOpened = useIsFetching({ queryKey: ['dashboard', 'bugs-opened'] })
   const fetchingDoneByIncrement = useIsFetching({ queryKey: ['dashboard', 'done-by-increment'] })
+  const fetchingWip = useIsFetching({ queryKey: ['dashboard', 'wip'] })
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1596,8 +2010,9 @@ function RefreshAllRow() {
           queryClient.refetchQueries({ queryKey: ['dashboard', 'cycle-time'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'bugs-opened'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'done-by-increment'] })
+          queryClient.refetchQueries({ queryKey: ['dashboard', 'wip'] })
         }}
-        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened + fetchingDoneByIncrement > 0}
+        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened + fetchingDoneByIncrement + fetchingWip > 0}
         label="Aggiorna tutti i grafici"
       />
     </div>
@@ -1628,6 +2043,7 @@ function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
       <MetricsCard />
       <CycleTimeCard />
       <ThroughputCard />
+      <FlowCard />
       <DoneByIncrementCard />
       <BugsOpenedCard />
     </SnapshotContext.Provider>

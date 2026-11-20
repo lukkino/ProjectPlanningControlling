@@ -15,6 +15,7 @@ from app.services.metrics import (
     compute_cycle_time_metrics,
     compute_done_by_increment_metrics,
     compute_overview_metrics,
+    compute_wip_metrics,
 )
 
 router = APIRouter(tags=["dashboard-snapshots"])
@@ -32,6 +33,7 @@ def _collect_team_data(team: str) -> schemas.DashboardSnapshotTeamData:
             cycle_time=compute_cycle_time_metrics(db, team),
             bugs_opened=compute_bugs_opened_metrics(db, team),
             done_by_increment=compute_done_by_increment_metrics(db, team),
+            wip=compute_wip_metrics(db, team),
         )
     finally:
         db.close()
@@ -42,7 +44,12 @@ def _has_errors(teams: dict[str, schemas.DashboardSnapshotTeamData]) -> bool:
         chart.error
         for data in teams.values()
         for chart in (
-            data.overview_current, data.overview_previous, data.cycle_time, data.bugs_opened, data.done_by_increment
+            data.overview_current,
+            data.overview_previous,
+            data.cycle_time,
+            data.bugs_opened,
+            data.done_by_increment,
+            data.wip,
         )
         if chart is not None
     )

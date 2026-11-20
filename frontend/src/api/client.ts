@@ -7,6 +7,7 @@ import type {
   BacklogItem,
   BugsOpenedMetrics,
   DoneByIncrementMetrics,
+  WipMetrics,
   Complaint,
   ComplaintMismatches,
   DoneCounts,
@@ -508,6 +509,7 @@ export const api = {
     importCycleTime: (team: Team, filename: string, content: string) =>
       post<CycleTimeMetrics>(`/dashboard/cycle-time/import?team=${team}`, { filename, content }),
     bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
+    wip: (team: Team) => request<WipMetrics>(`/dashboard/wip?team=${team}`),
     doneByIncrement: (team: Team) => request<DoneByIncrementMetrics>(`/dashboard/done-by-increment?team=${team}`),
   },
   dashboardSnapshots: {

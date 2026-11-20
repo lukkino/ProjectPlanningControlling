@@ -1637,3 +1637,6 @@ ul.changelog-body { padding-left: 20px; }
   padding: 10px 0;
   margin-bottom: -10px;
 }
+
+/* Dashboard, grafico Flusso: lettura in parole delle correlazioni. */
+.flow-verdict { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--primary); background: var(--bg); border-radius: var(--radius); font-size: 13px; }

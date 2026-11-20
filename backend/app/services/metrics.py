@@ -414,6 +414,40 @@ def _increment_versions(key: str, versions: list[dict]) -> list[dict]:
     return [v for v in versions if (m := _INCREMENT_VERSION.match(v["name"])) and m.group(1) == project_key]
 
 
+def compute_wip_metrics(db: Session, team: str = "sw") -> schemas.WipMetrics:
+    """PBI in lavorazione adesso sulla JQL base del team (categoria di
+    stato In Progress), con la data di inizio dal changelog: servono al
+    grafico WIP / Throughput / Cycle Time, che per i PBI chiusi usa i punti
+    del Cycle Time. Quelli senza una transizione di inizio restano fuori."""
+    settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
+    base_jql = _team_base_jql(user_settings(db), team)
+    if not base_jql.strip():
+        return schemas.WipMetrics(
+            in_progress=[], error=f"JQL base del {TEAM_LABELS.get(team, team)} non configurata (sezione Configurazione)."
+        )
+    try:
+        issues = fetch_cycle_times(
+            (settings.jira_base_url if settings else None) or "",
+            (settings.jira_email if settings else None) or "",
+            (settings.jira_api_token if settings else None) or "",
+            # Solo quelli iniziati davvero: nella categoria In Progress ci
+            # sono anche oltre mille PBI "Confirmed" mai lavorati.
+            f'{base_jql} AND statusCategory = "In Progress" AND status WAS IN ("In Progress", "On-Going")',
+        )
+    except JiraClientError as exc:
+        return schemas.WipMetrics(in_progress=[], error=str(exc))
+    return schemas.WipMetrics(
+        in_progress=sorted(
+            (
+                schemas.WipItem(key=i.key, issue_type=i.issue_type, start_date=i.actual_start, is_cve=i.is_cve)
+                for i in issues
+                if i.actual_start is not None
+            ),
+            key=lambda i: i.start_date,
+        )
+    )
+
+
 def compute_done_by_increment_metrics(db: Session, team: str = "sw") -> schemas.DoneByIncrementMetrics:
     """PBI chiusi (stato Done) per increment, cioe' per fix version, sulla
     JQL base del team: Story, Bug, Bug Complaint, Bug CVE e Activity, per gli ultimi

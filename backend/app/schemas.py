@@ -1199,6 +1199,22 @@ class BugsOpenedMetrics(BaseModel):
     error: str | None = None
 
 
+class WipItem(BaseModel):
+    key: str
+    issue_type: str
+    # Prima transizione a In Progress (On-Going per le Activity).
+    start_date: dt.date
+    is_cve: bool = False
+
+
+class WipMetrics(BaseModel):
+    # PBI in lavorazione adesso (non ancora Done), con la data di inizio:
+    # insieme ai punti del Cycle Time (PBI chiusi, inizio = fine - cycle
+    # time) danno il WIP di ogni giorno.
+    in_progress: list[WipItem]
+    error: str | None = None
+
+
 class DoneByIncrement(BaseModel):
     # Fix version Jira dell'increment (es. "PTBSYS-03-003").
     version: str
@@ -1267,6 +1283,8 @@ class DashboardSnapshotTeamData(BaseModel):
     bugs_opened: BugsOpenedMetrics
     # Assente negli snapshot creati prima del grafico.
     done_by_increment: DoneByIncrementMetrics | None = None
+    # Assente negli snapshot creati prima del grafico WIP.
+    wip: WipMetrics | None = None
 
 
 class DashboardSnapshotCreate(BaseModel):

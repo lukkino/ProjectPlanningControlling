@@ -15,6 +15,7 @@ from app.services.metrics import (
     compute_dashboard_metrics,
     compute_done_by_increment_metrics,
     compute_overview_metrics,
+    compute_wip_metrics,
 )
 from app.services.cycle_time_file import CycleTimeFileError, parse_cycle_time_file
 from app.services.earned_value import compute_earned_value
@@ -191,6 +192,11 @@ def get_cycle_time_progress(team: Team = "sw"):
 @router.get("/api/dashboard/bugs-opened", response_model=schemas.BugsOpenedMetrics)
 def get_bugs_opened_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
     return compute_bugs_opened_metrics(db, team)
+
+
+@router.get("/api/dashboard/wip", response_model=schemas.WipMetrics)
+def get_wip_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
+    return compute_wip_metrics(db, team)
 
 
 @router.get("/api/dashboard/done-by-increment", response_model=schemas.DoneByIncrementMetrics)

@@ -791,6 +791,12 @@ export type BugsOpenedMetrics = {
   error: string | null
 }
 
+// PBI in lavorazione adesso, con la data di inizio (grafico Flusso).
+export type WipMetrics = {
+  in_progress: { key: string; issue_type: string; start_date: string; is_cve: boolean }[]
+  error: string | null
+}
+
 // PBI chiusi di un increment (fix version Jira), per tipo.
 export type DoneByIncrement = {
   version: string
@@ -865,6 +871,8 @@ export type DashboardSnapshotTeamData = {
   bugs_opened: BugsOpenedMetrics
   // Assente negli snapshot creati prima del grafico.
   done_by_increment?: DoneByIncrementMetrics | null
+  // Assente negli snapshot creati prima del grafico Flusso.
+  wip?: WipMetrics | null
 }
 
 export type DashboardSnapshotSummary = {
