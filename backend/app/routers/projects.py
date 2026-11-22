@@ -16,6 +16,15 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 # affida a questo elenco fisso per colorare/etichettare le fasi in modo
 # uniforme tra progetti diversi.
 STANDARD_PHASE_NAMES = ["Kick-off", "Planning", "Code freeze", "Execution", "Deployment", "Release to Market"]
+# Fasi iniziali di un nuovo increment, scelte alla creazione: Full Review
+# (tutte le review) o Medium Change (code freeze e la review di Medium
+# Change, che vale anche come rilascio). Poi le fasi si aggiungono e tolgono
+# a mano.
+MEDIUM_CHANGE_PHASE_NAME = "Medium Change"
+PHASE_TEMPLATES = {
+    "full_review": STANDARD_PHASE_NAMES,
+    "medium_change": ["Code freeze", MEDIUM_CHANGE_PHASE_NAME],
+}
 KICK_OFF_PHASE_NAME = "Kick-off"
 CODE_FREEZE_PHASE_NAME = "Code freeze"
 RELEASE_TO_MARKET_PHASE_NAME = "Release to Market"
@@ -51,11 +60,15 @@ def sync_phase_dates(project: models.Project) -> None:
         setattr(project, field, phase.planned_date if phase else None)
 
 
-def _fill_planned_from_original(phase: models.Phase) -> None:
-    """Fase con la sola data Originale: l'Aggiornata parte uguale (e' quella
-    che danno le date dell'increment, Gantt e dashboard). Senza storico: non
-    e' uno spostamento."""
-    if phase.planned_date is None and phase.original_date is not None:
+def _fill_planned_from_original(phase: models.Phase, previous_original=None) -> None:
+    """La data Aggiornata segue l'Originale finche' non e' stata spostata per
+    conto suo: vuota, o uguale all'Originale di prima (es. si corregge
+    l'Originale appena inserita). E' quella che danno le date
+    dell'increment, Gantt e dashboard. Senza storico: non e' uno
+    spostamento."""
+    if phase.original_date is None:
+        return
+    if phase.planned_date is None or (previous_original is not None and phase.planned_date == previous_original):
         phase.planned_date = phase.original_date
 
 
@@ -131,18 +144,25 @@ def set_project_pinned(project_id: int, payload: schemas.SidebarPin, db: Session
 
 @router.post("", response_model=schemas.ProjectDetail, status_code=201)
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
-    project = models.Project(**payload.model_dump(), owner_id=scope_user_id())
+    data = payload.model_dump()
+    template = data.pop("phase_template", "full_review")
+    project = models.Project(**data, owner_id=scope_user_id())
     db.add(project)
     db.flush()  # assegna project.id, serve per le fasi sotto
-    for order, name in enumerate(STANDARD_PHASE_NAMES, start=1):
+    for order, name in enumerate(PHASE_TEMPLATES[template], start=1):
         db.add(models.Phase(project_id=project.id, name=name, order=order))
     db.flush()
     db.refresh(project)
-    # Date dell'increment: Kick-off, Code freeze e Release to Market,
-    # cambiabili poi dall'utente.
-    project.start_phase_id = _find_phase(project, KICK_OFF_PHASE_NAME).id
+    # Date dell'increment, cambiabili poi dall'utente: Full Review =
+    # Kick-off, Code freeze e Release to Market; Medium Change = Code freeze
+    # e, come fine, la review di Medium Change (e' il rilascio); l'inizio lo
+    # sceglie l'utente.
     project.code_freeze_phase_id = _find_phase(project, CODE_FREEZE_PHASE_NAME).id
-    project.finish_phase_id = _find_phase(project, RELEASE_TO_MARKET_PHASE_NAME).id
+    if template == "medium_change":
+        project.finish_phase_id = _find_phase(project, MEDIUM_CHANGE_PHASE_NAME).id
+    else:
+        project.start_phase_id = _find_phase(project, KICK_OFF_PHASE_NAME).id
+        project.finish_phase_id = _find_phase(project, RELEASE_TO_MARKET_PHASE_NAME).id
     db.commit()
     db.refresh(project)
     return project
@@ -305,12 +325,13 @@ def update_phase(phase_id: int, payload: schemas.PhaseUpdate, db: Session = Depe
     data = payload.model_dump(exclude_unset=True)
     planned_changed = "planned_date" in data
     new_planned = data.pop("planned_date", None)
+    previous_original = phase.original_date
     for field, value in data.items():
         setattr(phase, field, value)
     if planned_changed:
         _set_phase_planned_date(phase, new_planned)
     else:
-        _fill_planned_from_original(phase)
+        _fill_planned_from_original(phase, previous_original)
     # Le milestone collegate seguono la fase (vedi models.align_milestone).
     for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
         models.align_milestone(item, phase)

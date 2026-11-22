@@ -1640,3 +1640,16 @@ ul.changelog-body { padding-left: 20px; }
 
 /* Dashboard, grafico Flusso: lettura in parole delle correlazioni. */
 .flow-verdict { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--primary); background: var(--bg); border-radius: var(--radius); font-size: 13px; }
+
+/* Dashboard: fonte dello storico Cycle Time (Jira o file CSV). */
+.ct-source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }
+/* Dashboard: pannello Periodo e dati (Dal/Al e fonte dello storico per team). */
+.dash-controls .ct-source { margin-top: 8px; }
+.ct-source-team { min-width: 110px; }
+/* Dashboard: periodo scelto accanto al titolo dei grafici. */
+.window-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); font-size: 12px; font-weight: 500; vertical-align: 2px; white-space: nowrap; }
+/* Nuovo increment: tipo (fasi iniziali). */
+.phase-template-options { display: grid; gap: 6px; }
+.phase-template { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; font-size: 13px; color: var(--text); }
+.phase-template.active { border-color: var(--primary); background: var(--bg); }
+.phase-template input { margin-top: 3px; }

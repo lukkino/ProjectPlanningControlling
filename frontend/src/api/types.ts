@@ -756,6 +756,10 @@ export type PbiDoneCount = {
 // Finestra del grafico Metriche: ultimi 365 giorni o i 365 precedenti.
 export type OverviewPeriod = 'current' | 'previous'
 
+// Fasi iniziali di un nuovo increment: tutte le review o solo il code
+// freeze e la review di Medium Change (che vale come rilascio).
+export type PhaseTemplate = 'full_review' | 'medium_change'
+
 export type OverviewMetrics = {
   done_last_12_months: PbiDoneCount[]
   done_last_12_months_total: number
@@ -831,6 +835,8 @@ export type CycleTimeMetrics = {
   source?: string | null
   // Da che data i dati sono completi (inizio estrazione / prima chiusura).
   data_from?: string | null
+  // Solo da file CSV: issue iniziate e non chiuse (WIP del grafico Flusso).
+  in_progress?: { key: string; issue_type: string; start_date: string; is_cve: boolean }[]
 }
 
 export type AppSettings = {

@@ -672,7 +672,9 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    pass
+    # Fasi iniziali: "full_review" (Kick-off ... Release to Market) o
+    # "medium_change" (Code freeze e Medium Change).
+    phase_template: Literal["full_review", "medium_change"] = "full_review"
 
 
 class ProjectGanttOrder(BaseModel):
@@ -1164,6 +1166,10 @@ class CycleTimeMetrics(BaseModel):
     # prima chiusura nel file): una finestra storica che parte prima e'
     # coperta solo in parte.
     data_from: dt.date | None = None
+    # Solo da file: le issue iniziate e non ancora chiuse (Developing senza
+    # Done), per il WIP del grafico Flusso; da Jira si leggono a parte
+    # (/api/dashboard/wip).
+    in_progress: list["WipItem"] = []
 
 
 class CycleTimeImport(BaseModel):
@@ -1205,6 +1211,9 @@ class WipItem(BaseModel):
     # Prima transizione a In Progress (On-Going per le Activity).
     start_date: dt.date
     is_cve: bool = False
+
+
+CycleTimeMetrics.model_rebuild()
 
 
 class WipMetrics(BaseModel):

@@ -372,6 +372,7 @@ function RecentlyClosedCard({
         items={closed}
         lastHeader="Chiusa il"
         lastValue={(item) => formatIsoDate(item.actual_finish)}
+        duration={(item) => workingDaysBetween(item.actual_start, item.actual_finish)}
         emptyMessage={`Nessuna issue in scope chiusa negli ultimi ${period.days} giorni.`}
       />
       <h4 style={{ margin: '20px 0 12px' }}>In progress ({inProgress.length})</h4>
@@ -379,6 +380,8 @@ function RecentlyClosedCard({
         items={inProgress}
         lastHeader="Iniziata il"
         lastValue={(item) => formatIsoDate(item.actual_start)}
+        duration={(item) => workingDaysBetween(item.actual_start, todayIso())}
+        provisional
         emptyMessage="Nessuna issue in scope in progress."
       />
       {toDoSections.map((section) => (
@@ -464,19 +467,30 @@ function ComplaintsCard({ items, complaints }: { items: BacklogItem[] | undefine
   )
 }
 
+const todayIso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // Tabella di issue della card qui sopra: le tre sezioni (chiuse, in progress,
 // da fare) cambiano solo nell'ultima colonna. Larghezze fisse sulle colonne
-// strette, cosi' le tre tabelle restano allineate tra loro.
+// strette, cosi' le tre tabelle restano allineate tra loro. duration: giorni
+// lavorativi da inizio lavorazione a chiusura (o a oggi, provisional, per
+// quelle ancora in corso), in una colonna in fondo.
 function IssueTable({
   items,
   lastHeader,
   lastValue,
   emptyMessage,
+  duration,
+  provisional = false,
 }: {
   items: BacklogItem[]
   lastHeader: string
   lastValue: (item: BacklogItem) => string | null
   emptyMessage: string
+  duration?: (item: BacklogItem) => number | null
+  provisional?: boolean
 }) {
   if (items.length === 0) {
     return (
@@ -499,6 +513,18 @@ function IssueTable({
             </th>
             <th style={{ width: 110 }}>Incluso in code freeze</th>
             <th style={{ width: 150 }}>{lastHeader}</th>
+            {duration && (
+              <th
+                style={{ width: 110 }}
+                title={
+                  provisional
+                    ? 'Giorni lavorativi da inizio lavorazione a oggi: provvisoria, cresce finché la issue è aperta'
+                    : 'Giorni lavorativi da inizio lavorazione a chiusura'
+                }
+              >
+                Durata (gg lav.)
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -515,6 +541,21 @@ function IssueTable({
               <td>{planningLabel(item) ?? <span className="muted">-</span>}</td>
               <td>{item.included_in_codefreeze ? 'Yes' : 'No'}</td>
               <td>{lastValue(item) ?? <span className="muted">-</span>}</td>
+              {duration && (
+                <td>
+                  {(() => {
+                    const days = duration(item)
+                    if (days === null) return <span className="muted">-</span>
+                    return provisional ? (
+                      <span className="muted" style={{ fontStyle: 'italic' }} title="Provvisoria: la issue è ancora in corso">
+                        {days} finora
+                      </span>
+                    ) : (
+                      days
+                    )
+                  })()}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

@@ -53,6 +53,7 @@ import type {
   NonWorkingDay,
   OverviewMetrics,
   OverviewPeriod,
+  PhaseTemplate,
   Phase,
   PprDeliverable,
   PprCandidate,
@@ -268,7 +269,8 @@ export const api = {
   projects: {
     list: () => request<Project[]>('/projects'),
     get: (id: number) => request<ProjectDetail>(`/projects/${id}`),
-    create: (data: Partial<Project>) => post<ProjectDetail>('/projects', data),
+    // phase_template: fasi iniziali (Full Review o Medium Change).
+    create: (data: Partial<Project> & { phase_template?: PhaseTemplate }) => post<ProjectDetail>('/projects', data),
     // scope_change_note: motivo della modifica dello Scope congelato.
     update: (id: number, data: Partial<Project> & { scope_change_note?: string | null }) =>
       put<ProjectDetail>(`/projects/${id}`, data),
@@ -497,8 +499,11 @@ export const api = {
     // selezionato nella card delle issue chiuse.
     presentation: (projectId: number, closedDays: number) =>
       downloadFile(`/projects/${projectId}/dashboard/presentation`, { days: String(closedDays) }),
-    overview: (team: Team, period: OverviewPeriod = 'current') =>
-      request<OverviewMetrics>(`/dashboard/overview?team=${team}&period=${period}`),
+    // since/until: periodo esplicito (date ISO) invece degli ultimi 12 mesi.
+    overview: (team: Team, period: OverviewPeriod = 'current', since?: string, until?: string) =>
+      request<OverviewMetrics>(
+        `/dashboard/overview?team=${team}&period=${period}${since && until ? `&since=${since}&until=${until}` : ''}`,
+      ),
     // since: estrae anche prima degli ultimi 12 mesi (finestra storica scelta).
     cycleTime: (team: Team, since?: string | null) =>
       request<CycleTimeMetrics>(`/dashboard/cycle-time?team=${team}${since ? `&since=${since}` : ''}`),
@@ -508,7 +513,11 @@ export const api = {
     // Storico da un file pre-elaborato (CSV) invece che da Jira.
     importCycleTime: (team: Team, filename: string, content: string) =>
       post<CycleTimeMetrics>(`/dashboard/cycle-time/import?team=${team}`, { filename, content }),
-    bugsOpened: (team: Team) => request<BugsOpenedMetrics>(`/dashboard/bugs-opened?team=${team}`),
+    // since/until: periodo scelto nella Dashboard (default ultimi 365 giorni).
+    bugsOpened: (team: Team, since?: string, until?: string) =>
+      request<BugsOpenedMetrics>(
+        `/dashboard/bugs-opened?team=${team}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`,
+      ),
     wip: (team: Team) => request<WipMetrics>(`/dashboard/wip?team=${team}`),
     doneByIncrement: (team: Team) => request<DoneByIncrementMetrics>(`/dashboard/done-by-increment?team=${team}`),
   },

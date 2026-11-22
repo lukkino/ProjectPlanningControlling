@@ -127,8 +127,14 @@ def _cycle_time_key(team: str) -> str:
 
 
 @router.get("/api/dashboard/overview", response_model=schemas.OverviewMetrics)
-def get_overview_dashboard(team: Team = "sw", period: Period = "current", db: Session = Depends(get_db)):
-    return compute_overview_metrics(db, team, period)
+def get_overview_dashboard(
+    team: Team = "sw",
+    period: Period = "current",
+    since: dt.date | None = None,
+    until: dt.date | None = None,
+    db: Session = Depends(get_db),
+):
+    return compute_overview_metrics(db, team, period, since, until)
 
 
 @router.get("/api/dashboard/cycle-time", response_model=schemas.CycleTimeMetrics)
@@ -190,8 +196,10 @@ def get_cycle_time_progress(team: Team = "sw"):
 
 
 @router.get("/api/dashboard/bugs-opened", response_model=schemas.BugsOpenedMetrics)
-def get_bugs_opened_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
-    return compute_bugs_opened_metrics(db, team)
+def get_bugs_opened_dashboard(
+    team: Team = "sw", since: dt.date | None = None, until: dt.date | None = None, db: Session = Depends(get_db)
+):
+    return compute_bugs_opened_metrics(db, team, since, until)
 
 
 @router.get("/api/dashboard/wip", response_model=schemas.WipMetrics)

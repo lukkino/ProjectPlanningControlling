@@ -23,6 +23,8 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
+import { SyncProgressModal } from '../components/SyncProgressModal'
+import { useCycleTimeData } from '../lib/useCycleTimeData'
 import type {
   BugsOpenedMonth,
   BugStatusCount,
@@ -293,6 +295,16 @@ function sortGanttRows(rows: Row[], sort: GanttSort): Row[] {
 // grafici non cambiano, cambia solo da dove leggono i dati.
 const SnapshotContext = createContext<DashboardSnapshotDetail | null>(null)
 
+// Periodo (Dal/Al, date ISO) scelto una volta sola nel pannello "Periodo e
+// dati" e usato da tutti i grafici dal Cycle Time in giu'.
+type DashboardWindow = { from: string; to: string }
+const DashboardWindowContext = createContext<DashboardWindow>({ from: '', to: '' })
+const defaultWindowFrom = () => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 1)
+  return isoDate(d)
+}
+
 // Dati di un grafico per il team scelto: dalla query live oppure, se si sta
 // guardando uno snapshot, dalla fotografia salvata (la query live resta
 // disabilitata, niente chiamate a Jira). isSnapshot serve alle card per
@@ -302,9 +314,10 @@ function useChartData<T>(
   queryKey: unknown[],
   queryFn: () => Promise<T>,
   fromSnapshot: (d: DashboardSnapshotTeamData) => T,
+  enabled = true,
 ): { data: T | undefined; refetch: () => void; isFetching: boolean; isSnapshot: boolean } {
   const snapshot = useContext(SnapshotContext)
-  const live = useQuery({ queryKey, queryFn, enabled: snapshot === null })
+  const live = useQuery({ queryKey, queryFn, enabled: snapshot === null && enabled })
   if (snapshot) {
     const teamData = snapshot.teams[team]
     return { data: teamData ? fromSnapshot(teamData) : undefined, refetch: () => {}, isFetching: false, isSnapshot: true }
@@ -319,6 +332,175 @@ function RefreshButton({ onClick, isFetching, label = 'Aggiorna' }: { onClick: (
     <button className="btn" onClick={onClick} disabled={isFetching} style={{ fontSize: 12, padding: '4px 10px' }}>
       {isFetching ? 'Aggiornamento...' : `⟳ ${label}`}
     </button>
+  )
+}
+
+// Storico Cycle Time di Cycle Time, Throughput e Flusso: come in Monte Carlo
+// e Forecasting, l'ultima estrazione salvata, da Jira o da un file CSV
+// pre-elaborato (stessi dati per team in tutte le pagine). Jira si rilegge
+// solo con "Aggiorna da Jira" (lento: un changelog per PBI). In uno
+// snapshot, i dati salvati li'.
+function useDashboardCycleTime(team: Team, since?: string | null) {
+  const snapshot = useContext(SnapshotContext)
+  const source = useCycleTimeData(team, since)
+  if (snapshot) return { ...source, data: snapshot.teams[team]?.cycle_time, isSnapshot: true }
+  return { ...source, isSnapshot: false }
+}
+type DashboardCycleTime = ReturnType<typeof useDashboardCycleTime>
+
+const formatFetchedAt = (value: string) =>
+  parseBackendDateTime(value).toLocaleString('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+// Da dove vengono i dati (Jira o file, e quando) con i pulsanti per
+// rileggerli da Jira o caricare un CSV. Nascosta negli snapshot.
+function CycleTimeSource({ team, source, label }: { team: Team; source: DashboardCycleTime; label?: string }) {
+  // L'avanzamento dell'estrazione solo dove e' partita.
+  const [started, setStarted] = useState(false)
+  if (source.isSnapshot) return null
+  const data = source.data
+  return (
+    <div className="ct-source">
+      {label && <b className="ct-source-team">{label}</b>}
+      <span className="muted">
+        {data?.fetched_at ? (
+          data.source ? (
+            <>
+              Dati dal file <b title={data.source}>{data.source}</b>, caricato il {formatFetchedAt(data.fetched_at)}
+            </>
+          ) : (
+            <>Dati da Jira, estratti il {formatFetchedAt(data.fetched_at)}</>
+          )
+        ) : source.isLoadingCached ? (
+          'Caricamento…'
+        ) : (
+          'Dati non ancora caricati: aggiorna da Jira o carica un file CSV.'
+        )}
+      </span>
+      <button
+        className="btn"
+        style={{ fontSize: 12, padding: '3px 10px' }}
+        disabled={source.isFetching}
+        title="Rilegge lo storico da Jira (lento: un changelog per PBI); vale anche per Monte Carlo e Forecasting"
+        onClick={() => {
+          setStarted(true)
+          source.refresh()
+        }}
+      >
+        {source.isFetching ? 'Aggiornamento…' : '⟳ Aggiorna da Jira'}
+      </button>
+      <label
+        className="btn"
+        style={{ fontSize: 12, padding: '3px 10px', cursor: source.isImporting ? 'default' : 'pointer' }}
+        title="Carica lo storico da un file CSV pre-elaborato (colonne ID, Developing, Done, Issue Type): più veloce di Jira; vale anche per Monte Carlo e Forecasting"
+      >
+        {source.isImporting ? 'Caricamento…' : '📄 Carica da file'}
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          hidden
+          disabled={source.isImporting}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) source.importFile(file)
+            e.target.value = ''
+          }}
+        />
+      </label>
+      {source.error && <span style={{ color: 'var(--danger)' }}>{source.error}</span>}
+      {source.importError && <span style={{ color: 'var(--danger)' }}>{source.importError}</span>}
+      {started && source.isFetching && (
+        <SyncProgressModal
+          title="Estrazione dati da Jira"
+          queryKey={['cycle-time-progress', team]}
+          fetchProgress={() => api.dashboard.cycleTimeProgress(team)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Periodo scelto nel pannello "Periodo e dati", accanto al titolo di ogni
+// grafico che lo usa: scorrendo in basso il pannello non si vede piu'.
+function WindowBadge() {
+  const { from, to } = useContext(DashboardWindowContext)
+  if (!from || !to) return null
+  return (
+    <span className="window-badge" title="Periodo scelto in Periodo e dati, in cima ai grafici">
+      {formatIsoDate(from)} – {formatIsoDate(to)}
+    </span>
+  )
+}
+
+// Messaggio delle card del Cycle Time quando i dati del team non ci sono.
+function NoCycleTimeData({ source }: { source: DashboardCycleTime }) {
+  if (source.data) return null
+  return (
+    <p className="muted">
+      {source.isLoadingCached
+        ? 'Caricamento…'
+        : 'Dati non ancora caricati: aggiornali da Jira o carica un file CSV nel pannello "Periodo e dati".'}
+    </p>
+  )
+}
+
+function TeamCycleTimeSource({ team, label, since }: { team: Team; label: string; since: string }) {
+  const source = useDashboardCycleTime(team, since)
+  return <CycleTimeSource team={team} source={source} label={label} />
+}
+
+// Pannello sopra i grafici dal Cycle Time in giu': il periodo Dal/Al e la
+// fonte dello storico Cycle Time (Jira o file CSV) di ogni team, scelti una
+// volta sola per tutti.
+function DashboardControls({ window, onChange }: { window: DashboardWindow; onChange: (w: DashboardWindow) => void }) {
+  const snapshot = useContext(SnapshotContext)
+  const today = isoDate(new Date())
+  const defaultFrom = defaultWindowFrom()
+  return (
+    <div className="card dash-controls">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ margin: 0 }}>Periodo e dati</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="tp-date">
+            Dal
+            <input
+              type="date"
+              value={window.from}
+              max={window.to}
+              onChange={(e) => e.target.value && onChange({ ...window, from: e.target.value })}
+            />
+          </label>
+          <label className="tp-date">
+            Al
+            <input
+              type="date"
+              value={window.to}
+              min={window.from}
+              onChange={(e) => e.target.value && onChange({ ...window, to: e.target.value })}
+            />
+          </label>
+          {(window.from !== defaultFrom || window.to !== today) && (
+            <button className="link-btn" style={{ fontSize: 12 }} onClick={() => onChange({ from: defaultFrom, to: today })}>
+              Ultimi 12 mesi
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="muted" style={{ margin: '6px 0 0', fontSize: 13 }}>
+        Il periodo vale per tutti i grafici qui sotto (per PBI chiusi per increment conta la data di rilascio). Cycle
+        Time, Throughput e Flusso usano lo storico di ogni team, da Jira o da un file CSV: lo stesso di Monte Carlo e
+        Forecasting.
+      </p>
+      {!snapshot &&
+        TEAMS.map((t) => (
+          <TeamCycleTimeSource key={t.key} team={t.key} label={`Team ${t.label}`} since={window.from} />
+        ))}
+    </div>
   )
 }
 
@@ -364,6 +546,44 @@ function periodRangeLabel(period: OverviewPeriod, referenceDate: string | null):
   return `${fmt(start)} – ${fmt(end)}`
 }
 
+// Periodi del grafico Metriche: ogni periodo e' confrontato con quello
+// equivalente precedente. Date ISO [since, until] compresi; per gli ultimi
+// 12 mesi restano le finestre relative del backend (anche negli snapshot).
+type MetricsRange = '12m' | 'ytd' | '6m' | '1m'
+const METRICS_RANGES: { key: MetricsRange; label: string; previousTitle: string }[] = [
+  { key: '12m', label: 'Ultimi 12 mesi', previousTitle: '12 mesi precedenti' },
+  { key: 'ytd', label: 'Anno in corso', previousTitle: 'Stesso periodo anno precedente' },
+  { key: '6m', label: 'Ultimi 6 mesi', previousTitle: '6 mesi precedenti' },
+  { key: '1m', label: 'Ultimo mese', previousTitle: 'Mese precedente' },
+]
+
+function shiftDate(d: Date, months: number, years = 0): Date {
+  const r = new Date(d)
+  r.setFullYear(r.getFullYear() + years, r.getMonth() + months)
+  return r
+}
+
+function metricsRangeDates(range: MetricsRange, reference: Date): { current: [string, string]; previous: [string, string] } {
+  const day = (d: Date, delta = 0) => {
+    const r = new Date(d)
+    r.setDate(r.getDate() + delta)
+    return isoDate(r)
+  }
+  if (range === 'ytd') {
+    const start = new Date(reference.getFullYear(), 0, 1)
+    return {
+      current: [isoDate(start), isoDate(reference)],
+      previous: [isoDate(shiftDate(start, 0, -1)), isoDate(shiftDate(reference, 0, -1))],
+    }
+  }
+  const months = range === '6m' ? 6 : range === '1m' ? 1 : 12
+  const start = shiftDate(reference, -months)
+  return {
+    current: [day(start, 1), isoDate(reference)],
+    previous: [day(shiftDate(start, -months), 1), isoDate(start)],
+  }
+}
+
 // Grafico Metriche: PBI messi a Done sulla JQL base del team, due ciambelle
 // affiancate - a sinistra gli ultimi 365 giorni, a destra i 365 precedenti.
 // Componente a se' (invece che inline in OverviewDashboardPage) cosi' da
@@ -372,26 +592,47 @@ function periodRangeLabel(period: OverviewPeriod, referenceDate: string | null):
 // il confronto anno su anno non avrebbe senso.
 function MetricsCard() {
   const [team, setTeam] = useState<Team>('sw')
+  const [chosenRange, setRange] = useState<MetricsRange>('12m')
   const snapshot = useContext(SnapshotContext)
+  // Negli snapshot sono salvati solo gli ultimi 12 mesi e l'anno prima.
+  const range: MetricsRange = snapshot ? '12m' : chosenRange
+  const referenceDate = snapshot?.snapshot_date ?? null
+  const dates = metricsRangeDates(range, referenceDate ? new Date(`${referenceDate}T12:00:00`) : new Date())
+  const explicit = range !== '12m'
   const current = useChartData(
     team,
-    ['dashboard', 'overview', team, 'current'],
-    () => api.dashboard.overview(team, 'current'),
+    explicit ? ['dashboard', 'overview', team, 'current', ...dates.current] : ['dashboard', 'overview', team, 'current'],
+    () => (explicit ? api.dashboard.overview(team, 'current', ...dates.current) : api.dashboard.overview(team, 'current')),
     (d) => d.overview_current,
   )
   const previous = useChartData(
     team,
-    ['dashboard', 'overview', team, 'previous'],
-    () => api.dashboard.overview(team, 'previous'),
+    explicit ? ['dashboard', 'overview', team, 'previous', ...dates.previous] : ['dashboard', 'overview', team, 'previous'],
+    () => (explicit ? api.dashboard.overview(team, 'previous', ...dates.previous) : api.dashboard.overview(team, 'previous')),
     (d) => d.overview_previous,
   )
-  const referenceDate = snapshot?.snapshot_date ?? null
+  const rangeInfo = METRICS_RANGES.find((r) => r.key === range)!
+  const label = ([from, to]: [string, string]) => `${formatIsoDate(from)} – ${formatIsoDate(to)}`
 
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ marginTop: 0, marginBottom: 0 }}>Metriche</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="filter-group">
+            {METRICS_RANGES.map((r) => (
+              <button
+                key={r.key}
+                className={`btn filter-btn${range === r.key ? ' active' : ''}`}
+                aria-pressed={range === r.key}
+                disabled={!!snapshot && r.key !== '12m'}
+                title={snapshot && r.key !== '12m' ? 'Negli snapshot sono salvati solo gli ultimi 12 mesi' : undefined}
+                onClick={() => setRange(r.key)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
           <TeamSelector team={team} onChange={setTeam} />
           {!current.isSnapshot && (current.data || previous.data) && (
             <RefreshButton
@@ -405,13 +646,21 @@ function MetricsCard() {
         </div>
       </div>
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        PBI messi a Done (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): ultimo anno a confronto con
-        l'anno precedente.
+        PBI messi a Done (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): {rangeInfo.label.toLowerCase()} a
+        confronto con {rangeInfo.previousTitle.toLowerCase()}.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
-        <DoneDonut data={current.data} title="Ultimi 12 mesi" rangeLabel={periodRangeLabel('current', referenceDate)} />
-        <DoneDonut data={previous.data} title="12 mesi precedenti" rangeLabel={periodRangeLabel('previous', referenceDate)} />
+        <DoneDonut
+          data={current.data}
+          title={rangeInfo.label}
+          rangeLabel={explicit ? label(dates.current) : periodRangeLabel('current', referenceDate)}
+        />
+        <DoneDonut
+          data={previous.data}
+          title={rangeInfo.previousTitle}
+          rangeLabel={explicit ? label(dates.previous) : periodRangeLabel('previous', referenceDate)}
+        />
       </div>
     </div>
   )
@@ -556,49 +805,44 @@ function CycleTimeTooltip({ active, payload }: { active?: boolean; payload?: { p
   )
 }
 
-// I dati Cycle Time possono andare oltre i 12 mesi (finestra storica di
-// Monte Carlo o file pre-elaborato): qui si mostrano gli ultimi 12 mesi.
-function lastYearPoints<T extends { finish_date: string }>(points: T[]): T[] {
-  const from = new Date()
-  from.setFullYear(from.getFullYear() - 1)
-  const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`
-  return points.filter((p) => p.finish_date >= fromIso)
-}
-
 // Scatterplot Cycle Time: un punto per PBI (JQL configurabile in
 // Configurazione + ultimi 12 mesi), asse X la data di completamento, asse Y
 // il cycle time in giorni, con le linee di percentile 50/85/95.
 function CycleTimeCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const { data, refetch, isFetching, isSnapshot } = useChartData(
-    team,
-    ['dashboard', 'cycle-time', team],
-    () => api.dashboard.cycleTime(team),
-    (d) => d.cycle_time,
-  )
+  const { from, to } = useContext(DashboardWindowContext)
+  const source = useDashboardCycleTime(team)
+  const { data } = source
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Cycle Time</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>
+        Cycle Time <WindowBadge />
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <TeamSelector team={team} onChange={setTeam} />
-        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
     </div>
   )
+  const sourceBar = <NoCycleTimeData source={source} />
 
   if (!data) {
     return (
       <div className="card">
         {header}
-        <p className="muted">Caricamento...</p>
+        {sourceBar}
       </div>
     )
   }
 
   const pointsBySeries: Record<string, ScatterPoint[]> = {}
   const xs: number[] = []
-  const points = lastYearPoints(data.points)
+  const points = data.points.filter((p) => p.finish_date >= from && p.finish_date <= to)
+  // Percentili del periodo scelto, senza i Bug CVE (come nel backend).
+  const durations = points.filter((p) => !p.is_cve).map((p) => p.cycle_time_days)
+  const p50 = durations.length ? percentile(durations, 50) : null
+  const p85 = durations.length ? percentile(durations, 85) : null
+  const p95 = durations.length ? percentile(durations, 95) : null
   for (const p of points) {
     const x = dateStrToEpochDays(p.finish_date)
     if (x === null) continue
@@ -611,19 +855,19 @@ function CycleTimeCard() {
       {header}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginTop: 8, marginBottom: 12 }}>
         <p className="muted" style={{ margin: 0, flex: '1 1 320px' }}>
-          Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento (ultimi 12 mesi).
+          Un punto per PBI: giorni trascorsi da inizio lavorazione a Done, per data di completamento, nel periodo scelto.
           Le linee tratteggiate sono il 50°, 85° e 95° percentile, calcolati senza i Bug CVE del bot di security scan.
         </p>
         {/* 85° percentile in evidenza: e' il valore da citare in
             presentazione ("l'85% dei PBI si chiude entro N giorni"), stesso
             colore della sua linea nel grafico. */}
-        {!data.error && data.p85 != null && (
+        {!data.error && p85 != null && (
           <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
             <div className="muted" style={{ fontSize: 12 }}>
               Cycle time 85° percentile
             </div>
             <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--warning)' }}>
-              {data.p85.toFixed(1)} <span style={{ fontSize: 16, fontWeight: 600 }}>giorni</span>
+              {p85.toFixed(1)} <span style={{ fontSize: 16, fontWeight: 600 }}>giorni</span>
             </div>
             <div className="muted" style={{ fontSize: 11 }}>
               l'85% dei PBI (CVE esclusi) si chiude entro questo tempo
@@ -635,7 +879,7 @@ function CycleTimeCard() {
       {data.error ? (
         <p className="muted">{data.error}</p>
       ) : points.length === 0 ? (
-        <p className="muted">Nessun PBI completato negli ultimi 12 mesi con i dati necessari.</p>
+        <p className="muted">Nessun PBI completato nel periodo scelto con i dati necessari.</p>
       ) : (
         <>
           <div style={{ height: 340 }}>
@@ -657,28 +901,28 @@ function CycleTimeCard() {
                 />
                 <Tooltip content={<CycleTimeTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                {data.p50 != null && (
+                {p50 != null && (
                   <ReferenceLine
-                    y={data.p50}
+                    y={p50}
                     stroke="var(--text-muted)"
                     strokeDasharray="4 4"
-                    label={{ value: `P50: ${data.p50.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--text-muted)' }}
+                    label={{ value: `P50: ${p50.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--text-muted)' }}
                   />
                 )}
-                {data.p85 != null && (
+                {p85 != null && (
                   <ReferenceLine
-                    y={data.p85}
+                    y={p85}
                     stroke="var(--warning)"
                     strokeDasharray="4 4"
-                    label={{ value: `P85: ${data.p85.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--warning)' }}
+                    label={{ value: `P85: ${p85.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--warning)' }}
                   />
                 )}
-                {data.p95 != null && (
+                {p95 != null && (
                   <ReferenceLine
-                    y={data.p95}
+                    y={p95}
                     stroke="var(--danger)"
                     strokeDasharray="4 4"
-                    label={{ value: `P95: ${data.p95.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--danger)' }}
+                    label={{ value: `P95: ${p95.toFixed(1)}g`, position: 'right', fontSize: 11, fill: 'var(--danger)' }}
                   />
                 )}
                 {SERIES.filter((s) => pointsBySeries[s.key]?.length).map((s) => (
@@ -797,57 +1041,28 @@ function ThroughputStat({ icon, value, label }: { icon: string; value: string; l
 // mesi), dentro i dati disponibili.
 function ThroughputCard() {
   const [team, setTeam] = useState<Team>('sw')
-  const defaultFrom = (() => {
-    const d = new Date()
-    d.setFullYear(d.getFullYear() - 1)
-    return isoDate(d)
-  })()
-  const today = isoDate(new Date())
-  const [from, setFrom] = useState(defaultFrom)
-  const [to, setTo] = useState(today)
+  const { from, to } = useContext(DashboardWindowContext)
   const [hidden, setHidden] = useState<Set<string>>(() => new Set())
-  const { data, refetch, isFetching, isSnapshot } = useChartData(
-    team,
-    ['dashboard', 'cycle-time', team],
-    () => api.dashboard.cycleTime(team),
-    (d) => d.cycle_time,
-  )
+  const source = useDashboardCycleTime(team)
+  const { data } = source
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Throughput</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>
+        Throughput <WindowBadge />
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label className="tp-date">
-          Dal
-          <input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} />
-        </label>
-        <label className="tp-date">
-          Al
-          <input type="date" value={to} min={from} onChange={(e) => e.target.value && setTo(e.target.value)} />
-        </label>
-        {(from !== defaultFrom || to !== today) && (
-          <button
-            className="link-btn"
-            style={{ fontSize: 12 }}
-            onClick={() => {
-              setFrom(defaultFrom)
-              setTo(today)
-            }}
-          >
-            Ultimi 12 mesi
-          </button>
-        )}
         <TeamSelector team={team} onChange={setTeam} />
-        {data && !isSnapshot && <RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       </div>
     </div>
   )
+  const sourceBar = <NoCycleTimeData source={source} />
 
   if (!data) {
     return (
       <div className="card">
         {header}
-        <p className="muted">Caricamento...</p>
+        {sourceBar}
       </div>
     )
   }
@@ -1084,18 +1299,21 @@ function BugsOpenedTooltip({ active, payload, showCve }: { active?: boolean; pay
 // Andamento mese per mese dei Bug aperti negli ultimi 12 mesi, Complaint e
 // non Complaint piu' la loro somma (CVE opzionali, mai inclusi nel totale).
 function BugsOpenedCard() {
+  const { from, to } = useContext(DashboardWindowContext)
   const [team, setTeam] = useState<Team>('sw')
   const [showCve, setShowCve] = useState(false)
   const { data, refetch, isFetching, isSnapshot } = useChartData(
     team,
-    ['dashboard', 'bugs-opened', team],
-    () => api.dashboard.bugsOpened(team),
+    ['dashboard', 'bugs-opened', team, from, to],
+    () => api.dashboard.bugsOpened(team, from, to),
     (d) => d.bugs_opened,
   )
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Bug aperti</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>
+        Bug aperti <WindowBadge />
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
           <input type="checkbox" checked={showCve} onChange={(e) => setShowCve(e.target.checked)} />
@@ -1116,7 +1334,8 @@ function BugsOpenedCard() {
     )
   }
 
-  const chartData = data.months.map((m) => {
+  const months = data.months.filter((m) => m.month >= from.slice(0, 7) && m.month <= to.slice(0, 7))
+  const chartData = months.map((m) => {
     const [year, month] = m.month.split('-').map(Number)
     const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('it-IT', {
       month: 'short',
@@ -1126,7 +1345,7 @@ function BugsOpenedCard() {
     return { ...m, label, total: m.complaint + m.non_complaint }
   })
   const totals = Object.fromEntries(
-    BUGS_OPENED_SERIES.map((s) => [s.key, data.months.reduce((sum, m) => sum + m[s.key], 0)]),
+    BUGS_OPENED_SERIES.map((s) => [s.key, months.reduce((sum, m) => sum + m[s.key], 0)]),
   ) as Record<(typeof BUGS_OPENED_SERIES)[number]['key'], number>
   const visibleSeries = BUGS_OPENED_SERIES.filter((s) => s.key !== 'cve' || showCve)
 
@@ -1134,7 +1353,7 @@ function BugsOpenedCard() {
     <div className="card">
       {header}
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        Bug creati per mese negli ultimi 12 mesi (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): totale{' '}
+        Bug creati per mese nel periodo scelto (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): totale{' '}
         <strong>{totals.complaint + totals.non_complaint}</strong> (<strong>{totals.complaint}</strong> complaint,{' '}
         <strong>{totals.non_complaint}</strong> non complaint)
         {totals.cve > 0 && (
@@ -1213,30 +1432,38 @@ type FlowPeriod = {
 // Lunedi' della settimana di un giorno (epoch day 0 = giovedi' 1/1/1970).
 const mondayOf = (day: number) => day - ((day + 3) % 7)
 
-// Periodi del grafico Flusso (ultimi 12 mesi o 52 settimane fino a oggi),
-// come intervalli [from, to) in epoch days.
-function flowPeriods(granularity: FlowGranularity, today: number): { from: number; to: number; label: string }[] {
+// Periodi del grafico Flusso (mesi o settimane del periodo scelto), come
+// intervalli [from, to) in epoch days.
+function flowPeriods(granularity: FlowGranularity, startDay: number, endDay: number): { from: number; to: number; label: string }[] {
   if (granularity === 'week') {
-    const start = mondayOf(today) - 51 * 7
-    return Array.from({ length: 52 }, (_, i) => {
-      const from = start + i * 7
+    const periods: { from: number; to: number; label: string }[] = []
+    for (let from = mondayOf(startDay); from <= endDay && periods.length < 600; from += 7) {
       const d = epochDaysToDate(from)
-      return {
+      periods.push({
         from,
         to: from + 7,
-        label: d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }),
-      }
-    })
-  }
-  const thisMonth = `${isoDate(new Date()).slice(0, 7)}-01`
-  return Array.from({ length: 12 }, (_, i) => {
-    const first = shiftMonths(thisMonth, i - 11)
-    return {
-      from: dateStrToEpochDays(first) as number,
-      to: dateStrToEpochDays(shiftMonths(first, 1)) as number,
-      label: monthLabel(first),
+        label: d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'UTC' }),
+      })
     }
-  })
+    return periods
+  }
+  const iso = (day: number) => epochDaysToDate(day).toISOString().slice(0, 10)
+  return monthsBetween(iso(startDay), iso(endDay)).map((m) => ({
+    from: dateStrToEpochDays(m.date) as number,
+    to: dateStrToEpochDays(shiftMonths(m.date, 1)) as number,
+    label: monthLabel(m.date),
+  }))
+}
+
+// Percentile con interpolazione lineare (come _percentile nel backend e
+// numpy): per il cycle time all'85° percentile del grafico Flusso.
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const k = (sorted.length - 1) * (p / 100)
+  const f = Math.floor(k)
+  const c = Math.ceil(k)
+  return f === c ? sorted[f] : sorted[f] * (c - k) + sorted[c] * (k - f)
 }
 
 // Correlazione di Pearson (null con meno di 3 coppie o senza variazione).
@@ -1313,7 +1540,7 @@ function FlowTooltip({
       {row('WIP medio', p.wip.toLocaleString('it-IT', { maximumFractionDigits: 1 }), FLOW_WIP_COLOR)}
       {row('PBI chiusi', String(p.throughput), FLOW_THROUGHPUT_COLOR)}
       {row(
-        'Cycle time mediano',
+        'Cycle time 85° percentile',
         p.cycleTime === null ? '—' : `${p.cycleTime.toLocaleString('it-IT', { maximumFractionDigits: 1 })} gg`,
         FLOW_CYCLE_TIME_COLOR,
       )}
@@ -1386,7 +1613,7 @@ function FlowScatter({
 
 // WIP, Throughput e Cycle Time nello stesso grafico, per periodo: il WIP e'
 // la media giornaliera dei PBI in lavorazione (da inizio In Progress a
-// Done), il throughput i PBI chiusi, il cycle time la mediana di quelli
+// Done), il throughput i PBI chiusi, il cycle time l'85° percentile di quelli
 // chiusi nel periodo. Sotto, WIP contro cycle time e contro throughput,
 // con la correlazione: per capire se il parallelismo allunga i tempi e se
 // intanto si chiude di piu' o di meno. Bug CVE del bot esclusi.
@@ -1394,17 +1621,24 @@ function FlowCard() {
   const [team, setTeam] = useState<Team>('sw')
   const [granularity, setGranularity] = useState<FlowGranularity>('month')
   const [includeStale, setIncludeStale] = useState(false)
-  const cycle = useChartData(team, ['dashboard', 'cycle-time', team], () => api.dashboard.cycleTime(team), (d) => d.cycle_time)
+  const window = useContext(DashboardWindowContext)
+  const cycle = useDashboardCycleTime(team)
+  // Dati da file: i PBI in corso sono nel file stesso; da Jira si leggono a
+  // parte (solo quelli iniziati davvero).
+  const fromFile = !cycle.isSnapshot && !!cycle.data?.source
   const wip = useChartData(
     team,
     ['dashboard', 'wip', team],
     () => api.dashboard.wip(team),
     (d) => d.wip ?? { in_progress: [], error: 'Grafico non presente in questo snapshot (creato prima).' },
+    !fromFile,
   )
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>Flusso: WIP, Throughput e Cycle Time</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>
+        Flusso: WIP, Throughput e Cycle Time <WindowBadge />
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 2, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 2 }}>
           {(
@@ -1432,39 +1666,45 @@ function FlowCard() {
           ))}
         </div>
         <TeamSelector team={team} onChange={setTeam} />
-        {cycle.data && wip.data && !cycle.isSnapshot && (
+        {!cycle.isSnapshot && !fromFile && wip.data && (
           <RefreshButton
-            onClick={() => {
-              cycle.refetch()
-              wip.refetch()
-            }}
-            isFetching={cycle.isFetching || wip.isFetching}
+            onClick={() => wip.refetch()}
+            isFetching={wip.isFetching}
+            label="Aggiorna PBI in corso"
           />
         )}
       </div>
     </div>
   )
+  const sourceBar = <NoCycleTimeData source={cycle} />
 
-  if (!cycle.data || !wip.data) {
+  if (!cycle.data || (!fromFile && !wip.data)) {
     return (
       <div className="card">
         {header}
-        <p className="muted">Caricamento... (la prima lettura dei PBI in corso da Jira richiede qualche secondo)</p>
+        {sourceBar}
+        {cycle.data && <p className="muted">Lettura da Jira dei PBI in corso (qualche secondo)…</p>}
       </div>
     )
   }
-  const error = cycle.data.error ?? wip.data.error
+  const error = cycle.data.error ?? (fromFile ? null : (wip.data?.error ?? null))
   if (error) {
     return (
       <div className="card">
         {header}
+        {sourceBar}
         <p className="muted">{error}</p>
       </div>
     )
   }
+  const inProgress = fromFile ? (cycle.data.in_progress ?? []) : (wip.data?.in_progress ?? [])
 
-  const today = dateStrToEpochDays(isoDate(new Date())) as number
-  const periods = flowPeriods(granularity, today)
+  // Ultimo giorno considerato: la fine del periodo scelto, al massimo oggi.
+  const today = Math.min(
+    dateStrToEpochDays(isoDate(new Date())) as number,
+    dateStrToEpochDays(window.to) as number,
+  )
+  const periods = flowPeriods(granularity, dateStrToEpochDays(window.from) as number, today)
   const rangeStart = periods[0].from
   // PBI chiusi: inizio = fine - cycle time. PBI aperti: fine ancora da venire.
   const closed = cycle.data.points
@@ -1473,7 +1713,7 @@ function FlowCard() {
       const finish = dateStrToEpochDays(p.finish_date) as number
       return { start: finish - p.cycle_time_days, finish, cycleTime: p.cycle_time_days }
     })
-  const openAll = wip.data.in_progress.filter((i) => !i.is_cve)
+  const openAll = inProgress.filter((i) => !i.is_cve)
   const stale = openAll.filter((i) => (dateStrToEpochDays(i.start_date) as number) < rangeStart)
   const open = openAll
     .filter((i) => includeStale || (dateStrToEpochDays(i.start_date) as number) >= rangeStart)
@@ -1508,7 +1748,7 @@ function FlowCard() {
       partial: p.to > today + 1,
       wip: span.length ? span.reduce((s, v) => s + v, 0) / span.length : 0,
       throughput: finished.length,
-      cycleTime: finished.length ? median(finished.map((c) => c.cycleTime)) : null,
+      cycleTime: finished.length ? percentile(finished.map((c) => c.cycleTime), 85) : null,
     }
   })
   const complete = data.filter((d) => !d.partial)
@@ -1527,7 +1767,8 @@ function FlowCard() {
       <p className="muted" style={{ marginTop: 8, marginBottom: 8 }}>
         Per {w.per}: <b style={{ color: FLOW_WIP_COLOR }}>WIP medio</b> (PBI contemporaneamente in lavorazione, da
         In Progress a Done, media dei giorni), <b style={{ color: FLOW_THROUGHPUT_COLOR }}>PBI chiusi</b> e{' '}
-        <b style={{ color: FLOW_CYCLE_TIME_COLOR }}>cycle time mediano</b> dei PBI chiusi {w.inThe}. Bug CVE del bot
+        <b style={{ color: FLOW_CYCLE_TIME_COLOR }}>cycle time all'85° percentile</b> dei PBI chiusi {w.inThe} (l'85% si
+        è chiuso entro quel numero di giorni). Bug CVE del bot
         esclusi; {w.the} in corso è nel grafico (più chiara) ma non nelle correlazioni.
       </p>
       {stale.length > 0 && (
@@ -1574,7 +1815,7 @@ function FlowCard() {
               yAxisId="days"
               type="linear"
               dataKey="cycleTime"
-              name="Cycle time mediano (giorni)"
+              name="Cycle time 85° percentile (giorni)"
               stroke={FLOW_CYCLE_TIME_COLOR}
               strokeWidth={2}
               strokeDasharray="5 3"
@@ -1587,9 +1828,9 @@ function FlowCard() {
       <div className="flow-verdict">{flowVerdict(rCt, rTp)}</div>
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
         <FlowScatter
-          title="WIP → Cycle time"
+          title="WIP → Cycle time (85° percentile)"
           points={ctPoints}
-          yName="Cycle time mediano (gg)"
+          yName="Cycle time 85° perc. (gg)"
           color={FLOW_CYCLE_TIME_COLOR}
           r={rCt}
         />
@@ -1678,6 +1919,7 @@ function DoneByIncrementCard() {
   const [team, setTeam] = useState<Team>('sw')
   const [showCve, setShowCve] = useState(false)
   const [showActivity, setShowActivity] = useState(false)
+  const { from, to } = useContext(DashboardWindowContext)
   const navigate = useNavigate()
   const { data, refetch, isFetching, isSnapshot } = useChartData(
     team,
@@ -1688,7 +1930,9 @@ function DoneByIncrementCard() {
 
   const header = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ marginTop: 0, marginBottom: 0 }}>PBI chiusi per increment</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 0 }}>
+        PBI chiusi per increment <WindowBadge />
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
           <input type="checkbox" checked={showActivity} onChange={(e) => setShowActivity(e.target.checked)} />
@@ -1718,7 +1962,10 @@ function DoneByIncrementCard() {
   )
   // Gli increment senza nessun PBI dei tipi mostrati (es. solo Activity,
   // con le Activity nascoste) restano fuori.
-  const chartData: DoneByIncrementPoint[] = data.increments
+  // Increment rilasciati (data di rilascio) nel periodo scelto; quelli
+  // senza data di rilascio restano.
+  const inWindow = data.increments.filter((i) => !i.release_date || (i.release_date >= from && i.release_date <= to))
+  const chartData: DoneByIncrementPoint[] = inWindow
     .map((i) => ({
       ...i,
       // Snapshot creati prima delle Activity: 0.
@@ -1728,14 +1975,14 @@ function DoneByIncrementCard() {
       topKey: [...series].reverse().find((s) => (i[s.key] ?? 0) > 0)?.key,
     }))
     .filter((p) => p.total > 0)
-  const cveTotal = data.increments.reduce((sum, i) => sum + i.bug_cve, 0)
+  const cveTotal = inWindow.reduce((sum, i) => sum + i.bug_cve, 0)
 
   return (
     <div className="card">
       {header}
       <p className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-        PBI in Done per fix version (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}), ultimi{' '}
-        {chartData.length} increment. I Bug Complaint sono quelli con Source Type = Complaint
+        PBI in Done per fix version (JQL base del {team === 'sw' ? 'Team SW' : 'Team Embedded'}): {chartData.length} increment con data di
+        rilascio nel periodo scelto (tra gli ultimi 12 con PBI chiusi), più quelli senza data. I Bug Complaint sono quelli con Source Type = Complaint
         {cveTotal > 0 && !showCve && (
           <>
             ; nascosti <strong>{cveTotal}</strong> Bug CVE del bot di security scan
@@ -1806,7 +2053,7 @@ function BugStatusTable({ byStatus }: { byStatus: BugStatusCount[] }) {
     <div style={{ flex: '0 0 auto' }}>
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Stato attuale</div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        Bug degli ultimi 12 mesi, CVE esclusi
+        Bug del periodo scelto, CVE esclusi
       </div>
       <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
@@ -1997,7 +2244,6 @@ function SnapshotPanel({ selectedId, onSelect }: { selectedId: number | null; on
 function RefreshAllRow() {
   const queryClient = useQueryClient()
   const fetchingOverview = useIsFetching({ queryKey: ['dashboard', 'overview'] })
-  const fetchingCycleTime = useIsFetching({ queryKey: ['dashboard', 'cycle-time'] })
   const fetchingBugsOpened = useIsFetching({ queryKey: ['dashboard', 'bugs-opened'] })
   const fetchingDoneByIncrement = useIsFetching({ queryKey: ['dashboard', 'done-by-increment'] })
   const fetchingWip = useIsFetching({ queryKey: ['dashboard', 'wip'] })
@@ -2007,12 +2253,11 @@ function RefreshAllRow() {
       <RefreshButton
         onClick={() => {
           queryClient.refetchQueries({ queryKey: ['dashboard', 'overview'] })
-          queryClient.refetchQueries({ queryKey: ['dashboard', 'cycle-time'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'bugs-opened'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'done-by-increment'] })
           queryClient.refetchQueries({ queryKey: ['dashboard', 'wip'] })
         }}
-        isFetching={fetchingOverview + fetchingCycleTime + fetchingBugsOpened + fetchingDoneByIncrement + fetchingWip > 0}
+        isFetching={fetchingOverview + fetchingBugsOpened + fetchingDoneByIncrement + fetchingWip > 0}
         label="Aggiorna tutti i grafici"
       />
     </div>
@@ -2023,6 +2268,7 @@ function RefreshAllRow() {
 // Con uno snapshot selezionato si aspetta di averlo caricato prima di
 // mostrarli, altrimenti partirebbero per un attimo le query live verso Jira.
 function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
+  const [window, setWindow] = useState<DashboardWindow>(() => ({ from: defaultWindowFrom(), to: isoDate(new Date()) }))
   const { data: snapshot, isError } = useQuery({
     queryKey: ['dashboard-snapshot', snapshotId],
     queryFn: () => api.dashboardSnapshots.get(snapshotId as number),
@@ -2041,11 +2287,14 @@ function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
     <SnapshotContext.Provider value={snapshotId !== null ? (snapshot ?? null) : null}>
       {snapshotId === null && <RefreshAllRow />}
       <MetricsCard />
-      <CycleTimeCard />
-      <ThroughputCard />
-      <FlowCard />
-      <DoneByIncrementCard />
-      <BugsOpenedCard />
+      <DashboardControls window={window} onChange={setWindow} />
+      <DashboardWindowContext.Provider value={window}>
+        <CycleTimeCard />
+        <ThroughputCard />
+        <FlowCard />
+        <DoneByIncrementCard />
+        <BugsOpenedCard />
+      </DashboardWindowContext.Provider>
     </SnapshotContext.Provider>
   )
 }

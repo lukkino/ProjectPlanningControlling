@@ -5,12 +5,23 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useSuggestions } from '../lib/useSuggestions'
 import { Suggestion } from './Suggestion'
-import type { Project } from '../api/types'
+import type { PhaseTemplate, Project } from '../api/types'
 
 type Props = {
   project?: Project
   onClose: () => void
 }
+
+// Tipo di increment, scelto solo alla creazione: decide le fasi iniziali
+// (poi si aggiungono e tolgono a mano dalla Dashboard).
+const PHASE_TEMPLATES: { value: PhaseTemplate; label: string; phases: string }[] = [
+  {
+    value: 'full_review',
+    label: 'Full Review',
+    phases: 'Kick-off, Planning, Code freeze, Execution, Deployment, Release to Market',
+  },
+  { value: 'medium_change', label: 'Medium Change', phases: 'Code freeze, Medium Change (vale come rilascio)' },
+]
 
 const emptyForm = {
   code: '',
@@ -37,6 +48,7 @@ export function ProjectFormModal({ project, onClose }: Props) {
         }
       : emptyForm,
   )
+  const [phaseTemplate, setPhaseTemplate] = useState<PhaseTemplate>('full_review')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -52,7 +64,9 @@ export function ProjectFormModal({ project, onClose }: Props) {
       // Lo Scope di un increment esistente si modifica direttamente dalla
       // Dashboard (ScopeCard, con formattazione): qui solo alla creazione.
       if (project) delete payload.scope
-      return project ? api.projects.update(project.id, payload) : api.projects.create(payload)
+      return project
+        ? api.projects.update(project.id, payload)
+        : api.projects.create({ ...payload, phase_template: phaseTemplate })
     },
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -90,6 +104,27 @@ export function ProjectFormModal({ project, onClose }: Props) {
           <label>Nome</label>
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
         </div>
+        {!project && (
+          <div className="form-row">
+            <label>Tipo di increment</label>
+            <div className="phase-template-options">
+              {PHASE_TEMPLATES.map((t) => (
+                <label key={t.value} className={`phase-template${phaseTemplate === t.value ? ' active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="phase-template"
+                    checked={phaseTemplate === t.value}
+                    onChange={() => setPhaseTemplate(t.value)}
+                  />
+                  <span>
+                    <b>{t.label}</b>
+                    <span className="muted"> · fasi: {t.phases}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         {!project && (
           <div className="form-row">
             <label>Scope</label>

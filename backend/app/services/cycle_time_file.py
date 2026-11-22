@@ -78,15 +78,27 @@ def parse_cycle_time_file(content: str, today: dt.date | None = None) -> schemas
         )
 
     points: list[schemas.CycleTimePoint] = []
+    in_progress: list[schemas.WipItem] = []
     for line, row in enumerate(reader, start=2):
         try:
             start, finish = _date(row.get(start_col)), _date(row.get(finish_col))
         except CycleTimeFileError as exc:
             raise CycleTimeFileError(f"Riga {line}: {exc}") from exc
-        if start is None or finish is None or finish < start or finish > today:
-            continue
         issue_type = (row.get(type_col) or "").strip()
         title = (row.get(title_col) or "") if title_col else ""
+        # Iniziata e non ancora chiusa: in lavorazione (WIP del grafico Flusso).
+        if start is not None and start <= today and (finish is None or finish > today):
+            in_progress.append(
+                schemas.WipItem(
+                    key=(row.get(key_col) or "").strip(),
+                    issue_type=issue_type,
+                    start_date=start,
+                    is_cve=issue_type == "Bug" and "CVE" in title.upper(),
+                )
+            )
+            continue
+        if start is None or finish is None or finish < start or finish > today:
+            continue
         points.append(
             schemas.CycleTimePoint(
                 key=(row.get(key_col) or "").strip(),
@@ -102,4 +114,5 @@ def parse_cycle_time_file(content: str, today: dt.date | None = None) -> schemas
         )
     metrics = cycle_time_metrics_from_points(points)
     metrics.data_from = min(p.finish_date for p in points)
+    metrics.in_progress = sorted(in_progress, key=lambda i: i.start_date)
     return metrics

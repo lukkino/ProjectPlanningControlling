@@ -261,7 +261,13 @@ def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementD
     )
 
 
-def compute_overview_metrics(db: Session, team: str = "sw", period: str = "current") -> schemas.OverviewMetrics:
+def compute_overview_metrics(
+    db: Session,
+    team: str = "sw",
+    period: str = "current",
+    since: dt.date | None = None,
+    until: dt.date | None = None,
+) -> schemas.OverviewMetrics:
     """Grafico a ciambella della Dashboard generale: quanti PBI sono stati
     messi a Done negli ultimi 12 mesi, sulla JQL base del team scelto
     (team_sw_base_jql o team_embedded_base_jql, configurate in
@@ -276,6 +282,11 @@ def compute_overview_metrics(db: Session, team: str = "sw", period: str = "curre
     settings = db.get(models.AppSettings, SETTINGS_ROW_ID)
     base_jql = _team_base_jql(user_settings(db), team)
     window = OVERVIEW_PERIOD_JQL[period]
+    # Periodo esplicito (Anno in corso, ultimi 6 mesi, ultimo mese... e il
+    # periodo di confronto): Done dal giorno since al giorno until compresi.
+    if since and until:
+        end = until + dt.timedelta(days=1)
+        window = f'status CHANGED TO Done DURING ("{since.isoformat()}", "{end.isoformat()}")'
     if not base_jql.strip():
         return schemas.OverviewMetrics(
             done_last_12_months=[],
@@ -534,7 +545,9 @@ def compute_done_by_increment_metrics(db: Session, team: str = "sw") -> schemas.
     return schemas.DoneByIncrementMetrics(increments=result)
 
 
-def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOpenedMetrics:
+def compute_bugs_opened_metrics(
+    db: Session, team: str = "sw", since: dt.date | None = None, until: dt.date | None = None
+) -> schemas.BugsOpenedMetrics:
     """Andamento mese per mese dei Bug aperti (data di creazione) negli
     ultimi 12 mesi sulla JQL base del team scelto, divisi tra Complaint, non
     Complaint e CVE del bot di security scan (tenuti a parte perche' aperti
@@ -553,7 +566,12 @@ def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOp
     email = (settings.jira_email if settings else None) or ""
     api_token = (settings.jira_api_token if settings else None) or ""
 
-    bugs_jql = f"{base_jql} AND issuetype = Bug AND created >= -365d"
+    # Periodo scelto nella Dashboard (default: ultimi 365 giorni).
+    today = dt.date.today()
+    until = min(until or today, today)
+    since = since or (today - dt.timedelta(days=365))
+    end = until + dt.timedelta(days=1)
+    bugs_jql = f'{base_jql} AND issuetype = Bug AND created >= "{since.isoformat()}" AND created < "{end.isoformat()}"'
     try:
         all_bugs = fetch_created_and_status(base_url, email, api_token, bugs_jql)
         complaint_keys = set(
@@ -563,12 +581,11 @@ def compute_bugs_opened_metrics(db: Session, team: str = "sw") -> schemas.BugsOp
     except JiraClientError as exc:
         return schemas.BugsOpenedMetrics(months=[], error=str(exc))
 
-    # Tutti i mesi solari toccati dalla finestra di 365 giorni, dal mese di
-    # oggi-365 a quello corrente (il primo e l'ultimo sono parziali).
-    today = dt.date.today()
-    cursor = (today - dt.timedelta(days=365)).replace(day=1)
+    # Tutti i mesi solari toccati dal periodo (il primo e l'ultimo possono
+    # essere parziali).
+    cursor = since.replace(day=1)
     counts: dict[str, dict[str, int]] = {}
-    while cursor <= today:
+    while cursor <= until:
         counts[cursor.strftime("%Y-%m")] = {"complaint": 0, "non_complaint": 0, "cve": 0}
         cursor = (cursor + dt.timedelta(days=32)).replace(day=1)
 
