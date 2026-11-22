@@ -2719,28 +2719,48 @@ export function OverviewDashboardPage() {
                     </>
                   )}
 
-                  {/* Date di inizio/fine ben visibili sotto la barra. */}
-                  {startEpoch !== null && (
-                    <span className="muted" style={{ position: 'absolute', left: `${pct(startEpoch)}%`, bottom: -18, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      {formatEpochDaysAsDate(startEpoch)}
-                    </span>
-                  )}
-                  {endEpoch !== null && (
-                    <span
-                      className="muted"
-                      style={{
-                        position: 'absolute',
-                        left: `${pct(endEpoch)}%`,
-                        bottom: -18,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        whiteSpace: 'nowrap',
-                        transform: 'translateX(-100%)',
-                      }}
-                    >
-                      {formatEpochDaysAsDate(endEpoch)}
-                    </span>
-                  )}
+                  {/* Date di inizio/fine ben visibili sotto la barra: dentro
+                      gli estremi; con una barra troppo corta per entrambe,
+                      l'inizio va a sinistra e la fine a destra degli
+                      estremi, cosi' non si sovrappongono. */}
+                  {(() => {
+                    const dateLabelWidth = 10 * PHASE_LABEL_CHAR_WIDTH
+                    const px = (epoch: number) => (pct(epoch) / 100) * layoutWidth
+                    const tight =
+                      startEpoch !== null && endEpoch !== null && px(endEpoch) - px(startEpoch) < 2 * dateLabelWidth + 8
+                    // Spazio per spostare l'inizio a sinistra (al bordo sinistro no).
+                    const startOutside = tight && px(startEpoch!) >= dateLabelWidth + 4
+                    const endOutside = tight && px(endEpoch!) + dateLabelWidth + 4 <= layoutWidth
+                    const base = { position: 'absolute', bottom: -18, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' } as const
+                    return (
+                      <>
+                        {startEpoch !== null && (
+                          <span
+                            className="muted"
+                            style={{
+                              ...base,
+                              left: `${pct(startEpoch)}%`,
+                              transform: startOutside ? 'translateX(calc(-100% - 4px))' : undefined,
+                            }}
+                          >
+                            {formatEpochDaysAsDate(startEpoch)}
+                          </span>
+                        )}
+                        {endEpoch !== null && (
+                          <span
+                            className="muted"
+                            style={{
+                              ...base,
+                              left: `${pct(endEpoch)}%`,
+                              transform: endOutside || (tight && !startOutside) ? 'translateX(4px)' : 'translateX(-100%)',
+                            }}
+                          >
+                            {formatEpochDaysAsDate(endEpoch)}
+                          </span>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
                 {phaseLanes.length > 0 && (
                   <div style={{ marginTop: PHASE_LANES_MARGIN_TOP }}>
