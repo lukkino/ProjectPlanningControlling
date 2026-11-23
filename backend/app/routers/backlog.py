@@ -302,6 +302,49 @@ def apply_default_planning(db: Session, project: models.Project) -> int:
     return planned
 
 
+# Campi confrontati prima/dopo la sync per il riepilogo dei cambiamenti:
+# (attributo dell'item, etichetta). La descrizione si segnala senza valori.
+_SYNC_TRACKED_FIELDS = [
+    ("jira_status", "Stato"),
+    ("summary", "Summary"),
+    ("assignee", "Assignee"),
+    ("issue_type", "Tipo"),
+    ("labels", "Label"),
+    ("parent_key", "Parent"),
+    ("components", "Componenti"),
+    ("impacts_on", "Impacts on"),
+    ("dev_effort_hours", "Developer Effort (h)"),
+    ("actual_start", "Inizio effettivo"),
+    ("actual_finish", "Fine effettiva"),
+    ("logged_hours", "Ore registrate"),
+]
+
+
+def _sync_value(value) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dt.date):
+        return value.strftime("%d/%m/%Y")
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _sync_snapshot(item: models.BacklogItem) -> dict:
+    return {attr: getattr(item, attr) for attr, _ in _SYNC_TRACKED_FIELDS} | {"description": item.description}
+
+
+def _sync_diff(before: dict, item: models.BacklogItem) -> list[schemas.SyncFieldChange]:
+    changes = []
+    for attr, label in _SYNC_TRACKED_FIELDS:
+        old, new = _sync_value(before[attr]), _sync_value(getattr(item, attr))
+        if old != new:
+            changes.append(schemas.SyncFieldChange(field=label, old=old, new=new))
+    if (before["description"] or "") != (item.description or ""):
+        changes.append(schemas.SyncFieldChange(field="Descrizione", old=None, new="modificata"))
+    return changes
+
+
 def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -> schemas.SyncResult:
     """Allinea gli item del backlog alle issue lette da Jira: crea le nuove,
     aggiorna le esistenti (riportando nel backlog quelle archiviate), archivia
@@ -315,6 +358,7 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
     created = 0
     updated = 0
     restored = 0
+    changes: list[schemas.SyncItemChange] = []
     now = dt.datetime.utcnow()
     max_order = max((item.priority_order for item in existing.values()), default=0)
     matched_keys = {issue.key for issue in issues}
@@ -324,6 +368,8 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
         implemented_by_json = json.dumps(issue.implemented_by) if issue.implemented_by else None
         if issue.key in existing:
             item = existing[issue.key]
+            before = _sync_snapshot(item)
+            was_archived = item.archived_at is not None
             item.summary = issue.summary
             item.description = issue.description
             item.change_description = issue.change_description
@@ -349,6 +395,17 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
                 item.archived_at = None
                 restored += 1
             updated += 1
+            diff = _sync_diff(before, item)
+            if was_archived or diff:
+                changes.append(
+                    schemas.SyncItemChange(
+                        jira_key=item.jira_key,
+                        summary=item.summary,
+                        issue_type=item.issue_type,
+                        kind="restored" if was_archived else "updated",
+                        changes=diff,
+                    )
+                )
         else:
             max_order += 1
             item = models.BacklogItem(
@@ -380,6 +437,15 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
             )
             db.add(item)
             created += 1
+            changes.append(
+                schemas.SyncItemChange(
+                    jira_key=issue.key,
+                    summary=issue.summary,
+                    issue_type=issue.issue_type,
+                    kind="new",
+                    changes=[schemas.SyncFieldChange(field="Stato", new=issue.status)] if issue.status else [],
+                )
+            )
 
     # Archivia gli item sincronizzati in precedenza che non sono piu' nel
     # risultato della JQL (es. fix version cambiata su Jira): altrimenti
@@ -390,6 +456,11 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
         if jira_key not in matched_keys and item.archived_at is None:
             item.archived_at = now
             removed += 1
+            changes.append(
+                schemas.SyncItemChange(
+                    jira_key=jira_key, summary=item.summary, issue_type=item.issue_type, kind="removed"
+                )
+            )
 
     # Gli item da fare senza date compaiono nel Gantt dall'inizio dell'increment.
     db.flush()
@@ -403,5 +474,10 @@ def _save_synced_issues(db: Session, project_id: int, issues: list[JiraIssue]) -
     apply_default_planning(db, db.get(models.Project, project_id))
     db.commit()
     return schemas.SyncResult(
-        created=created, updated=updated, removed=removed, restored=restored, total_matched=len(issues)
+        created=created,
+        updated=updated,
+        removed=removed,
+        restored=restored,
+        total_matched=len(issues),
+        changes=changes,
     )

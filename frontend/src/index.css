@@ -1653,3 +1653,34 @@ ul.changelog-body { padding-left: 20px; }
 .phase-template { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; font-size: 13px; color: var(--text); }
 .phase-template.active { border-color: var(--primary); background: var(--bg); }
 .phase-template input { margin-top: 3px; }
+/* Dashboard: popup sulla barra di un increment nel Gantt. */
+.gantt-popup { position: fixed; z-index: 60; max-height: 60vh; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); padding: 10px 12px; font-size: 13px; pointer-events: none; }
+.gantt-popup-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.gantt-popup-dates { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 6px; }
+.gantt-popup-counts { margin-bottom: 8px; }
+.gantt-popup-scope { border-top: 1px solid var(--border); padding-top: 6px; max-height: 40vh; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent); mask-image: linear-gradient(to bottom, black 85%, transparent); }
+.gantt-popup-scope .rich-text { font-size: 12px; }
+/* Dashboard, grafico Flusso: fasce di parallelismo e spiegazione. */
+.flow-bands { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.flow-bands th, .flow-bands td { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.flow-bands th:first-child, .flow-bands td:first-child { text-align: left; }
+.flow-bands th { font-weight: 600; color: var(--text-muted); }
+.flow-help { margin-top: 10px; font-size: 13px; }
+.flow-help summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.flow-help p { margin: 6px 0; }
+/* Popup dei cambiamenti dopo la sync del backlog. */
+.sync-changes-body { max-height: 60vh; overflow-y: auto; }
+.sync-changes-section h4 { margin: 12px 0 4px; font-size: 14px; }
+.sync-changes-section h4 .muted { font-weight: 400; font-size: 12px; }
+.sync-changes-section ul { list-style: none; padding: 0; margin: 0; }
+.sync-changes-section li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.sync-changes-fields { width: auto; margin: 4px 0 0 16px; border-collapse: collapse; font-size: 12px; }
+.sync-changes-fields td:first-child { min-width: 120px; }
+.sync-changes-fields td { padding: 1px 8px 1px 0; vertical-align: top; }
+.sync-old { color: var(--text-muted); text-decoration: line-through; }
+.sync-new { font-weight: 600; }
+/* Fasi increment: tabella e grafico affiancati, uno sotto l'altro su schermi
+   stretti; colonna con ✕ fissa a destra quando la tabella scorre. */
+.phases-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 1500px) { .phases-layout { grid-template-columns: minmax(0, 1fr); } }
+.phase-actions-col { position: sticky; right: 0; width: 1%; background: var(--surface); box-shadow: -1px 0 0 var(--border); }

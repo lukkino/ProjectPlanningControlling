@@ -528,6 +528,22 @@ class BaselineResult(BaseModel):
     without_dates: int
 
 
+class SyncFieldChange(BaseModel):
+    field: str
+    old: str | None = None
+    new: str | None = None
+
+
+class SyncItemChange(BaseModel):
+    jira_key: str
+    summary: str | None = None
+    issue_type: str | None = None
+    # "new", "updated", "restored" (rientrato dall'archivio), "removed"
+    # (archiviato: non piu' nella JQL).
+    kind: str
+    changes: list[SyncFieldChange] = []
+
+
 class SyncResult(BaseModel):
     created: int
     updated: int
@@ -538,6 +554,8 @@ class SyncResult(BaseModel):
     errors: list[str] = []
     # Complaints: Case trovati in Salesforce (None = lettura non fatta).
     salesforce_matched: int | None = None
+    # Backlog: cosa e' cambiato con questa sync, issue per issue.
+    changes: list[SyncItemChange] = []
 
 
 class SyncProgress(BaseModel):
@@ -738,9 +756,18 @@ class ScopeFreeze(BaseModel):
     note: str | None = None
 
 
+class BacklogCounts(BaseModel):
+    total: int = 0
+    done: int = 0
+    in_progress: int = 0
+    to_do: int = 0
+
+
 class ProjectListItem(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    # PBI in scope del backlog per stato (popup del Gantt della Dashboard).
+    backlog_counts: BacklogCounts | None = None
     # Sola lettura: date aggiornate delle fasi scelte per Project start,
     # Code freeze e Planned finish (si modificano dalle fasi).
     start_date: dt.date | None = None

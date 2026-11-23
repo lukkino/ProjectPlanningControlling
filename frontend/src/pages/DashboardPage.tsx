@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { api, saveBlob } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
+import { SyncChangesModal } from '../components/SyncChangesModal'
 import { EarnedValueCard } from '../components/EarnedValue'
 import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
@@ -578,9 +579,12 @@ export function DashboardPage() {
   const [closedPeriod, setClosedPeriod] = useState(RECENTLY_CLOSED_PERIODS[0])
 
   // Stessa sync Jira del Backlog: aggiorna backlog e metriche della dashboard.
+  // Popup con cio' che e' cambiato, aperto alla fine di ogni sync.
+  const [syncChangesOpen, setSyncChangesOpen] = useState(false)
   const sync = useMutation({
     mutationFn: () => api.backlog.sync(project.id),
     onSuccess: () => {
+      setSyncChangesOpen(true)
       queryClient.invalidateQueries({ queryKey: ['backlog', project.id] })
       queryClient.invalidateQueries({ queryKey: ['backlog-archived', project.id] })
       queryClient.invalidateQueries({ queryKey: ['dashboard', project.id] })
@@ -714,6 +718,9 @@ export function DashboardPage() {
           <div className="error-banner" style={{ marginTop: 10, marginBottom: 0 }}>
             Sync Jira non riuscita: {(sync.error as Error).message}
           </div>
+        )}
+        {sync.isSuccess && syncChangesOpen && (
+          <SyncChangesModal result={sync.data} onClose={() => setSyncChangesOpen(false)} />
         )}
         {sync.isSuccess && (
           <div

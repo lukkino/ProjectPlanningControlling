@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useIsFetching, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import {
   Bar,
   BarChart,
@@ -25,6 +26,7 @@ import {
 import { api } from '../api/client'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { useCycleTimeData } from '../lib/useCycleTimeData'
+import { RichText } from '../components/ScopeCard'
 import type {
   BugsOpenedMonth,
   BugStatusCount,
@@ -1553,12 +1555,14 @@ function FlowScatter({
   title,
   points,
   yName,
+  xName = 'WIP medio',
   color,
   r,
 }: {
   title: string
   points: { x: number; y: number; label: string }[]
   yName: string
+  xName?: string
   color: string
   r: number | null
 }) {
@@ -1575,10 +1579,10 @@ function FlowScatter({
             <XAxis
               type="number"
               dataKey="x"
-              name="WIP medio"
+              name={xName}
               tick={{ fontSize: 11 }}
               domain={['auto', 'auto']}
-              label={{ value: 'WIP medio', position: 'insideBottom', offset: -8, style: { fontSize: 11, fill: 'var(--text-muted)' } }}
+              label={{ value: xName, position: 'insideBottom', offset: -8, style: { fontSize: 11, fill: 'var(--text-muted)' } }}
             />
             <YAxis type="number" dataKey="y" name={yName} tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={36} />
             <Tooltip
@@ -1595,7 +1599,9 @@ function FlowScatter({
                     }}
                   >
                     <b>{(payload[0].payload as { label: string }).label}</b>
-                    <div>WIP medio {Number(payload[0].payload.x).toLocaleString('it-IT', { maximumFractionDigits: 1 })}</div>
+                    <div>
+                      {xName} {Number(payload[0].payload.x).toLocaleString('it-IT', { maximumFractionDigits: 1 })}
+                    </div>
                     <div>
                       {yName} {Number(payload[0].payload.y).toLocaleString('it-IT', { maximumFractionDigits: 1 })}
                     </div>
@@ -1603,7 +1609,7 @@ function FlowScatter({
                 ) : null
               }
             />
-            <Scatter data={points} fill={color} />
+            <Scatter data={points} fill={color} fillOpacity={points.length > 40 ? 0.55 : 1} shape={points.length > 40 ? 'circle' : undefined} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -1711,7 +1717,7 @@ function FlowCard() {
     .filter((p) => !p.is_cve)
     .map((p) => {
       const finish = dateStrToEpochDays(p.finish_date) as number
-      return { start: finish - p.cycle_time_days, finish, cycleTime: p.cycle_time_days }
+      return { key: p.key, start: finish - p.cycle_time_days, finish, cycleTime: p.cycle_time_days }
     })
   const openAll = inProgress.filter((i) => !i.is_cve)
   const stale = openAll.filter((i) => (dateStrToEpochDays(i.start_date) as number) < rangeStart)
@@ -1719,16 +1725,23 @@ function FlowCard() {
     .filter((i) => includeStale || (dateStrToEpochDays(i.start_date) as number) >= rangeStart)
     .map((i) => ({ start: dateStrToEpochDays(i.start_date) as number }))
 
-  // WIP di ogni giorno dall'inizio del primo periodo a oggi: +1 dal giorno
-  // di inizio, -1 dal giorno di chiusura (somme prefisse).
-  const days = today - rangeStart + 1
+  // PBI chiusi nel periodo scelto: per ognuno il WIP vissuto durante la sua
+  // lavorazione (grafico per PBI), quindi il WIP serve anche da prima del
+  // periodo, dall'inizio del PBI chiuso nel periodo iniziato prima.
+  const windowStartDay = dateStrToEpochDays(window.from) as number
+  const closedInWindow = closed.filter((c) => c.finish >= windowStartDay && c.finish <= today)
+  const wipStart = Math.min(rangeStart, ...closedInWindow.map((c) => c.start))
+
+  // WIP di ogni giorno da wipStart a oggi: +1 dal giorno di inizio, -1 dal
+  // giorno di chiusura (somme prefisse).
+  const days = today - wipStart + 1
   const delta = new Array<number>(days + 1).fill(0)
   const addSpan = (start: number, end: number) => {
-    const s = Math.max(start, rangeStart)
+    const s = Math.max(start, wipStart)
     const e = Math.min(end, today + 1)
     if (e <= s) return
-    delta[s - rangeStart] += 1
-    delta[e - rangeStart] -= 1
+    delta[s - wipStart] += 1
+    delta[e - wipStart] -= 1
   }
   for (const c of closed) addSpan(c.start, c.finish)
   for (const o of open) addSpan(o.start, today + 1)
@@ -1741,7 +1754,7 @@ function FlowCard() {
 
   const data: FlowPeriod[] = periods.map((p) => {
     const lastDay = Math.min(p.to, today + 1)
-    const span = wipByDay.slice(p.from - rangeStart, lastDay - rangeStart)
+    const span = wipByDay.slice(p.from - wipStart, lastDay - wipStart)
     const finished = closed.filter((c) => c.finish >= p.from && c.finish < p.to)
     return {
       label: p.label,
@@ -1752,10 +1765,40 @@ function FlowCard() {
     }
   })
   const complete = data.filter((d) => !d.partial)
-  const ctPoints = complete.filter((d) => d.cycleTime !== null).map((d) => ({ x: d.wip, y: d.cycleTime as number, label: d.label }))
+  // WIP -> cycle time per PBI: per ogni PBI chiuso nel periodo, quanti altri
+  // PBI erano in lavorazione in media mentre lo era lui (lui escluso), contro
+  // il suo cycle time. Cosi' le due misure riguardano gli stessi PBI e gli
+  // stessi giorni (confrontare il WIP di un mese col cycle time dei PBI
+  // chiusi in quel mese mescola PBI diversi: il WIP alto di un mese pesa sui
+  // PBI che si chiudono nei mesi dopo).
+  const pbiPoints = closedInWindow.map((c) => {
+    const end = Math.max(c.finish, c.start + 1)
+    const span = wipByDay.slice(c.start - wipStart, end - wipStart)
+    const own = c.finish > c.start ? 1 : 0
+    const avg = span.length ? span.reduce((sum, v) => sum + v, 0) / span.length - own : 0
+    return { x: Math.max(0, avg), y: c.cycleTime, label: c.key }
+  })
+  // Tre fasce di PBI per parallelismo (terzili), con l'85° percentile del
+  // cycle time di ciascuna: piu' leggibile della sola correlazione.
+  const sortedPbi = [...pbiPoints].sort((a, b) => a.x - b.x)
+  const bands =
+    sortedPbi.length >= 9
+      ? ['Meno parallelismo', 'Parallelismo medio', 'Più parallelismo'].map((name, i) => {
+          const part = sortedPbi.slice(Math.floor((i * sortedPbi.length) / 3), Math.floor(((i + 1) * sortedPbi.length) / 3))
+          return {
+            name,
+            count: part.length,
+            from: part[0].x,
+            to: part[part.length - 1].x,
+            p85: percentile(part.map((p) => p.y), 85),
+            median: median(part.map((p) => p.y)),
+          }
+        })
+      : []
   const tpPoints = complete.map((d) => ({ x: d.wip, y: d.throughput, label: d.label }))
-  const rCt = pearson(ctPoints.map((p) => [p.x, p.y]))
+  const rCt = pearson(pbiPoints.map((p) => [p.x, p.y]))
   const rTp = pearson(tpPoints.map((p) => [p.x, p.y]))
+  const fmt1 = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 1 })
   const w =
     granularity === 'month'
       ? { per: 'mese', the: 'il mese', inThe: 'nel mese', a: 'un mese' }
@@ -1827,20 +1870,82 @@ function FlowCard() {
       </div>
       <div className="flow-verdict">{flowVerdict(rCt, rTp)}</div>
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <FlowScatter
+            title={`Parallelismo → Cycle time (un punto per PBI, ${pbiPoints.length})`}
+            points={pbiPoints}
+            xName="PBI in parallelo"
+            yName="Cycle time (gg)"
+            color={FLOW_CYCLE_TIME_COLOR}
+            r={rCt}
+          />
+          {bands.length > 0 && (
+            <table className="flow-bands">
+              <thead>
+                <tr>
+                  <th />
+                  <th>PBI in parallelo</th>
+                  <th>PBI</th>
+                  <th>Cycle time mediano</th>
+                  <th>85° percentile</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bands.map((b) => (
+                  <tr key={b.name}>
+                    <td>{b.name}</td>
+                    <td>
+                      {fmt1(b.from)}–{fmt1(b.to)}
+                    </td>
+                    <td>{b.count}</td>
+                    <td>{fmt1(b.median)} gg</td>
+                    <td>{fmt1(b.p85)} gg</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
         <FlowScatter
-          title="WIP → Cycle time (85° percentile)"
-          points={ctPoints}
-          yName="Cycle time 85° perc. (gg)"
-          color={FLOW_CYCLE_TIME_COLOR}
-          r={rCt}
+          title={`WIP → PBI chiusi (un punto per ${w.per})`}
+          points={tpPoints}
+          yName="PBI chiusi"
+          color={FLOW_THROUGHPUT_COLOR}
+          r={rTp}
         />
-        <FlowScatter title="WIP → PBI chiusi" points={tpPoints} yName="PBI chiusi" color={FLOW_THROUGHPUT_COLOR} r={rTp} />
       </div>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-        Un punto per {w.per} {granularity === 'month' ? 'completo' : 'completa'}. Correlazione: vicino a +1 le due misure crescono insieme, vicino a −1 una
-        cresce mentre l'altra cala, vicino a 0 non c'è legame. È un indizio, non una prova: il cycle time di {w.a}{' '}
-        risente anche del WIP dei periodi precedenti, in cui quei PBI erano in lavorazione.
-      </p>
+      <details className="flow-help">
+        <summary>Come leggere questi grafici</summary>
+        <p>
+          <b>WIP</b>: quanti PBI sono in lavorazione nello stesso giorno, da quando passano a In Progress (On-Going per
+          le Activity) a quando vanno in Done. Nel grafico in alto è la media dei giorni di ogni {w.per}.
+        </p>
+        <p>
+          <b>Parallelismo → Cycle time</b> è calcolato <b>per PBI</b>: per ogni PBI chiuso nel periodo si guarda quanti
+          altri PBI erano in lavorazione, in media, nei giorni in cui era in lavorazione lui (lui escluso), e lo si
+          confronta con il suo cycle time. Così le due misure riguardano gli stessi PBI e gli stessi giorni.
+        </p>
+        <p>
+          Non si usa il confronto {w.per} per {w.per} perché mescola PBI diversi: il WIP di {w.a} conta tutti i PBI in
+          lavorazione, mentre il cycle time di quel {w.per} riguarda solo quelli chiusi in quel {w.per}. Quando il WIP
+          è alto, la maggior parte di quei PBI si chiude nei {granularity === 'month' ? 'mesi' : 'periodi'} successivi,
+          quindi un eventuale allungamento dei tempi si vedrebbe più avanti e non nello stesso {w.per}.
+        </p>
+        <p>
+          La tabella divide i PBI in tre fasce uguali per parallelismo: se il cycle time cresce passando da "meno" a
+          "più parallelismo", lavorare su più PBI insieme allunga i tempi.
+        </p>
+        <p>
+          <b>WIP → PBI chiusi</b> resta per {w.per}: misura se nei {granularity === 'month' ? 'mesi' : 'periodi'} con più
+          lavoro aperto si chiude di più o di meno. Se il cycle time cresce col parallelismo ma i PBI chiusi crescono
+          anche loro, il flusso tiene; se calano, il parallelismo lo sta frenando.
+        </p>
+        <p>
+          <b>Correlazione</b>: vicino a +1 le due misure crescono insieme, vicino a −1 una cresce mentre l'altra cala,
+          vicino a 0 non c'è legame. È un indizio, non una prova di causa. Bug CVE del bot esclusi. Il WIP dei giorni
+          prima dei dati disponibili (inizio dello storico) può essere sottostimato.
+        </p>
+      </details>
     </div>
   )
 }
@@ -2299,6 +2404,55 @@ function JiraCharts({ snapshotId }: { snapshotId: number | null }) {
   )
 }
 
+// Popup del Gantt: passando sopra la barra di un increment, codice e nome,
+// date (inizio, code freeze, fine), PBI del backlog e Scope schematico.
+// Posizione fissa vicino al puntatore, dentro la finestra.
+type GanttHover = { project: Project; x: number; y: number }
+const GANTT_POPUP_WIDTH = 420
+
+function GanttBarPopup({ hover }: { hover: GanttHover }) {
+  const { project, x, y } = hover
+  const counts = project.backlog_counts
+  const left = Math.max(8, Math.min(x + 16, window.innerWidth - GANTT_POPUP_WIDTH - 8))
+  // Sotto il puntatore se c'e' spazio, se no sopra.
+  const below = y < window.innerHeight * 0.55
+  const date = (d: string | null) => formatIsoDate(d) ?? '—'
+  return (
+    <div
+      className="gantt-popup"
+      style={{
+        left,
+        width: GANTT_POPUP_WIDTH,
+        ...(below ? { top: y + 16 } : { bottom: window.innerHeight - y + 16 }),
+      }}
+    >
+      <div className="gantt-popup-title">
+        {project.code} <span className="muted">· {project.name}</span>
+      </div>
+      <div className="gantt-popup-dates">
+        <span>
+          Inizio <b>{date(project.start_date)}</b>
+        </span>
+        <span>
+          Code freeze <b>{date(project.code_freeze_date)}</b>
+        </span>
+        <span>
+          Fine <b>{date(project.planned_finish_date)}</b>
+        </span>
+      </div>
+      {counts && (
+        <div className="gantt-popup-counts">
+          <b>{counts.total}</b> PBI in scope nel backlog: {counts.done} Done, {counts.in_progress} in corso,{' '}
+          {counts.to_do} da fare
+        </div>
+      )}
+      <div className="gantt-popup-scope">
+        {project.scope ? <RichText text={project.scope} /> : <span className="muted">Nessuno scope definito.</span>}
+      </div>
+    </div>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
   const [searchParams, setSearchParams] = useSearchParams()
@@ -2339,6 +2493,7 @@ export function OverviewDashboardPage() {
   // Larghezza in pixel dell'area delle barre, misurata sull'header dei mesi:
   // serve a disporre le etichette delle fasi senza accavallarle.
   const [trackWidth, setTrackWidth] = useState(0)
+  const [ganttHover, setGanttHover] = useState<GanttHover | null>(null)
   const trackObserver = useRef<ResizeObserver | null>(null)
   const trackRef = useCallback((el: HTMLDivElement | null) => {
     trackObserver.current?.disconnect()
@@ -2420,6 +2575,7 @@ export function OverviewDashboardPage() {
 
   return (
     <div>
+      {ganttHover && createPortal(<GanttBarPopup hover={ganttHover} />, document.body)}
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
@@ -2652,8 +2808,11 @@ export function OverviewDashboardPage() {
 
                   {startEpoch !== null && endEpoch !== null && (
                     <div
-                      title={`${project.name}: dal ${formatEpochDaysAsDate(startEpoch)} al ${formatEpochDaysAsDate(endEpoch)}`}
+                      onMouseEnter={(e) => setGanttHover({ project, x: e.clientX, y: e.clientY })}
+                      onMouseMove={(e) => setGanttHover({ project, x: e.clientX, y: e.clientY })}
+                      onMouseLeave={() => setGanttHover(null)}
                       style={{
+                        cursor: 'default',
                         position: 'absolute',
                         left: `${pct(startEpoch)}%`,
                         width: `${Math.max(pct(endEpoch) - pct(startEpoch), 1.2)}%`,

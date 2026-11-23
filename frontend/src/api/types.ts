@@ -297,6 +297,18 @@ export type SyncResult = {
   errors: string[]
   // Complaints: Case trovati in Salesforce (null = lettura non fatta).
   salesforce_matched?: number | null
+  // Backlog: cosa e' cambiato con questa sync, issue per issue.
+  changes?: SyncItemChange[]
+}
+
+export type SyncItemChange = {
+  jira_key: string
+  summary: string | null
+  issue_type: string | null
+  // new = nuova, updated = modificata, restored = rientrata dall'archivio,
+  // removed = archiviata (non piu' nella JQL).
+  kind: 'new' | 'updated' | 'restored' | 'removed'
+  changes: { field: string; old: string | null; new: string | null }[]
 }
 
 // Una cartella dell'increment (es. quella dei documenti delle review): null
@@ -383,6 +395,8 @@ export type Project = {
   id: number
   code: string
   name: string
+  // PBI in scope del backlog per stato (popup del Gantt della Dashboard).
+  backlog_counts?: { total: number; done: number; in_progress: number; to_do: number } | null
   status: string
   scope: string | null
   scope_narrative: string | null

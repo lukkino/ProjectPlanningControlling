@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
+import { SyncChangesModal } from '../components/SyncChangesModal'
 import { isMilestone } from '../lib/milestone'
 import { itemBudget, itemCompletion } from '../lib/earnedValue'
 import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
@@ -326,9 +327,14 @@ export function BacklogPage() {
       invalidate()
     },
   })
+  // Popup con cio' che e' cambiato, aperto alla fine di ogni sync.
+  const [syncChangesOpen, setSyncChangesOpen] = useState(false)
   const sync = useMutation({
     mutationFn: () => api.backlog.sync(project.id),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      setSyncChangesOpen(true)
+    },
   })
   // Azioni in blocco sugli item selezionati: una sola chiamata, tutto o
   // niente lato backend (vedi routers/backlog.py::bulk_update_backlog_items).
@@ -1686,6 +1692,9 @@ export function BacklogPage() {
         </div>
       )}
       {sync.isSuccess && <CodeFreezeCheck projectId={project.id} items={items} />}
+      {sync.isSuccess && syncChangesOpen && (
+        <SyncChangesModal result={sync.data} onClose={() => setSyncChangesOpen(false)} />
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 10, fontSize: 13 }}>
         <span className="backlog-search">

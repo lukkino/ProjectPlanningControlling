@@ -334,8 +334,11 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
           </div>
         ))}
       {/* Tabella piu' larga del grafico: date, scostamento e note devono stare tutte. */}
-      <div className="grid-3-2" style={{ gridTemplateColumns: '2fr 1fr' }}>
-        <div className="table-wrap">
+      {/* Su schermi stretti tabella e grafico vanno uno sotto l'altro; la
+          tabella scorre in orizzontale dentro la sua colonna (min-width 0)
+          e la colonna con ✕ resta fissa a destra, sempre visibile. */}
+      <div className="phases-layout">
+        <div className="table-wrap" style={{ minWidth: 0 }}>
           <table>
             <thead>
               <tr>
@@ -352,7 +355,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                   </th>
                 )}
                 <th>Note</th>
-                <th />
+                <th className="phase-actions-col" />
               </tr>
             </thead>
             <tbody>
@@ -449,7 +452,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                       />
                     </td>
                   )}
-                  <td className="editable-cell" style={{ minWidth: 240 }}>
+                  <td className="editable-cell" style={{ minWidth: 180 }}>
                     <input
                       defaultValue={phase.notes ?? ''}
                       onBlur={(e) => {
@@ -458,7 +461,7 @@ export function PhasesCard({ projectId, currentStatus }: Props) {
                       }}
                     />
                   </td>
-                  <td>
+                  <td className="phase-actions-col">
                     <button
                       className="btn btn-danger"
                       title="Elimina la fase"

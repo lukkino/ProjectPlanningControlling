@@ -235,6 +235,19 @@ class Project(Base):
     # Il backlog vero e proprio, senza gli item archiviati (vedi
     # BacklogItem.archived_at): e' quello che usano metriche, documenti e
     # presentazioni.
+    @property
+    def backlog_counts(self) -> dict:
+        """PBI del backlog in scope (Rejected esclusi, come nella Dashboard
+        dell'increment) per stato: popup del Gantt della Dashboard generale."""
+        items = [i for i in self.backlog_items if i.in_scope and i.jira_status != "Rejected"]
+        statuses = [i.status for i in items]
+        return {
+            "total": len(items),
+            "done": statuses.count("Done"),
+            "in_progress": statuses.count("In Progress"),
+            "to_do": statuses.count("To Do"),
+        }
+
     backlog_items: Mapped[list["BacklogItem"]] = relationship(
         primaryjoin="and_(Project.id == BacklogItem.project_id, BacklogItem.archived_at.is_(None))",
         viewonly=True,
