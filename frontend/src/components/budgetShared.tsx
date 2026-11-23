@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { BudgetCatalog, MaterialFields } from '../api/types'
-import { fmtEuro, fmtNumber, parseDecimal, useBudgetCatalog } from '../lib/budget'
+import { fmtEuro, fmtHours, fmtNumber, parseDecimal, useBudgetCatalog } from '../lib/budget'
 
 // Componenti comuni del budget di progetto: campi numerici/testo e la
 // tabella delle righe materiali, usata sia dal Budget materiali (bozza)
@@ -286,6 +286,144 @@ export function MaterialTable({
             </td>
             <td className="text-right">
               <strong>{fmtEuro(total)}</strong>
+            </td>
+            <td />
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  )
+}
+
+// Righe ore per reparto e attivita', divise per societa' (SpA/SA/TPM): il
+// Budget ore del progetto (bozza) e le ore extra delle review di budget.
+export type HoursItem = { id: number; department: string; description: string; spa: number; sa: number; tpm: number }
+export type HoursItemInput = Partial<Omit<HoursItem, 'id'>>
+
+export function HoursItemsTable({
+  rows,
+  footerLabel,
+  onAdd,
+  onUpdate,
+  onRemove,
+  adding,
+}: {
+  rows: HoursItem[]
+  footerLabel: string
+  // Promise: i campi della riga nuova si svuotano quando e' salvata.
+  onAdd: (data: HoursItemInput) => Promise<unknown>
+  onUpdate: (id: number, data: HoursItemInput) => void
+  onRemove: (row: HoursItem) => void
+  adding: boolean
+}) {
+  const { data: catalog } = useBudgetCatalog()
+  const [department, setDepartment] = useState<string | null>(null)
+  const [description, setDescription] = useState('')
+  const [values, setValues] = useState({ spa: '', sa: '', tpm: '' })
+  if (!catalog) return null
+
+  const newDepartment = department ?? 'DEV060'
+  const parsed = { spa: parseDecimal(values.spa), sa: parseDecimal(values.sa), tpm: parseDecimal(values.tpm) }
+  const valid = parsed.spa !== null && parsed.sa !== null && parsed.tpm !== null
+  const canAdd = !!description.trim() && valid && !adding
+  const submit = () => {
+    if (!canAdd) return
+    onAdd({ department: newDepartment, description: description.trim(), spa: parsed.spa ?? 0, sa: parsed.sa ?? 0, tpm: parsed.tpm ?? 0 })
+      .then(() => {
+        setDescription('')
+        setValues({ spa: '', sa: '', tpm: '' })
+      })
+      .catch(() => undefined)
+  }
+  const total = rows.reduce((sum, i) => sum + i.spa + i.sa + i.tpm, 0)
+  const departmentOptions = catalog.departments.map((d) => (
+    <option key={d.code} value={d.code}>
+      {d.code} {d.name}
+    </option>
+  ))
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Reparto</th>
+            <th style={{ minWidth: 200 }}>Attività / motivo</th>
+            <th className="text-right">SpA (h)</th>
+            <th className="text-right">SA (h)</th>
+            <th className="text-right">TPM (h)</th>
+            <th className="text-right">Totale</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((item) => (
+            <tr key={item.id}>
+              <td className="editable-cell">
+                <select aria-label="Reparto" value={item.department} onChange={(e) => onUpdate(item.id, { department: e.target.value })}>
+                  {departmentOptions}
+                </select>
+              </td>
+              <td className="editable-cell">
+                <TextCell value={item.description} label="Attività" onSave={(v) => onUpdate(item.id, { description: v })} />
+              </td>
+              {(['spa', 'sa', 'tpm'] as const).map((field) => (
+                <td key={field} className="editable-cell">
+                  <NumberCell value={item[field]} label={field} onSave={(v) => onUpdate(item.id, { [field]: v })} />
+                </td>
+              ))}
+              <td className="text-right">
+                <strong>{fmtHours(item.spa + item.sa + item.tpm)}</strong>
+              </td>
+              <td>
+                <button className="btn" title="Elimina la riga" onClick={() => onRemove(item)}>
+                  🗑
+                </button>
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td className="editable-cell">
+              <select aria-label="Reparto della nuova riga" value={newDepartment} onChange={(e) => setDepartment(e.target.value)}>
+                {departmentOptions}
+              </select>
+            </td>
+            <td className="editable-cell">
+              <input
+                aria-label="Attività della nuova riga"
+                placeholder="Nuova riga, es. Sviluppo board"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </td>
+            {(['spa', 'sa', 'tpm'] as const).map((field) => (
+              <td key={field} className="editable-cell">
+                <input
+                  aria-label={`${field} della nuova riga`}
+                  placeholder="0"
+                  className="text-right"
+                  value={values[field]}
+                  onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
+                  onKeyDown={(e) => e.key === 'Enter' && submit()}
+                />
+              </td>
+            ))}
+            <td />
+            <td>
+              <button className="btn btn-primary" disabled={!canAdd} onClick={submit}>
+                + Aggiungi
+              </button>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={5}>
+              <strong>{footerLabel}</strong>
+            </td>
+            <td className="text-right">
+              <strong>{fmtHours(total)}</strong>
             </td>
             <td />
           </tr>

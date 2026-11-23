@@ -212,6 +212,124 @@ def update_hours_detail_row(
     return _hours_detail(increment)
 
 
+# ---------- Budget ore (bozza) ----------
+
+def _get_hours_cost_or_404(db: Session, cost_id: int) -> models.IncrementHoursCost:
+    cost = db.get(models.IncrementHoursCost, cost_id)
+    if cost is None:
+        raise HTTPException(status_code=404, detail="Riga del budget ore non trovata")
+    return cost
+
+
+def _hours_cost_fields(data: dict, require_description: bool) -> dict:
+    if "department" in data:
+        if not data["department"]:
+            data.pop("department")
+        else:
+            _check_department(data["department"])
+    if "description" in data or require_description:
+        description = (data.get("description") or "").strip()
+        if not description:
+            raise HTTPException(status_code=400, detail="L'attivita' e' obbligatoria")
+        data["description"] = description
+    return {k: v for k, v in data.items() if v is not None}
+
+
+@router.get("/{increment_id}/hours-costs", response_model=list[schemas.BudgetReviewHours])
+def list_hours_costs(increment_id: int, db: Session = Depends(get_db)):
+    return _get_increment_or_404(db, increment_id).hours_costs
+
+
+@router.post("/{increment_id}/hours-costs", response_model=schemas.BudgetReviewHours, status_code=201)
+def create_hours_cost(increment_id: int, payload: schemas.BudgetReviewHoursWrite, db: Session = Depends(get_db)):
+    increment = _get_increment_or_404(db, increment_id)
+    data = _hours_cost_fields(payload.model_dump(exclude_unset=True), require_description=True)
+    last = max((c.order for c in increment.hours_costs), default=0)
+    cost = models.IncrementHoursCost(
+        increment_id=increment.id,
+        department=data.get("department", budget.DEPARTMENTS[0][0]),
+        description=data["description"],
+        spa=data.get("spa", 0),
+        sa=data.get("sa", 0),
+        tpm=data.get("tpm", 0),
+        order=last + 1,
+    )
+    db.add(cost)
+    db.commit()
+    db.refresh(cost)
+    return cost
+
+
+@router.put("/{increment_id}/hours-costs", response_model=list[schemas.BudgetReviewHours])
+def replace_hours_costs(
+    increment_id: int, payload: list[schemas.BudgetReviewHoursWrite], db: Session = Depends(get_db)
+):
+    """Dal Capacity Planner (tool): le righe del Budget ore diventano quelle
+    calcolate (le precedenti vengono sostituite)."""
+    increment = _get_increment_or_404(db, increment_id)
+    rows = [_hours_cost_fields(item.model_dump(exclude_unset=True), require_description=True) for item in payload]
+    increment.hours_costs.clear()
+    db.flush()
+    for order, data in enumerate(rows, start=1):
+        increment.hours_costs.append(
+            models.IncrementHoursCost(
+                department=data.get("department", budget.DEPARTMENTS[0][0]),
+                description=data["description"],
+                spa=data.get("spa", 0),
+                sa=data.get("sa", 0),
+                tpm=data.get("tpm", 0),
+                order=order,
+            )
+        )
+    db.commit()
+    db.refresh(increment)
+    return increment.hours_costs
+
+
+@router.put("/hours-costs/{cost_id}", response_model=schemas.BudgetReviewHours)
+def update_hours_cost(cost_id: int, payload: schemas.BudgetReviewHoursWrite, db: Session = Depends(get_db)):
+    cost = _get_hours_cost_or_404(db, cost_id)
+    for field, value in _hours_cost_fields(payload.model_dump(exclude_unset=True), require_description=False).items():
+        setattr(cost, field, value)
+    db.commit()
+    db.refresh(cost)
+    return cost
+
+
+@router.delete("/hours-costs/{cost_id}", status_code=204)
+def delete_hours_cost(cost_id: int, db: Session = Depends(get_db)):
+    db.delete(_get_hours_cost_or_404(db, cost_id))
+    db.commit()
+
+
+@router.put("/{increment_id}/hours-detail/publish", response_model=schemas.HoursDetail)
+def publish_hours_costs(increment_id: int, correction: bool = Query(False), db: Session = Depends(get_db)):
+    """"Aggiorna ore progetto": le righe del Budget ore di adesso diventano
+    il Dettaglio budget ore, una riga per attivita' e societa' con ore."""
+    increment = _get_increment_or_404(db, increment_id)
+    _check_not_frozen(increment, correction)
+    increment.hours_detail_rows.clear()
+    db.flush()
+    order = 0
+    for cost in increment.hours_costs:
+        for company, hours in (("SpA", cost.spa), ("SA", cost.sa), ("TPM", cost.tpm)):
+            if not hours:
+                continue
+            order += 1
+            increment.hours_detail_rows.append(
+                models.IncrementHoursDetailRow(
+                    name=cost.description,
+                    department=cost.department,
+                    company=company,
+                    resource_count=0,
+                    hours=hours,
+                    order=order,
+                )
+            )
+    _budget_changed(db, increment)
+    return _hours_detail(increment)
+
+
 # ---------- Budget materiali (bozza) ----------
 
 def _get_material_cost_or_404(db: Session, cost_id: int) -> models.IncrementMaterialCost:

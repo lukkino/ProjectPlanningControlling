@@ -90,6 +90,7 @@ import type {
   IncrementComponent,
   ChangeOrderTarget,
   ChangeOrderStatus,
+  WrikeReadResult,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -251,6 +252,50 @@ async function saveToReviewFolder(
   return { status: 'saved', filename: body.filename }
 }
 
+// Presentazione mensile "Project Review TTP": il file aggiornato, dove e'
+// stato salvato e cosa e' cambiato (slide aggiornate e aggiunte).
+export type TtpReviewResult = {
+  blob: Blob
+  filename: string
+  saved: string
+  updated: string[]
+  added: string[]
+  skipped: string[]
+  source: string
+}
+
+async function exportTtpReview(): Promise<TtpReviewResult> {
+  const response = await fetch('/api/dashboard/ttp-review', { method: 'POST' })
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      const body = await response.json()
+      detail = body.detail ?? detail
+    } catch {
+      // ignore, keep statusText
+    }
+    throw new Error(detail)
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  const summary = Object.fromEntries(
+    (response.headers.get('X-TTP-Summary') ?? '').split(';').map((part) => {
+      const [key, value = ''] = part.split('=')
+      return [key, value]
+    }),
+  )
+  const list = (value: string | undefined) => (value ? value.split(',').filter(Boolean) : [])
+  return {
+    blob: await response.blob(),
+    filename: match ? match[1] : 'Project Review TTP.pptx',
+    saved: response.headers.get('X-TTP-Saved') ?? '',
+    updated: list(summary.updated),
+    added: list(summary.added),
+    skipped: list(summary.skipped),
+    source: summary.source ?? '',
+  }
+}
+
 export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -291,6 +336,12 @@ export const api = {
       post<void>(`/projects/${id}/change-order/fill-target?${new URLSearchParams({ pn })}`),
     setGanttOrder: (projectIds: number[]) => put<void>('/projects/gantt-order', { project_ids: projectIds }),
     setPinned: (id: number, pinned: boolean) => put<void>(`/projects/${id}/pinned`, { pinned }),
+  },
+  ttpReview: {
+    settings: () => request<{ path: string | null }>('/dashboard/ttp-review/settings'),
+    // Finestra "Apri file" di Windows (sul PC del backend) per scegliere il file.
+    browse: () => post<{ path: string | null }>('/dashboard/ttp-review/browse'),
+    export: exportTtpReview,
   },
   increments: {
     list: () => request<Increment[]>('/increments'),
@@ -335,7 +386,9 @@ export const api = {
       put<IncrementSnapshot>(`/increments/snapshots/${id}`, data),
     remove: (id: number) => del(`/increments/snapshots/${id}`),
     // Actual ore dello snapshot letto da Wrike (ripartizione e ore per persona).
-    readWrike: (snapshotId: number) => post<IncrementSnapshot>(`/increments/snapshots/${snapshotId}/wrike`),
+    // totalOnly: salva il solo totale (struttura dei task non riconosciuta).
+    readWrike: (snapshotId: number, totalOnly = false) =>
+      post<WrikeReadResult>(`/increments/snapshots/${snapshotId}/wrike?total_only=${totalOnly}`),
     // Actual delle voci di spesa dalle RDA del progetto (tool RDA).
     readRequisitions: (snapshotId: number, onlyIfAny = false) =>
       post<IncrementSnapshot>(`/increments/snapshots/${snapshotId}/requisitions?only_if_any=${onlyIfAny}`),
@@ -405,6 +458,22 @@ export const api = {
       put<BudgetReview>(`/increments/budget-review-materials/${id}`, data),
     removeReviewMaterial: (id: number) =>
       request<BudgetReview>(`/increments/budget-review-materials/${id}`, { method: 'DELETE' }),
+  },
+  // Budget ore del progetto (bozza): righe per reparto e attivita' con le
+  // ore per societa'; valgono con "Aggiorna ore progetto" (publish).
+  hoursCosts: {
+    list: (incrementId: number) => request<BudgetReviewHours[]>(`/increments/${incrementId}/hours-costs`),
+    create: (incrementId: number, data: Partial<Omit<BudgetReviewHours, 'id'>>) =>
+      post<BudgetReviewHours>(`/increments/${incrementId}/hours-costs`, data),
+    update: (id: number, data: Partial<Omit<BudgetReviewHours, 'id'>>) =>
+      put<BudgetReviewHours>(`/increments/hours-costs/${id}`, data),
+    remove: (id: number) => del(`/increments/hours-costs/${id}`),
+    // Dal Capacity Planner: sostituisce tutte le righe.
+    replace: (incrementId: number, rows: Omit<BudgetReviewHours, 'id'>[]) =>
+      put<BudgetReviewHours[]>(`/increments/${incrementId}/hours-costs`, rows),
+    // "Aggiorna ore progetto": le righe diventano il Dettaglio budget ore.
+    publish: (incrementId: number, correction = false) =>
+      put<HoursDetail>(`/increments/${incrementId}/hours-detail/publish${correction ? '?correction=true' : ''}`, {}),
   },
   materialCosts: {
     list: (incrementId: number) => request<MaterialCost[]>(`/increments/${incrementId}/material-costs`),

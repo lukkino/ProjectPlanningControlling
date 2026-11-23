@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { useCycleTimeData } from '../lib/useCycleTimeData'
 import { RichText } from '../components/ScopeCard'
@@ -2453,6 +2453,76 @@ function GanttBarPopup({ hover }: { hover: GanttHover }) {
   )
 }
 
+// Presentazione mensile "Project Review TTP": aggiorna la presentazione
+// scelta (date delle milestone, ore e materiali, % completamento backlog) e
+// la salva accanto con data e ora; quella salvata diventa la prossima da
+// aggiornare. Aggiunge le slide dei progetti attivi nuovi.
+const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+function TtpReviewButton() {
+  const { data: settings, refetch } = useQuery({ queryKey: ['ttp-review-settings'], queryFn: api.ttpReview.settings })
+  const [message, setMessage] = useState<string | null>(null)
+  // Finestra "Apri file" di Windows: path null = annullata.
+  const browse = useMutation({ mutationFn: api.ttpReview.browse, onSuccess: () => refetch() })
+  const exportDeck = useMutation({
+    mutationFn: api.ttpReview.export,
+    onSuccess: (result) => {
+      refetch()
+      saveBlob(result.blob, result.filename)
+      const parts = [
+        result.updated.length ? `aggiornate ${result.updated.join(', ')}` : null,
+        result.added.length ? `aggiunte ${result.added.join(', ')}` : null,
+        result.skipped.length ? `non attivi, lasciati com'erano: ${result.skipped.join(', ')}` : null,
+      ].filter(Boolean)
+      setMessage(
+        `Partito da "${result.source}": ${parts.join('; ') || 'nessuna slide di progetto'}. ` +
+          (result.saved ? `Salvata in ${result.saved}` : 'Non salvata nella cartella (solo scaricata).'),
+      )
+    },
+    onError: () => setMessage(null),
+  })
+  const run = async () => {
+    setMessage(null)
+    if (!settings?.path) {
+      const chosen = await browse.mutateAsync().catch(() => null)
+      if (!chosen?.path) return
+    }
+    exportDeck.mutate()
+  }
+  const error = (browse.error ?? exportDeck.error) as Error | null
+  return (
+    <div className="ttp-review">
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <button
+          className="link-btn"
+          disabled={browse.isPending}
+          title="Scegli dal disco la presentazione da aggiornare (si apre la finestra di Windows, a volte dietro il browser)"
+          onClick={() => {
+            setMessage(null)
+            browse.mutate()
+          }}
+        >
+          {browse.isPending ? 'Scelta del file…' : settings?.path ? 'Cambia presentazione' : 'Scegli presentazione'}
+        </button>
+        <button className="btn btn-primary" disabled={exportDeck.isPending || browse.isPending} onClick={run}>
+          {exportDeck.isPending ? 'Esportazione…' : '📊 Esporta PowerPoint'}
+        </button>
+      </div>
+      {settings?.path && (
+        <span className="muted" style={{ fontSize: 12, marginTop: 4 }} title={settings.path}>
+          Da aggiornare: {fileName(settings.path)}
+        </span>
+      )}
+      {error && <div className="error-banner">Esportazione non riuscita: {error.message}</div>}
+      {message && (
+        <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+          {message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function OverviewDashboardPage() {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.projects.list })
   const [searchParams, setSearchParams] = useSearchParams()
@@ -2577,7 +2647,10 @@ export function OverviewDashboardPage() {
     <div>
       {ganttHover && createPortal(<GanttBarPopup hover={ganttHover} />, document.body)}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Dashboard generale</h3>
+        <div className="page-header" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
+          <h3 style={{ margin: 0 }}>Dashboard generale</h3>
+          <TtpReviewButton />
+        </div>
         <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
           Panoramica di tutti gli increment: una barra per increment, da Inizio a Planned finish. Quelli "in corso"
           sono evidenziati. Sotto ogni barra le fasi dell'increment, col nome: su una corsia le date pianificate,

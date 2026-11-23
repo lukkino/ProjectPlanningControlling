@@ -3,8 +3,8 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import type { BudgetReview, BudgetReviewHours, MaterialFields } from '../api/types'
 import { DateInput } from './DateInput'
-import { fmtHours, parseDecimal, useBudgetCatalog, useRefreshBudget } from '../lib/budget'
-import { MaterialTable, NumberCell, TextCell } from './budgetShared'
+import { useRefreshBudget } from '../lib/budget'
+import { HoursItemsTable, MaterialTable, TextCell } from './budgetShared'
 
 type Props = { incrementId: number; frozen: boolean }
 
@@ -20,17 +20,9 @@ function ReviewHoursTable({
   onChanged: (saved: BudgetReview) => void
   onError: (e: Error) => void
 }) {
-  const { data: catalog } = useBudgetCatalog()
-  const [department, setDepartment] = useState<string | null>(null)
-  const [description, setDescription] = useState('')
-  const [values, setValues] = useState({ spa: '', sa: '', tpm: '' })
   const add = useMutation({
     mutationFn: (data: Partial<Omit<BudgetReviewHours, 'id'>>) => api.budget.addReviewHours(review.id, data),
-    onSuccess: (saved) => {
-      setDescription('')
-      setValues({ spa: '', sa: '', tpm: '' })
-      onChanged(saved)
-    },
+    onSuccess: onChanged,
     onError,
   })
   const update = useMutation({
@@ -39,121 +31,15 @@ function ReviewHoursTable({
     onError,
   })
   const remove = useMutation({ mutationFn: (id: number) => api.budget.removeReviewHours(id), onSuccess: onChanged, onError })
-  if (!catalog) return null
-
-  const newDepartment = department ?? 'DEV060'
-  const parsed = { spa: parseDecimal(values.spa), sa: parseDecimal(values.sa), tpm: parseDecimal(values.tpm) }
-  const valid = parsed.spa !== null && parsed.sa !== null && parsed.tpm !== null
-  const canAdd = !!description.trim() && valid && !add.isPending
-  const submit = () =>
-    canAdd &&
-    add.mutate({ department: newDepartment, description: description.trim(), spa: parsed.spa ?? 0, sa: parsed.sa ?? 0, tpm: parsed.tpm ?? 0 })
-  const total = review.hours_items.reduce((sum, i) => sum + i.spa + i.sa + i.tpm, 0)
-
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Reparto</th>
-            <th style={{ minWidth: 200 }}>Attività / motivo</th>
-            <th className="text-right">SpA (h)</th>
-            <th className="text-right">SA (h)</th>
-            <th className="text-right">TPM (h)</th>
-            <th className="text-right">Totale</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {review.hours_items.map((item) => (
-            <tr key={item.id}>
-              <td className="editable-cell">
-                <select
-                  aria-label="Reparto"
-                  value={item.department}
-                  onChange={(e) => update.mutate({ id: item.id, data: { department: e.target.value } })}
-                >
-                  {catalog.departments.map((d) => (
-                    <option key={d.code} value={d.code}>
-                      {d.code} {d.name}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="editable-cell">
-                <TextCell value={item.description} label="Attività" onSave={(v) => update.mutate({ id: item.id, data: { description: v } })} />
-              </td>
-              {(['spa', 'sa', 'tpm'] as const).map((field) => (
-                <td key={field} className="editable-cell">
-                  <NumberCell value={item[field]} label={field} onSave={(v) => update.mutate({ id: item.id, data: { [field]: v } })} />
-                </td>
-              ))}
-              <td className="text-right">
-                <strong>{fmtHours(item.spa + item.sa + item.tpm)}</strong>
-              </td>
-              <td>
-                <button
-                  className="btn"
-                  title="Elimina la riga"
-                  onClick={() => window.confirm(`Eliminare "${item.description}"?`) && remove.mutate(item.id)}
-                >
-                  🗑
-                </button>
-              </td>
-            </tr>
-          ))}
-          <tr>
-            <td className="editable-cell">
-              <select aria-label="Reparto della nuova riga" value={newDepartment} onChange={(e) => setDepartment(e.target.value)}>
-                {catalog.departments.map((d) => (
-                  <option key={d.code} value={d.code}>
-                    {d.code} {d.name}
-                  </option>
-                ))}
-              </select>
-            </td>
-            <td className="editable-cell">
-              <input
-                aria-label="Attività della nuova riga"
-                placeholder="Nuova riga, es. Sviluppo extra board"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-              />
-            </td>
-            {(['spa', 'sa', 'tpm'] as const).map((field) => (
-              <td key={field} className="editable-cell">
-                <input
-                  aria-label={`${field} della nuova riga`}
-                  placeholder="0"
-                  className="text-right"
-                  value={values[field]}
-                  onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
-                  onKeyDown={(e) => e.key === 'Enter' && submit()}
-                />
-              </td>
-            ))}
-            <td />
-            <td>
-              <button className="btn btn-primary" disabled={!canAdd} onClick={submit}>
-                + Aggiungi
-              </button>
-            </td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colSpan={5}>
-              <strong>Ore extra della review</strong>
-            </td>
-            <td className="text-right">
-              <strong>{fmtHours(total)}</strong>
-            </td>
-            <td />
-          </tr>
-        </tfoot>
-      </table>
-    </div>
+    <HoursItemsTable
+      rows={review.hours_items}
+      footerLabel="Ore extra della review"
+      adding={add.isPending}
+      onAdd={(data) => add.mutateAsync(data)}
+      onUpdate={(id, data) => update.mutate({ id, data })}
+      onRemove={(item) => window.confirm(`Eliminare "${item.description}"?`) && remove.mutate(item.id)}
+    />
   )
 }
 

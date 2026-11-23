@@ -1,5 +1,6 @@
 import datetime as dt
 import re
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
-from app.ownership import scope_user_id
+from app.ownership import scope_user_id, user_settings, user_settings_for_update
 from app.services.metrics import (
     compute_bugs_opened_metrics,
     compute_cycle_time_metrics,
@@ -21,6 +22,7 @@ from app.services.cycle_time_file import CycleTimeFileError, parse_cycle_time_fi
 from app.services.earned_value import compute_earned_value
 from app.services.workload import TeamPerson, compute_workload, team_key
 from app.services.presentation import generate_dashboard_presentation
+from app.services import ttp_review
 
 router = APIRouter(tags=["dashboard"])
 
@@ -210,3 +212,96 @@ def get_wip_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
 @router.get("/api/dashboard/done-by-increment", response_model=schemas.DoneByIncrementMetrics)
 def get_done_by_increment_dashboard(team: Team = "sw", db: Session = Depends(get_db)):
     return compute_done_by_increment_metrics(db, team)
+
+
+# ---------- Presentazione mensile "Project Review TTP" ----------
+
+class TtpReviewSettings(schemas.BaseModel):
+    path: str | None = None
+
+
+@router.get("/api/dashboard/ttp-review/settings", response_model=TtpReviewSettings)
+def get_ttp_review_settings(db: Session = Depends(get_db)):
+    return TtpReviewSettings(path=user_settings(db).ttp_review_path)
+
+
+@router.post("/api/dashboard/ttp-review/browse", response_model=TtpReviewSettings)
+def browse_ttp_review(db: Session = Depends(get_db)):
+    """Finestra "Apri file" di Windows sulla macchina del backend (quella
+    dell'utente) per scegliere la presentazione: il browser non da' il
+    percorso completo dei file scelti. Parte dalla cartella di quella
+    impostata. Annullando resta quella di prima."""
+    import tkinter
+    from tkinter import filedialog
+
+    current = user_settings(db).ttp_review_path
+    folder = Path(current).parent if current else None
+    root = tkinter.Tk()
+    try:
+        root.withdraw()
+        # Davanti al browser, altrimenti la finestra si apre dietro.
+        root.attributes("-topmost", True)
+        chosen = filedialog.askopenfilename(
+            parent=root,
+            title="Presentazione Project Review TTP da aggiornare",
+            initialdir=str(folder) if folder and folder.is_dir() else None,
+            filetypes=[("PowerPoint", "*.pptx")],
+        )
+    finally:
+        root.destroy()
+    if not chosen:
+        return TtpReviewSettings(path=current)
+    try:
+        path = str(ttp_review.source_file(str(Path(chosen))))
+    except ttp_review.TtpReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = user_settings_for_update(db)
+    row.ttp_review_path = path
+    db.commit()
+    return TtpReviewSettings(path=path)
+
+
+@router.post("/api/dashboard/ttp-review")
+def export_ttp_review(db: Session = Depends(get_db)):
+    """Aggiorna la presentazione scelta e la salva accanto con data e ora nel
+    nome; quella salvata diventa la sorgente dell'export successivo.
+    Restituisce anche il file (download)."""
+    configured = user_settings(db).ttp_review_path
+    if not configured:
+        raise HTTPException(status_code=400, detail="Scegli prima la presentazione da aggiornare")
+    increments = (
+        db.query(models.Increment)
+        .filter(models.Increment.owner_id == scope_user_id())
+        .order_by(models.Increment.code)
+        .all()
+    )
+    now = dt.datetime.now()
+    try:
+        source = ttp_review.source_file(configured)
+        content, info = ttp_review.generate(source, increments, now.date())
+    except ttp_review.TtpReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    target = ttp_review.output_path(source, now)
+    try:
+        target.write_bytes(content)
+        saved = str(target)
+        row = user_settings_for_update(db)
+        row.ttp_review_path = saved
+        db.commit()
+    except OSError:
+        saved = ""
+    summary = (
+        f"updated={','.join(info['updated'])};added={','.join(info['added'])};"
+        f"skipped={','.join(info['skipped'])};source={source.name}"
+    )
+    filename = re.sub(r"[^\w\-. ()+]", "_", target.name, flags=re.ASCII)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-TTP-Summary": summary.encode("ascii", "replace").decode("ascii"),
+            "X-TTP-Saved": saved.encode("ascii", "replace").decode("ascii"),
+            "Access-Control-Expose-Headers": "X-TTP-Summary, X-TTP-Saved",
+        },
+    )

@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, saveBlob } from '../api/client'
 import { BudgetReviewsCard } from '../components/BudgetReviewsCard'
 import { HoursDetailCard } from '../components/HoursDetailCard'
-import { HoursCalculatorCard } from '../components/HoursCalculatorCard'
+import { HoursCostsCard } from '../components/HoursCostsCard'
 import { MaterialCostsCard } from '../components/MaterialCostsCard'
 import { MaterialDetailCard } from '../components/MaterialDetailCard'
 import { IncrementHistoryCard } from '../components/IncrementHistoryCard'
@@ -167,6 +167,15 @@ export function IncrementDetailPage() {
             <span className="value">{(increment.percent_budget_used * 100).toFixed(0)}%</span>
             <span className="label">% ore usate su budget</span>
           </div>
+          {increment.project && (
+            <div className="stat-chip green">
+              <span className="value">{(increment.percent_complete * 100).toFixed(0)}%</span>
+              <span className="label">Completamento backlog</span>
+              <span className="muted" style={{ fontSize: 11 }}>
+                {increment.backlog_done} / {increment.backlog_in_scope} PBI · {increment.project.code}
+              </span>
+            </div>
+          )}
           <div className="stat-chip blue">
             <span className="value">{increment.budget_material_total.toLocaleString('it-IT')} €</span>
             <span className="label">Budget materiali</span>
@@ -202,11 +211,7 @@ export function IncrementDetailPage() {
         wrikeUrl={increment.wrike_url}
       />
 
-      <HoursCalculatorCard
-        incrementId={increment.id}
-        projectStartDate={increment.start_date}
-        projectEndDate={increment.end_date}
-      />
+      <HoursCostsCard incrementId={increment.id} />
 
       <MaterialCostsCard incrementId={increment.id} />
 

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Bar,
   BarChart,
@@ -14,7 +15,13 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
-import type { IncrementBudgetLine, IncrementSnapshot, IncrementSnapshotValue, SubProject } from '../api/types'
+import type {
+  IncrementBudgetLine,
+  IncrementSnapshot,
+  IncrementSnapshotValue,
+  SubProject,
+  WrikeReadResult,
+} from '../api/types'
 import { formatIsoDate } from '../lib/dates'
 import { DateInput } from './DateInput'
 
@@ -156,11 +163,22 @@ export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Pro
     mutationFn: (url: string) => api.increments.update(incrementId, { wrike_url: url }),
     onSuccess: invalidate,
   })
+  // Struttura dei task Wrike non riconosciuta: popup che chiede se basta il
+  // totale (snapshot in attesa di risposta).
+  const [wrikeAsk, setWrikeAsk] = useState<{
+    snapshotId: number
+    info: NonNullable<WrikeReadResult['unrecognized']>
+  } | null>(null)
   const readWrike = useMutation({
-    mutationFn: (snapshotId: number) => api.incrementSnapshots.readWrike(snapshotId),
-    onSuccess: (snap) => {
+    mutationFn: ({ snapshotId, totalOnly }: { snapshotId: number; totalOnly: boolean }) =>
+      api.incrementSnapshots.readWrike(snapshotId, totalOnly),
+    onSuccess: (result, { snapshotId }) => {
+      if (result.unrecognized) {
+        setWrikeAsk({ snapshotId, info: result.unrecognized })
+        return
+      }
       const hoursLine = lines?.find((l) => l.is_hours)
-      if (hoursLine) setExpanded((prev) => new Set(prev).add(`${snap.id}-${hoursLine.id}`))
+      if (hoursLine && !result.total_only) setExpanded((prev) => new Set(prev).add(`${snapshotId}-${hoursLine.id}`))
       invalidate()
     },
   })
@@ -208,7 +226,7 @@ export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Pro
       api.incrementSnapshots.create(incrementId, { snapshot_date: new Date().toISOString().slice(0, 10) }),
     onSuccess: (snap) => {
       invalidate()
-      if (wrikeUrl) readWrike.mutate(snap.id)
+      if (wrikeUrl) readWrike.mutate({ snapshotId: snap.id, totalOnly: false })
       readRequisitions.mutate({ snapshotId: snap.id, onlyIfAny: true })
     },
   })
@@ -328,6 +346,56 @@ export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Pro
         Preserie, -004 Consultancies, -005 Travels.
       </p>
       {readWrike.isPending && <p className="muted">Lettura delle ore da Wrike…</p>}
+      {wrikeAsk &&
+        createPortal(
+          <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && setWrikeAsk(null)}>
+            <div className="modal" style={{ width: 560 }}>
+              <h3 style={{ marginTop: 0 }}>Struttura dei task Wrike non riconosciuta</h3>
+              <p>
+                Nella cartella {wrikeAsk.info.folder_title && <b>{wrikeAsk.info.folder_title} </b>}non trovo attività{' '}
+                <i>Project Management</i>, <i>SW Test</i> o <i>System Test</i> (nemmeno tra le attività madri), quindi
+                non so ripartire le ore in Project Management, Develop, Testing e System Testing.
+              </p>
+              <p>
+                Totale ore rendicontate fino alla data dello snapshot:{' '}
+                <b>{wrikeAsk.info.total_hours.toLocaleString('it-IT')} h</b>. Ti basta il totale? Viene salvato come
+                Actual ore dello snapshot, senza ripartizione (resta modificabile a mano).
+              </p>
+              {wrikeAsk.info.top_tasks.length > 0 && (
+                <>
+                  <p className="muted" style={{ marginBottom: 4 }}>
+                    Attività con più ore:
+                  </p>
+                  <table className="table" style={{ fontSize: 13 }}>
+                    <tbody>
+                      {wrikeAsk.info.top_tasks.map((t, i) => (
+                        <tr key={i}>
+                          <td>{t.title}</td>
+                          <td className="num">{t.hours.toLocaleString('it-IT')} h</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              <div className="form-actions">
+                <button className="btn" onClick={() => setWrikeAsk(null)}>
+                  No, lascia com&apos;è
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => {
+                    readWrike.mutate({ snapshotId: wrikeAsk.snapshotId, totalOnly: true })
+                    setWrikeAsk(null)
+                  }}
+                >
+                  Sì, usa il totale
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
       {error && <div className="error-banner">Salvataggio non riuscito: {(error as Error).message}</div>}
 
       <div className="grid-3-2">
@@ -381,7 +449,7 @@ export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Pro
                       onClick={() =>
                         window.confirm(
                           `Rileggere da Wrike le ore fino al ${formatIsoDate(snap.snapshot_date)}? L'Actual ore di questo snapshot viene sostituito.`,
-                        ) && readWrike.mutate(snap.id)
+                        ) && readWrike.mutate({ snapshotId: snap.id, totalOnly: false })
                       }
                     >
                       ⟳ Wrike
@@ -613,6 +681,34 @@ export function IncrementHistoryCard({ incrementId, subProjects, wrikeUrl }: Pro
                         </Fragment>
                       )
                     })}
+                    {/* Totale delle voci in € (materiali): consumo complessivo,
+                        come per le ore, oltre a quello per singola voce. */}
+                    {(() => {
+                      const money = (lines ?? []).filter((l) => !l.is_hours)
+                      if (money.length < 2) return null
+                      const sum = (pick: (v: IncrementSnapshotValue | undefined) => number, map: Map<number, IncrementSnapshotValue>) =>
+                        money.reduce((acc, l) => acc + pick(map.get(l.id)), 0)
+                      const budget = sum((v) => v?.budget_value ?? 0, valueByLine)
+                      const actual = sum((v) => v?.actual_value ?? 0, valueByLine)
+                      const prevActual = sum((v) => v?.actual_value ?? 0, prevByLine)
+                      const pct = budget ? (actual / budget) * 100 : null
+                      return (
+                        <tr className="snapshot-total">
+                          <td>Totale materiali</td>
+                          <td>{formatValue(budget, false)}</td>
+                          <td>{formatValue(actual, false)}</td>
+                          <td>{formatDiff(actual - prevActual, false)}</td>
+                          <td
+                            style={{
+                              color: pct === null ? undefined : pct > 100 ? 'var(--danger)' : 'var(--success)',
+                            }}
+                          >
+                            {pct === null ? '—' : `${pct.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+                          </td>
+                          <td />
+                        </tr>
+                      )
+                    })()}
                     {/* Actual ore dei sotto-progetti: stesse colonne delle
                         voci, col budget (fisso, del sotto-progetto) in sola
                         lettura. */}

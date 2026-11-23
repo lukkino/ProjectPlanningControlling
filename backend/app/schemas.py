@@ -1772,3 +1772,27 @@ class Workload(BaseModel):
     week_starts: list[dt.date]
     projects: list[WorkloadProject]
     assignees: list[WorkloadAssignee]
+
+
+class WrikeTaskHours(BaseModel):
+    title: str
+    hours: float
+
+
+class WrikeUnrecognized(BaseModel):
+    """Wrike letto ma senza attivita' riconoscibili (Project Management,
+    SW Test, System Test): nulla e' stato scritto, si chiede se basta il
+    totale."""
+
+    folder_title: str | None = None
+    total_hours: float
+    top_tasks: list[WrikeTaskHours] = []
+
+
+class WrikeReadResult(BaseModel):
+    # None quando la struttura non e' riconosciuta e non si e' chiesto il
+    # totale: lo snapshot non e' cambiato.
+    snapshot: IncrementSnapshot | None = None
+    unrecognized: WrikeUnrecognized | None = None
+    # True quando si e' salvato il solo totale, senza ripartizione.
+    total_only: bool = False

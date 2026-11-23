@@ -1684,3 +1684,7 @@ ul.changelog-body { padding-left: 20px; }
 .phases-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 1500px) { .phases-layout { grid-template-columns: minmax(0, 1fr); } }
 .phase-actions-col { position: sticky; right: 0; width: 1%; background: var(--surface); box-shadow: -1px 0 0 var(--border); }
+/* Consumo risorse progetto: riga del totale materiali. */
+.snapshot-total td { font-weight: 700; border-top: 2px solid var(--border); background: var(--bg); }
+/* Dashboard generale: esportazione della presentazione Project Review TTP. */
+.ttp-review { display: flex; flex-direction: column; align-items: flex-end; max-width: 520px; text-align: right; }

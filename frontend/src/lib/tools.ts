@@ -17,6 +17,13 @@ export const TOOLS: ToolInfo[] = [
       'I bug Jira nati da un case Salesforce: elenco con i case collegati, KPI e disallineamenti tra Jira e Salesforce, sincronizzati con un clic.',
   },
   {
+    path: '/tools/capacity-planner',
+    icon: '🧮',
+    name: 'Capacity Planner',
+    description:
+      'Calcola le ore disponibili di un progetto da team, ferie e periodo e copiale nella tabella Budget ore del progetto.',
+  },
+  {
     path: '/tools/rda',
     icon: '🛒',
     name: 'RDA',

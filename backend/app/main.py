@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import auth, models, ownership
-from app.database import Base, SessionLocal, engine, run_budget_migrations, run_lightweight_migrations
+from app.database import Base, SessionLocal, engine, run_budget_migrations, run_lightweight_migrations, seed_hours_costs
 from app.routers import app_info, backlog, change_order, complaints, dashboard, dashboard_snapshots, documents, forecasting, increment_components, increments, project_budget, projects, releases, review_folder, scenarios, settings, snapshots, suggestions, team, tools_certifications, tools_commercial_coding, tools_enhancements, tools_purchase_requisitions, tools_shipping, users
 
 # MVP: create tables directly from the models on startup instead of a
@@ -14,6 +14,7 @@ from app.routers import app_info, backlog, change_order, complaints, dashboard, 
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations()
 run_budget_migrations()
+seed_hours_costs()
 # Le date dell'increment sono copie di quelle delle fasi scelte: si
 # riallineano all'avvio.
 with SessionLocal() as _db:

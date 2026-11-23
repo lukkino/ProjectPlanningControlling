@@ -73,6 +73,9 @@ class Increment(Base):
     hours_reviews: Mapped[list["IncrementHoursReview"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementHoursReview.order"
     )
+    hours_costs: Mapped[list["IncrementHoursCost"]] = relationship(
+        back_populates="increment", cascade="all, delete-orphan", order_by="IncrementHoursCost.order"
+    )
     material_costs: Mapped[list["IncrementMaterialCost"]] = relationship(
         back_populates="increment", cascade="all, delete-orphan", order_by="IncrementMaterialCost.order"
     )
@@ -489,6 +492,27 @@ class IncrementHoursDetailRow(Base):
     review_values: Mapped[list["IncrementHoursReviewValue"]] = relationship(
         back_populates="row", cascade="all, delete-orphan"
     )
+
+
+class IncrementHoursCost(Base):
+    """Budget ore del progetto, in lavorazione: un'attivita' di un reparto
+    con le ore per societa', inserita a mano o copiata dal Capacity Planner
+    (tool). Vale per il progetto solo dopo "Aggiorna ore progetto", che la
+    copia nel Dettaglio budget ore (IncrementHoursDetailRow), come per i
+    materiali."""
+
+    __tablename__ = "increment_hours_costs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    increment_id: Mapped[int] = mapped_column(ForeignKey("increments.id", ondelete="CASCADE"))
+    department: Mapped[str] = mapped_column(String(16))
+    description: Mapped[str] = mapped_column(String(255))
+    spa: Mapped[float] = mapped_column(Float, default=0)
+    sa: Mapped[float] = mapped_column(Float, default=0)
+    tpm: Mapped[float] = mapped_column(Float, default=0)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+
+    increment: Mapped["Increment"] = relationship(back_populates="hours_costs")
 
 
 class IncrementMaterialCost(Base):
@@ -1407,6 +1431,9 @@ class UserSettings(Base):
     # (vuoto = Salesforce non ha ancora il campo).
     enh_list_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     enh_jira_field: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Dashboard: presentazione mensile "Project Review TTP" da aggiornare
+    # (percorso del file; si parte dalla versione piu' recente nella cartella).
+    ttp_review_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PurchaseRequisition(Base):

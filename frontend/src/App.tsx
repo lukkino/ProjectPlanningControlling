@@ -27,6 +27,7 @@ import { SnapshotsPage } from './pages/SnapshotsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { CertificationTicketsPage } from './pages/tools/CertificationTicketsPage'
+import { CapacityPlannerPage } from './pages/tools/CapacityPlannerPage'
 import { CommercialCodingPage } from './pages/tools/CommercialCodingPage'
 import { EnhancementsPage } from './pages/tools/EnhancementsPage'
 import { PurchaseRequisitionsPage } from './pages/tools/PurchaseRequisitionsPage'
@@ -34,7 +35,7 @@ import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/tools/complaints', '/tools/complaints/kpi', '/tools/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/workload']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/tools/complaints', '/tools/complaints/kpi', '/tools/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/tools/capacity-planner', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/tools/commercial-coding" element={<CommercialCodingPage />} />
           <Route path="/tools/enhancements" element={<EnhancementsPage />} />
           <Route path="/tools/rda" element={<PurchaseRequisitionsPage />} />
+          <Route path="/tools/capacity-planner" element={<CapacityPlannerPage />} />
           <Route path="/increments/:incrementId" element={<IncrementDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />

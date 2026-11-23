@@ -295,24 +295,26 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
   })
 
   const { data: catalog } = useBudgetCatalog()
-  const { data: hoursDetail } = useQuery({
-    queryKey: ['hours-detail', incrementId],
-    queryFn: () => api.hoursDetail.get(incrementId),
-  })
-  const frozen = !!hoursDetail?.frozen_at
 
-  // "Aggiorna ore progetto": copia le ore calcolate nel Dettaglio budget ore
-  // progetto, una riga per tipologia e societa'.
+  // "Copia nel Budget ore": le ore calcolate diventano le righe della tabella
+  // Budget ore del progetto (una per tipologia e reparto, ore per societa').
+  // Il budget del progetto cambia poi con "Aggiorna ore progetto".
   const publish = useMutation({
     mutationFn: (
       rows: { name: string; department: string | null; company: Company; resource_count: number; hours: number }[],
-    ) => api.hoursDetail.setRows(incrementId, rows, frozen),
-    onSuccess: (saved) => {
-      queryClient.setQueryData(['hours-detail', incrementId], saved)
-      // Il Budget ore del Totale progetto puo' venire dal dettaglio.
-      queryClient.invalidateQueries({ queryKey: ['increment', incrementId] })
-      queryClient.invalidateQueries({ queryKey: ['increment-snapshots', incrementId] })
+    ) => {
+      const grouped = new Map<string, { department: string; description: string; spa: number; sa: number; tpm: number }>()
+      for (const r of rows) {
+        const department = r.department ?? 'DEV060'
+        const key = `${r.name}|${department}`
+        const row = grouped.get(key) ?? { department, description: r.name, spa: 0, sa: 0, tpm: 0 }
+        const field = r.company === 'SA' ? 'sa' : r.company === 'TPM' ? 'tpm' : 'spa'
+        row[field] = Math.round((row[field] + r.hours) * 100) / 100
+        grouped.set(key, row)
+      }
+      return api.hoursCosts.replace(incrementId, [...grouped.values()])
     },
+    onSuccess: (saved) => queryClient.setQueryData(['hours-costs', incrementId], saved),
   })
 
   const error =
@@ -425,10 +427,12 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
 
   const handlePublish = () => {
     if (netDays === null) return
-    const message = frozen
-      ? 'Il budget è congelato. Correggere il budget ore iniziale con le ore calcolate qui, senza una review? Usalo per errori o risorse dimenticate: le variazioni di budget vere vanno in una review. Le ore corrette a mano nel Dettaglio vengono sovrascritte.'
-      : 'Aggiornare il Dettaglio budget ore progetto con le ore calcolate qui? Eventuali ore corrette a mano (es. arrotondate) vengono sovrascritte.'
-    if (!confirm(message)) return
+    if (
+      !confirm(
+        'Copiare le ore calcolate qui nella tabella Budget ore del progetto? Le sue righe attuali (anche quelle inserite a mano) vengono sostituite. Il budget del progetto cambia solo con "Aggiorna ore progetto".',
+      )
+    )
+      return
     publish.mutate(publishRows())
   }
 
@@ -461,27 +465,20 @@ export function HoursCalculatorCard({ incrementId, projectStartDate, projectEndD
             className="btn btn-primary"
             disabled={netDays === null || calc.resource_types.length === 0 || publish.isPending}
             title={
-              frozen
-                ? 'Budget congelato: corregge il budget ore iniziale (errori, risorse dimenticate) senza review'
-                : netDays === null
-                  ? 'Imposta data di inizio e data di fine per calcolare le ore'
-                  : 'Copia le ore calcolate nel Dettaglio budget ore progetto'
+              netDays === null
+                ? 'Imposta data di inizio e data di fine per calcolare le ore'
+                : 'Copia le ore calcolate nella tabella Budget ore del progetto'
             }
             onClick={handlePublish}
           >
-            {publish.isPending ? 'Aggiornamento…' : frozen ? '✎ Correggi ore progetto' : '↑ Aggiorna ore progetto'}
+            {publish.isPending ? 'Copia…' : '↑ Copia nel Budget ore'}
           </button>
         </div>
       </div>
-      {frozen && (
-        <p style={{ marginTop: 0, fontSize: 13, color: 'var(--warning)' }}>
-          Budget congelato: "Correggi ore progetto" sostituisce il budget ore iniziale con le ore calcolate qui, senza
-          review (per un errore o una risorsa dimenticata). Le variazioni di budget vere vanno in una review di budget.
-        </p>
-      )}
       {publish.isSuccess && (
-        <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
-          Dettaglio budget ore progetto aggiornato.
+        <p style={{ marginTop: 0, fontSize: 13, color: 'var(--success)' }}>
+          Ore copiate nella tabella Budget ore del progetto: aprila e premi "Aggiorna ore progetto" perché diventino il
+          budget.
         </p>
       )}
       <p className="muted" style={{ marginTop: 0 }}>

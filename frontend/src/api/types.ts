@@ -65,6 +65,18 @@ export type IncrementSnapshotValueEntry = {
   people: { name: string; hours: number }[]
 }
 
+// Lettura delle ore da Wrike: snapshot aggiornato, oppure (struttura dei task
+// non riconosciuta) il totale trovato, senza aver scritto nulla.
+export type WrikeReadResult = {
+  snapshot: IncrementSnapshot | null
+  unrecognized: {
+    folder_title: string | null
+    total_hours: number
+    top_tasks: { title: string; hours: number }[]
+  } | null
+  total_only: boolean
+}
+
 export type IncrementSnapshot = {
   id: number
   increment_id: number

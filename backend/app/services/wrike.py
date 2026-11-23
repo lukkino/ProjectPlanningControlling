@@ -142,7 +142,9 @@ def read_hours(url: str, until: dt.date, since: dt.date | None) -> dict:
 
         totals = {c: 0.0 for c in CATEGORIES}
         period: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        task_hours: dict[str, float] = defaultdict(float)
         for log in logs:
+            task_hours[log["taskId"]] += log["hours"]
             category = category_of(log["taskId"])
             totals[category] += log["hours"]
             if since is None or _created(log) > since.isoformat():
@@ -156,8 +158,20 @@ def read_hours(url: str, until: dt.date, since: dt.date | None) -> dict:
     finally:
         client.close()
 
+    total = round(sum(totals.values()), 2)
+    # Struttura riconosciuta = almeno un'attivita' (o sua madre) con titolo
+    # Project Management / SW Test / System Test. Se no tutto finirebbe in
+    # Develop: meglio chiedere se basta il totale.
+    recognized = total == 0 or any(totals[c] > 0 for c in CATEGORIES if c != DEVELOP)
+    top_tasks = [
+        {"title": tasks.get(t, {}).get("title") or t, "hours": round(h, 2)}
+        for t, h in sorted(task_hours.items(), key=lambda kv: -kv[1])[:8]
+    ]
     return {
         "title": title,
+        "total": total,
+        "recognized": recognized,
+        "top_tasks": top_tasks,
         "categories": {c: round(h, 2) for c, h in totals.items()},
         "people": {
             category: sorted(

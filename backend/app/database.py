@@ -168,6 +168,9 @@ def run_lightweight_migrations() -> None:
         if "cc_tickets_url" not in settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE user_settings ADD COLUMN cc_tickets_url TEXT"))
+        if "ttp_review_path" not in settings_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_settings ADD COLUMN ttp_review_path TEXT"))
         for column, ddl in (("enh_list_url", "TEXT"), ("enh_jira_field", "VARCHAR(128)")):
             if column not in settings_columns:
                 with engine.begin() as conn:
@@ -566,6 +569,40 @@ def run_budget_migrations() -> None:
                         code = default_department(row_name or "")
                         if code:
                             conn.execute(text(f"UPDATE {table} SET department = :code WHERE id = :id"), {"code": code, "id": row_id})
+
+
+def seed_hours_costs() -> None:
+    """Una tantum, all'arrivo del Budget ore (bozza): per i progetti che
+    hanno gia' un Dettaglio budget ore la bozza parte da quelle righe, una
+    per tipologia e reparto con le ore per societa'."""
+    inspector = inspect(engine)
+    if "increment_hours_costs" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        if conn.execute(text("SELECT COUNT(*) FROM increment_hours_costs")).scalar():
+            return
+        rows = conn.execute(
+            text(
+                'SELECT increment_id, name, department, company, hours FROM increment_hours_detail_rows '
+                'ORDER BY increment_id, "order", id'
+            )
+        ).fetchall()
+        groups: dict[tuple, dict] = {}
+        for increment_id, name, department, company, hours in rows:
+            key = (increment_id, name, department)
+            group = groups.setdefault(key, {"spa": 0.0, "sa": 0.0, "tpm": 0.0})
+            column = {"SpA": "spa", "SA": "sa", "TPM": "tpm"}.get(company or "SpA", "spa")
+            group[column] += hours or 0
+        order: dict[int, int] = {}
+        for (increment_id, name, department), hours in groups.items():
+            order[increment_id] = order.get(increment_id, 0) + 1
+            conn.execute(
+                text(
+                    'INSERT INTO increment_hours_costs (increment_id, department, description, spa, sa, tpm, "order") '
+                    "VALUES (:i, :d, :n, :spa, :sa, :tpm, :o)"
+                ),
+                {"i": increment_id, "d": department or "DEV060", "n": name, "o": order[increment_id], **hours},
+            )
 
 
 def get_db():

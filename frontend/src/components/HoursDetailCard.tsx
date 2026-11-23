@@ -64,8 +64,8 @@ export function HoursDetailCard({ incrementId }: Props) {
         )}
       </div>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Il budget ore iniziale: una riga per tipologia di risorsa e società, copiata dal Capacity Planner con "Aggiorna
-        ore progetto" (il reparto si sceglie lì, ma si può correggere qui). Dopo "Congela budget" cambia con le review
+        Il budget ore iniziale: una riga per attività e società, copiata dalla tabella Budget ore con "Aggiorna ore
+        progetto" (reparto e ore si possono correggere anche qui). Dopo "Congela budget" cambia con le review
         di budget, o con "Correggi" se c'è un errore. Il totale è il Budget ore del progetto e va negli snapshot del Consumo risorse progetto.
       </p>
       {updateRow.isError && (
@@ -73,7 +73,8 @@ export function HoursDetailCard({ incrementId }: Props) {
       )}
       {rows.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>
-          Ancora vuoto: compila il Capacity Planner più sotto e premi "Aggiorna ore progetto".
+          Ancora vuoto: compila la tabella Budget ore più sotto (a mano o dal Capacity Planner) e premi "Aggiorna ore
+          progetto".
         </p>
       ) : (
         <div className="table-wrap">

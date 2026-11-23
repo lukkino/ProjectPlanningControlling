@@ -426,12 +426,17 @@ def delete_value_split(value_id: int, db: Session = Depends(get_db)):
     return value
 
 
-@router.post("/snapshots/{snapshot_id}/wrike", response_model=schemas.IncrementSnapshot)
-def read_snapshot_hours_from_wrike(snapshot_id: int, db: Session = Depends(get_db)):
+@router.post("/snapshots/{snapshot_id}/wrike", response_model=schemas.WrikeReadResult)
+def read_snapshot_hours_from_wrike(snapshot_id: int, total_only: bool = False, db: Session = Depends(get_db)):
     """Actual ore dello snapshot da Wrike: ore registrate fino alla data
     dello snapshot, ripartite in Project Management/Develop/Testing/System
     Testing, con le ore per persona dallo snapshot precedente (non per
-    Project Management)."""
+    Project Management).
+
+    Se nella cartella non c'e' nessuna attivita' riconoscibile non scrive
+    nulla e restituisce `unrecognized` (totale e attivita' principali):
+    l'interfaccia chiede se basta il totale e, se si', richiama con
+    total_only=true, che salva il solo totale senza ripartizione."""
     snapshot = _get_snapshot_or_404(db, snapshot_id)
     increment = snapshot.increment
     if not increment.wrike_url:
@@ -455,6 +460,19 @@ def read_snapshot_hours_from_wrike(snapshot_id: int, db: Session = Depends(get_d
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Wrike non raggiungibile: {exc}") from exc
 
+    if total_only:
+        value.entries.clear()
+        value.actual_value = hours["total"]
+        db.commit()
+        db.refresh(snapshot)
+        return schemas.WrikeReadResult(snapshot=snapshot, total_only=True)
+    if not hours["recognized"]:
+        return schemas.WrikeReadResult(
+            unrecognized=schemas.WrikeUnrecognized(
+                folder_title=hours["title"], total_hours=hours["total"], top_tasks=hours["top_tasks"]
+            )
+        )
+
     # La struttura e' sempre quella delle quattro voci: quelle mancanti si
     # aggiungono, le altre (rinominate a mano) restano a 0.
     by_name = {e.name: e for e in value.entries}
@@ -472,7 +490,7 @@ def read_snapshot_hours_from_wrike(snapshot_id: int, db: Session = Depends(get_d
     value.actual_value = round(sum(e.hours for e in value.entries), 2)
     db.commit()
     db.refresh(snapshot)
-    return snapshot
+    return schemas.WrikeReadResult(snapshot=snapshot)
 
 
 @router.post("/snapshots/{snapshot_id}/requisitions", response_model=schemas.IncrementSnapshot)
