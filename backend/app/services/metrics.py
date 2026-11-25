@@ -101,51 +101,22 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
     backlog_in_scope = len(codefreeze_items)
     backlog_done = len(done_items)
 
-    # project.snapshots e' ordinato per snapshot_date crescente (vedi models.py),
-    # quindi l'ultimo elemento e' la fotografia piu' recente.
-    latest_snapshot = project.snapshots[-1] if project.snapshots else None
-    completion_source = "backlog"
-    last_snapshot_date = None
-    if latest_snapshot is not None and latest_snapshot.pbi_total:
-        backlog_in_scope = latest_snapshot.pbi_total
-        backlog_done = latest_snapshot.pbi_done or 0
-        completion_source = "snapshot"
-        last_snapshot_date = latest_snapshot.snapshot_date
-
+    # Sempre dal backlog di oggi (gli snapshot dell'Andamento non si usano
+    # piu': restano nel database ma non entrano nei calcoli).
     percent_complete = (backlog_done / backlog_in_scope) if backlog_in_scope else 0.0
 
     # "Ore usate" riflette lo sforzo reale sull'increment: con dei progetti
     # collegati e' la somma delle loro ore usate (come il budget sotto: di
     # un progetto collegato tramite un sotto-progetto contano solo le ore di
-    # quello). Senza progetti preferiamo le ore effettive dello snapshot
-    # (actual_hours) alle ore loggate, perche' queste ultime possono essere
-    # solo un sottoinsieme rendicontato su Jira.
-    logged_hours_source = "backlog"
-    progetti_hours: list[schemas.ProgettoHoursSource] = []
-    for progetto in [*project.progetti, *(s.increment for s in project.sub_projects)]:
-        if any(p.id == progetto.id for p in progetti_hours):
-            continue
-        progetti_hours.append(
-            schemas.ProgettoHoursSource(
-                id=progetto.id,
-                code=progetto.code,
-                name=progetto.notes,
-                last_snapshot_date=progetto.snapshots[-1].snapshot_date if progetto.snapshots else None,
-            )
-        )
+    # quello). Senza progetti restano le ore loggate su Jira.
     if project.progetti or project.sub_projects:
         logged_hours_total = sum(_used_hours_total(p) for p in project.progetti) + sum(
             s.actual_hours for s in project.sub_projects
         )
         logged_hours_source = "progetti"
-    elif latest_snapshot is not None and latest_snapshot.actual_hours is not None:
-        logged_hours_total = latest_snapshot.actual_hours
-        logged_hours_source = "snapshot"
-    elif latest_snapshot is not None and latest_snapshot.logged_hours is not None:
-        logged_hours_total = latest_snapshot.logged_hours
-        logged_hours_source = "snapshot"
     else:
         logged_hours_total = sum(i.logged_hours or 0 for i in items)
+        logged_hours_source = "backlog"
 
     # Ore da Time Tracking Jira sui singoli item di backlog: e' un dato di
     # sola Development (il tempo che gli sviluppatori loggano sulle issue),
@@ -183,12 +154,69 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         percent_budget_used=percent_budget_used,
         percent_time_elapsed=percent_time_elapsed,
         spi=spi,
-        completion_source=completion_source,
         logged_hours_source=logged_hours_source,
-        progetti_hours=progetti_hours,
-        last_snapshot_date=last_snapshot_date,
         phases=list(project.phases),
+        completion_history=completion_history(project),
+        hours_history=hours_history(project),
     )
+
+
+def completion_history(project: models.Project) -> list[schemas.CompletionPoint]:
+    """% di completamento nel tempo, ricostruita dal backlog di oggi: sui PBI
+    del code freeze (stessa regola del Completamento backlog), i Done
+    contano dal giorno della loro Fine effettiva (un Done senza Fine
+    effettiva conta da oggi). Il totale e' quello di oggi: le aggiunte allo
+    scope non si vedono nel tempo. Un punto all'inizio dell'increment, uno
+    per ogni giorno con delle chiusure e uno oggi."""
+    items = [i for i in project.backlog_items if i.counts_for_codefreeze]
+    total = len(items)
+    today = dt.date.today()
+    finishes = sorted(min(i.actual_finish or today, today) for i in items if i.status == "Done")
+    start = project.start_date or (finishes[0] if finishes else today)
+    if not total or start > today:
+        return []
+    days = sorted({start, today, *(d for d in finishes if d > start)})
+    points = []
+    for day in days:
+        done = sum(1 for d in finishes if d <= day)
+        points.append(schemas.CompletionPoint(date=day, done=done, total=total, percent=done / total))
+    return points
+
+
+def hours_history(project: models.Project) -> list[schemas.HoursPoint]:
+    """Ore usate nel tempo: la somma delle ore usate dei progetti collegati,
+    dai loro Storici (Consumo risorse). Ogni progetto conta col suo ultimo
+    snapshot fino a quella data; di un progetto collegato tramite un
+    sotto-progetto contano solo le ore di quello. Vuota senza progetti
+    collegati (le ore Jira non bastano a dire le ore usate)."""
+    series: list[list[tuple[dt.date, float]]] = []
+    for progetto in project.progetti:
+        hours_ids = {b.id for b in progetto.budget_lines if b.is_hours}
+        series.append(
+            [
+                (s.snapshot_date, sum(v.actual_value or 0 for v in s.values if v.budget_line_id in hours_ids))
+                for s in progetto.snapshots
+            ]
+        )
+    for sub in project.sub_projects:
+        series.append(
+            [
+                (s.snapshot_date, v.actual_hours or 0)
+                for s in sub.increment.snapshots
+                for v in s.sub_values
+                if v.sub_project_id == sub.id
+            ]
+        )
+    days = sorted({day for points in series for day, _ in points})
+    history = []
+    for day in days:
+        hours = 0.0
+        for points in series:
+            known = [h for d, h in points if d <= day]
+            if known:
+                hours += known[-1]
+        history.append(schemas.HoursPoint(date=day, hours=round(hours, 2)))
+    return history
 
 
 def compute_increment_metrics(increment: models.Increment) -> schemas.IncrementDetail:

@@ -23,7 +23,6 @@ import { ProjectLayout } from './pages/ProjectLayout'
 import { ProjectsDashboardPage } from './pages/ProjectsDashboardPage'
 import { ProjectsListPage } from './pages/ProjectsListPage'
 import { ReleasesPage } from './pages/ReleasesPage'
-import { SnapshotsPage } from './pages/SnapshotsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { CertificationTicketsPage } from './pages/tools/CertificationTicketsPage'
@@ -96,7 +95,7 @@ export default function App() {
           <Route path="/projects/:projectId" element={<ProjectLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="backlog" element={<BacklogPage />} />
-            <Route path="snapshots" element={<SnapshotsPage />} />
+            <Route path="snapshots" element={<Navigate to=".." relative="path" replace />} />
             <Route path="forecasting" element={<ForecastingPage />} />
             <Route path="montecarlo" element={<MonteCarloPage />} />
             <Route path="documents" element={<DocumentsPage />} />

@@ -4,14 +4,14 @@ Regole (stesse di frontend/src/lib/earnedValue.ts per la % in Backlog e Gantt):
 - perimetro: i PBI del piano (in scope, code freeze o attivita' per Release),
   non archiviati, senza le milestone;
 - budget di un PBI: stima dev + stima test; se mancano, Sizing (gg) x 8 h;
-- % di completamento: Done = 100%; altrimenti ore loggate / budget, al
-  massimo 95% finche' non e' Done;
+- % di completamento: Done = 100%, altrimenti 0% (solo tempi: le ore
+  loggate su Jira non sono attendibili e non entrano nel calcolo);
 - PV: il budget distribuito sui giorni lavorativi della baseline (se manca,
   le date aggiornate; per un PBI chiuso senza piano, le date effettive);
-- EV = budget x % completamento; AC = ore loggate su Jira.
+- EV = budget x % completamento, cioe' il budget dei PBI Done.
 
-L'andamento nel tempo di EV e AC e' ricostruito: il valore di ogni PBI e'
-distribuito in modo lineare tra Start eff. e Fine eff. (oggi se e' aperto).
+L'andamento nel tempo dell'EV e' ricostruito: il valore di un PBI Done e'
+guadagnato il giorno della sua Fine effettiva (oggi se manca).
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from app import models
 
 HOURS_PER_DAY = 8.0
-MAX_OPEN_COMPLETION = 0.95
 MIN_EV_FOR_FORECAST = 0.10
 
 
@@ -40,7 +39,7 @@ def item_completion(item: models.BacklogItem, budget: float | None) -> float | N
         return 1.0
     if not budget:
         return None
-    return min((item.logged_hours or 0) / budget, MAX_OPEN_COMPLETION)
+    return 0.0
 
 
 def in_earned_value_scope(item: models.BacklogItem) -> bool:
@@ -89,7 +88,6 @@ class EvItem:
     completion: float | None
     pv: float
     ev: float
-    ac: float
     plan_start: dt.date | None
     plan_finish: dt.date | None
     plan_source: str | None
@@ -98,17 +96,12 @@ class EvItem:
     def sv(self) -> float:
         return self.ev - self.pv
 
-    @property
-    def cpi(self) -> float | None:
-        return self.ev / self.ac if self.ac > 0 else None
-
 
 @dataclass
 class EvPoint:
     day: dt.date
     pv: float
     ev: float | None
-    ac: float | None
 
 
 @dataclass
@@ -118,12 +111,7 @@ class EarnedValue:
     bac: float
     pv: float
     ev: float
-    ac: float
     spi: float | None
-    cpi: float | None
-    eac: float | None
-    etc: float | None
-    vac: float | None
     plan_start: dt.date | None
     plan_finish: dt.date | None
     earned_schedule: dt.date | None
@@ -131,18 +119,12 @@ class EarnedValue:
     forecast_finish: dt.date | None
     items_without_budget: int
     items_without_plan: int
-    done_without_hours: int
-    unbudgeted_logged_hours: float
     items: list[EvItem] = field(default_factory=list)
     curve: list[EvPoint] = field(default_factory=list)
 
     @property
     def sv(self) -> float:
         return self.ev - self.pv
-
-    @property
-    def cv(self) -> float:
-        return self.ev - self.ac
 
 
 def _cumulate(daily: dict[dt.date, float], days: list[dt.date]) -> dict[dt.date, float]:
@@ -165,19 +147,15 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
 
     pv_daily: dict[dt.date, float] = {}
     ev_daily: dict[dt.date, float] = {}
-    ac_daily: dict[dt.date, float] = {}
     rows: list[EvItem] = []
-    without_budget = without_plan = done_without_hours = 0
-    unbudgeted_logged = 0.0
+    without_budget = without_plan = 0
     item_pv_daily: list[tuple[EvItem, dict[dt.date, float]]] = []
 
     for item in sorted(items, key=lambda i: i.priority_order):
         budget, source = item_budget(item)
         completion = item_completion(item, budget)
-        logged = item.logged_hours or 0.0
         if budget is None:
             without_budget += 1
-            unbudgeted_logged += logged
         done = item.status == "Done"
 
         if item.baseline_start and item.baseline_finish:
@@ -191,7 +169,6 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
             plan, plan_source = None, None
 
         ev = (budget or 0) * (completion or 0)
-        ac = logged if budget is not None else 0.0
         row = EvItem(
             id=item.id,
             jira_key=item.jira_key,
@@ -204,7 +181,6 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
             completion=completion,
             pv=0.0,
             ev=ev,
-            ac=ac,
             plan_start=plan[0] if plan else None,
             plan_finish=plan[1] if plan else None,
             plan_source=plan_source,
@@ -212,8 +188,6 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
         rows.append(row)
         if budget is None:
             continue
-        if done and logged == 0:
-            done_without_hours += 1
 
         if plan is None:
             without_plan += 1
@@ -224,16 +198,11 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
             for day, value in own.items():
                 pv_daily[day] = pv_daily.get(day, 0.0) + value
 
-        # Ricostruzione di EV e AC nel tempo: lineare tra l'inizio effettivo e
-        # la fine effettiva (oggi, se aperto).
-        end = item.actual_finish if done and item.actual_finish else today
-        start = item.actual_start or end
-        if start > today:
-            start = today
-        if end > today:
-            end = today
-        _spread(ev_daily, cal, start, end, ev)
-        _spread(ac_daily, cal, start, end, ac)
+        # EV nel tempo: guadagnato il giorno della Fine effettiva (oggi se
+        # manca o e' nel futuro).
+        if done and ev:
+            finish = min(item.actual_finish or today, today)
+            ev_daily[finish] = ev_daily.get(finish, 0.0) + ev
 
     for row, own in item_pv_daily:
         row.pv = sum(v for d, v in own.items() if d <= today)
@@ -241,19 +210,14 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
     bac = sum(r.budget or 0 for r in rows)
     pv = sum(r.pv for r in rows)
     ev = sum(r.ev for r in rows)
-    ac = sum(r.ac for r in rows)
     spi = ev / pv if pv > 0 else None
-    cpi = ev / ac if ac > 0 else None
-    eac = bac / cpi if cpi else None
-    etc = eac - ac if eac is not None else None
-    vac = bac - eac if eac is not None else None
 
     # Curva: dall'inizio dell'increment (o del primo valore) alla fine del
     # piano (o a oggi), un punto a settimana piu' oggi e l'ultimo giorno.
     pv_days = sorted(pv_daily)
     plan_start = pv_days[0] if pv_days else None
     plan_finish = pv_days[-1] if pv_days else None
-    candidates = [d for d in (project.start_date, plan_start, *ev_daily, *ac_daily) if d]
+    candidates = [d for d in (project.start_date, plan_start, *ev_daily) if d]
     curve: list[EvPoint] = []
     earned_schedule = delay = forecast = None
     if candidates:
@@ -267,11 +231,7 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
         points = sorted({*points, last, *([today] if first <= today <= last else [])})
         pv_cum = _cumulate(pv_daily, points)
         ev_cum = _cumulate(ev_daily, points)
-        ac_cum = _cumulate(ac_daily, points)
-        curve = [
-            EvPoint(day=d, pv=pv_cum[d], ev=ev_cum[d] if d <= today else None, ac=ac_cum[d] if d <= today else None)
-            for d in points
-        ]
+        curve = [EvPoint(day=d, pv=pv_cum[d], ev=ev_cum[d] if d <= today else None) for d in points]
 
     # Earned Schedule: il giorno del piano in cui il PV era uguale all'EV di
     # oggi. Ritardo = giorni lavorativi tra quel giorno e oggi; la fine
@@ -316,12 +276,7 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
         bac=bac,
         pv=pv,
         ev=ev,
-        ac=ac,
         spi=spi,
-        cpi=cpi,
-        eac=eac,
-        etc=etc,
-        vac=vac,
         plan_start=plan_start,
         plan_finish=plan_finish,
         earned_schedule=earned_schedule,
@@ -329,8 +284,6 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
         forecast_finish=forecast,
         items_without_budget=without_budget,
         items_without_plan=without_plan,
-        done_without_hours=done_without_hours,
-        unbudgeted_logged_hours=unbudgeted_logged,
         items=rows,
         curve=curve,
     )

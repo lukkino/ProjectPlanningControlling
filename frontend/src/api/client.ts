@@ -76,7 +76,6 @@ import type {
   ProjectDetail,
   ScopeHistory,
   ScenariosStatus,
-  Snapshot,
   SubProject,
   SyncProgress,
   SyncResult,
@@ -536,13 +535,6 @@ export const api = {
     mismatches: () => request<ComplaintMismatches>('/complaints/mismatches'),
     getSettings: () => request<ComplaintsSettings>('/complaints/settings'),
     updateSettings: (data: ComplaintsSettings) => put<ComplaintsSettings>('/complaints/settings', data),
-  },
-  snapshots: {
-    list: (projectId: number) => request<Snapshot[]>(`/projects/${projectId}/snapshots`),
-    create: (projectId: number, data: Partial<Snapshot>) =>
-      post<Snapshot>(`/projects/${projectId}/snapshots`, data),
-    update: (id: number, data: Partial<Snapshot>) => put<Snapshot>(`/snapshots/${id}`, data),
-    remove: (id: number) => del(`/snapshots/${id}`),
   },
   // Team del Carico team (ruoli, persone, assenze).
   team: {

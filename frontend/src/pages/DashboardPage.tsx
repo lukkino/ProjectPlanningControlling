@@ -17,7 +17,7 @@ import {
 import { api, saveBlob } from '../api/client'
 import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
 import { SyncChangesModal } from '../components/SyncChangesModal'
-import { EarnedValueCard } from '../components/EarnedValue'
+import { EarnedValueSection } from '../components/EarnedValue'
 import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
@@ -29,10 +29,9 @@ import { dateStrToEpochDays, formatDateTime, formatEpochDaysAsDate, formatIsoDat
 import { SalesforceCaseLinks } from './ComplaintsPage'
 import { useProjectContext } from './useProjectContext'
 
-// Palette categorica validata del progetto (skill data-viz): blu e arancio
-// per le due serie di ore reali.
+// Palette categorica validata del progetto (skill data-viz): blu per le ore
+// usate.
 const COLOR_ACTUAL_HOURS = '#2a78d6'
-const COLOR_ACTUAL_LOGGED = '#eb6834'
 // Grafici previsione vs effettivo (Sizing/Durata, Ore stimate/loggate):
 // previsione in grigio neutro, effettivo nel blu primario - il dato reale e'
 // quello da guardare, la previsione fa da riferimento.
@@ -44,13 +43,12 @@ const COLOR_CODE_FREEZE = '#d3402f'
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
 
 const COMPLETION_HELP =
-  'PBI Done su PBI totali del code freeze: item in scope e "Incluso in codefreeze", come nel Backlog, ' +
-  "nell'Andamento e nel Forecasting. Non contano le story senza sviluppi né le attività per Release.\n\n" +
-  "Se c'è almeno uno snapshot nell'Andamento, il valore è quello dell'ultimo snapshot."
+  'PBI Done su PBI totali del code freeze: item in scope e "Incluso in codefreeze", come nel Backlog ' +
+  "e nel Forecasting. Non contano le story senza sviluppi né le attività per Release. Sempre dal backlog di oggi."
 
 const HOURS_HELP =
   'Ore usate: le ore consuntivate (controlling), inserite nel Consumo risorse dei progetti. Con progetti collegati ' +
-  "sono la somma dei loro ultimi Actual ore; altrimenti vengono dall'ultimo snapshot dell'Andamento.\n\n" +
+  "sono la somma dei loro ultimi Actual ore; senza progetti collegati sono le Ore Jira.\n\n" +
   'Da non confondere con le Ore Jira, loggate dagli sviluppatori sulle issue: sono solo una parte del lavoro.'
 
 const SPI_HELP =
@@ -611,11 +609,6 @@ export function DashboardPage() {
     queryFn: () => api.dashboard.get(project.id),
   })
 
-  const { data: snapshots } = useQuery({
-    queryKey: ['snapshots', project.id],
-    queryFn: () => api.snapshots.list(project.id),
-  })
-
   // Stessa query (e cache) della tab Backlog.
   // Stessa query dell'area Complaints: per la tabella dei complaint nell'increment.
   const { data: complaints } = useQuery({ queryKey: ['complaints'], queryFn: api.complaints.list })
@@ -630,14 +623,15 @@ export function DashboardPage() {
   // code freeze e la linea ideale, dallo 0% all'inizio al 100% al code freeze.
   const hasPlan = startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch
 
-  // % completamento dagli snapshot di Andamento, su un asse di date vere
-  // (giorni) per poterla confrontare con la linea ideale: in ogni punto,
-  // dove dovremmo essere per arrivare al 100% al code freeze.
+  // % completamento nel tempo dalle Fine effettive dei PBI del code freeze
+  // (backend, metrics.completion_history), su un asse di date vere (giorni)
+  // per poterla confrontare con la linea ideale: in ogni punto, dove
+  // dovremmo essere per arrivare al 100% al code freeze.
   const completionByEpoch = new Map<number, number | null>()
-  for (const s of snapshots ?? []) {
-    const epoch = dateStrToEpochDays(s.snapshot_date)
+  for (const p of metrics?.completion_history ?? []) {
+    const epoch = dateStrToEpochDays(p.date)
     if (epoch === null) continue
-    completionByEpoch.set(epoch, s.pbi_total ? Math.round(((s.pbi_done ?? 0) / s.pbi_total) * 100) : null)
+    completionByEpoch.set(epoch, Math.round(p.percent * 1000) / 10)
   }
   const chartData = Array.from(new Set([...completionByEpoch.keys(), ...(hasPlan ? [startEpoch, freezeEpoch] : [])]))
     .sort((a, b) => a - b)
@@ -649,25 +643,19 @@ export function DashboardPage() {
         : null,
     }))
 
-  // Ore dagli snapshot di Andamento nel tempo: actual_hours = "Ore usate"
-  // (consuntivate), logged_hours = "Ore Jira" (loggate sulle issue).
-
-  let hoursChartData: { x: number; actualHours: number | null; actualLogged: number | null }[] = []
-  if (startEpoch !== null && freezeEpoch !== null && freezeEpoch > startEpoch) {
-    const snapshotByEpoch = new Map((snapshots ?? []).map((s) => [dateStrToEpochDays(s.snapshot_date), s]))
-    const allEpochs = Array.from(new Set([startEpoch, freezeEpoch, ...snapshotByEpoch.keys()]))
-      .filter((e): e is number => e !== null)
-      .sort((a, b) => a - b)
-
-    hoursChartData = allEpochs.map((epoch) => {
-      const snap = snapshotByEpoch.get(epoch)
-      return {
-        x: epoch,
-        actualHours: snap?.actual_hours ?? null,
-        actualLogged: snap?.logged_hours ?? null,
-      }
-    })
+  // Ore usate nel tempo dagli Storici dei progetti collegati (backend,
+  // metrics.hours_history), con inizio e code freeze sull'asse.
+  const hoursByEpoch = new Map<number, number>()
+  for (const p of metrics?.hours_history ?? []) {
+    const epoch = dateStrToEpochDays(p.date)
+    if (epoch !== null) hoursByEpoch.set(epoch, p.hours)
   }
+  const hoursChartData =
+    hoursByEpoch.size === 0
+      ? []
+      : Array.from(new Set([...hoursByEpoch.keys(), ...(hasPlan ? [startEpoch, freezeEpoch] : [])]))
+          .sort((a, b) => a - b)
+          .map((epoch) => ({ x: epoch, actualHours: hoursByEpoch.get(epoch) ?? null }))
 
   return (
     <div>
@@ -764,11 +752,6 @@ export function DashboardPage() {
                 i
               </span>
             </span>
-            {metrics?.completion_source === 'snapshot' && (
-              <span className="muted" style={{ fontSize: 11 }}>
-                da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
-              </span>
-            )}
           </div>
           <div className="stat">
             <span className="value">{metrics?.logged_hours_total ?? 0} h</span>
@@ -790,11 +773,6 @@ export function DashboardPage() {
                   {pct(metrics.percent_budget_used)}
                 </strong>{' '}
                 del budget di {metrics.budget_hours_total.toLocaleString('it-IT')} h
-              </span>
-            )}
-            {metrics?.logged_hours_source === 'snapshot' && (
-              <span className="muted" style={{ fontSize: 11 }}>
-                da snapshot del {formatIsoDate(metrics.last_snapshot_date)}
               </span>
             )}
             {metrics?.logged_hours_source === 'progetti' && (
@@ -827,7 +805,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <EarnedValueCard projectId={project.id} />
+      <EarnedValueSection projectId={project.id} />
 
       <RecentlyClosedCard items={backlogItems} phases={phases} period={closedPeriod} setPeriod={setClosedPeriod} />
 
@@ -837,8 +815,8 @@ export function DashboardPage() {
         <h3>Ore usate nel tempo</h3>
         {hoursChartData.length === 0 ? (
           <p className="muted">
-            Servono la data di inizio increment e la data di code freeze (scheda increment) per tracciare le ore nel
-            tempo.
+            Nessun progetto collegato con ore nel Consumo risorse: le ore usate nel tempo vengono dagli Storici dei
+            progetti collegati.
           </p>
         ) : (
           <div style={{ height: 260 }}>
@@ -848,7 +826,7 @@ export function DashboardPage() {
                 <XAxis
                   dataKey="x"
                   type="number"
-                  domain={[startEpoch ?? 0, freezeEpoch ?? 1]}
+                  domain={['dataMin', 'dataMax']}
                   tickFormatter={formatEpochDaysAsDate}
                   tick={{ fontSize: 12 }}
                 />
@@ -864,15 +842,6 @@ export function DashboardPage() {
                   dot={{ r: 4 }}
                   connectNulls
                 />
-                <Line
-                  type="monotone"
-                  dataKey="actualLogged"
-                  name="Ore Jira (h)"
-                  stroke={COLOR_ACTUAL_LOGGED}
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                  connectNulls
-                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -883,7 +852,7 @@ export function DashboardPage() {
         <h3>Andamento % completamento nel tempo</h3>
         {completionByEpoch.size === 0 ? (
           <p className="muted">
-            Nessuno snapshot registrato. Aggiungine uno dalla tab "Andamento" per iniziare a tracciare lo storico.
+            Nessun PBI del code freeze, o l'increment non è ancora iniziato.
           </p>
         ) : (
           <>

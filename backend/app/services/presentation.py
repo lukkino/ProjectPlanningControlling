@@ -581,7 +581,6 @@ def _scope_slides(deck: _Deck, project: models.Project) -> None:
 def _kpi_slide(deck: _Deck, project: models.Project) -> None:
     metrics = compute_dashboard_metrics(project)
     slide, box = deck.add_slide("Indicatori")
-    snapshot_note = f"da snapshot del {_date(metrics.last_snapshot_date)}"
     status_label, status_color = _spi_status(metrics.spi)
 
     # (valore, colore valore, etichetta, note[(testo, colore)])
@@ -590,7 +589,7 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
             _pct(metrics.percent_complete),
             COLOR_TEXT,
             f"Completamento backlog ({metrics.backlog_done}/{metrics.backlog_in_scope})",
-            [(snapshot_note, COLOR_MUTED)] if metrics.completion_source == "snapshot" else [],
+            [],
         ),
         (
             f"{_num(metrics.logged_hours_total)} h",
@@ -606,7 +605,6 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
                 if metrics.percent_budget_used is not None
                 else []
             )
-            + ([(snapshot_note, COLOR_MUTED)] if metrics.logged_hours_source == "snapshot" else [])
             + ([("somma dei progetti collegati", COLOR_MUTED)] if metrics.logged_hours_source == "progetti" else []),
         ),
         (
@@ -1440,20 +1438,22 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
         )
         return
 
-    serial = _date_serial
+    # Come nella Dashboard: le ore usate dagli Storici dei progetti collegati.
+    history = compute_dashboard_metrics(project).hours_history
+    if not history:
+        _text(
+            slide,
+            box,
+            "Nessun progetto collegato con ore nel Consumo risorse: le ore usate nel tempo vengono dagli Storici dei progetti.",
+            color=COLOR_MUTED,
+        )
+        return
     chart_data = XyChartData()
     days: list[dt.date] = [start, freeze]
-    for name, attribute in (("Ore usate (h)", "actual_hours"), ("Ore Jira (h)", "logged_hours")):
-        points = [(s.snapshot_date, getattr(s, attribute)) for s in project.snapshots if getattr(s, attribute) is not None]
-        if not points:
-            continue
-        series = chart_data.add_series(name)
-        for day, hours in points:
-            series.add_data_point(serial(day), hours)
-            days.append(day)
-    if len(days) == 2:
-        _text(slide, box, "Nessuno snapshot con ore registrate (tab Andamento).", color=COLOR_MUTED)
-        return
+    series = chart_data.add_series("Ore usate (h)")
+    for point in history:
+        series.add_data_point(_date_serial(point.date), point.hours)
+        days.append(point.date)
 
     chart = slide.shapes.add_chart(
         XL_CHART_TYPE.XY_SCATTER_LINES, box.left, box.top, box.width, box.height, chart_data
@@ -1487,8 +1487,8 @@ def _signed_hours(value: float) -> str:
 
 
 def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
-    """Indicatori e curve PV / EV / AC, come la sezione Earned Value della
-    tab Andamento (services/earned_value.py)."""
+    """Indicatori e curve PV / EV (solo tempi), come la sezione Earned Value
+    della Dashboard (services/earned_value.py)."""
     ev = compute_earned_value(project)
     slide, box = deck.add_slide("Earned Value")
     if ev.bac == 0:
@@ -1505,22 +1505,22 @@ def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
     tiles: list[tuple[str, RGBColor, str, list[tuple[str, RGBColor]]]] = [
         (f"{ev.spi:.2f}".replace(".", ",") if ev.spi is not None else "—", _ev_tone(ev.spi), "SPI (tempi)", delay_note),
         (
-            f"{ev.cpi:.2f}".replace(".", ",") if ev.cpi is not None else "—",
-            _ev_tone(ev.cpi),
-            "CPI (ore)",
-            [(f"CV {_signed_hours(ev.cv)}" if ev.cpi is not None else "nessuna ora loggata", COLOR_MUTED)],
-        ),
-        (
             _date(ev.forecast_finish) if ev.forecast_finish else "—",
             COLOR_DANGER if late else COLOR_SUCCESS if ev.forecast_finish else COLOR_TEXT,
             "Fine prevista",
             [(f"piano: {_date(ev.plan_finish)}" if ev.forecast_finish else "non ancora significativa", COLOR_MUTED)],
         ),
         (
-            _hours(ev.eac),
-            COLOR_TEXT if ev.vac is None else COLOR_DANGER if ev.vac < 0 else COLOR_SUCCESS,
-            "Stima a finire (EAC)",
-            [(f"budget {_hours(ev.bac)}" + (f" · VAC {_signed_hours(ev.vac)}" if ev.vac is not None else ""), COLOR_MUTED)],
+            _pct(ev.ev / ev.bac),
+            COLOR_TEXT,
+            "Completamento guadagnato",
+            [(f"pianificato a oggi {_pct(ev.pv / ev.bac)}", COLOR_MUTED)],
+        ),
+        (
+            _hours(ev.bac),
+            COLOR_TEXT,
+            "Budget dei PBI",
+            [(f"guadagnato {_hours(ev.ev)}", COLOR_MUTED)],
         ),
     ]
     gap = Inches(0.2)
@@ -1549,13 +1549,11 @@ def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
 
     summary = (
         f"Completamento pianificato {_pct(ev.pv / ev.bac)}, guadagnato {_pct(ev.ev / ev.bac)}   ·   "
-        f"PV {_hours(ev.pv)} · EV {_hours(ev.ev)} · AC {_hours(ev.ac)}   ·   SV {_signed_hours(ev.sv)}"
+        f"PV {_hours(ev.pv)} · EV {_hours(ev.ev)}   ·   SV {_signed_hours(ev.sv)}"
     )
     warnings = []
     if not ev.has_baseline:
         warnings.append("baseline non fissata: PV sulle date aggiornate")
-    if ev.done_without_hours:
-        warnings.append(f"{ev.done_without_hours} PBI Done senza ore loggate (CPI ottimistico)")
     if ev.items_without_budget:
         warnings.append(f"{ev.items_without_budget} PBI senza stima né Sizing esclusi")
     text_top = box.top + tile_height + Inches(0.1)
@@ -1568,7 +1566,7 @@ def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
         return
 
     chart_data = XyChartData()
-    for name, attribute in (("PV pianificato", "pv"), ("EV guadagnato", "ev"), ("AC ore loggate", "ac")):
+    for name, attribute in (("PV pianificato", "pv"), ("EV guadagnato", "ev")):
         series = chart_data.add_series(name)
         for point in ev.curve:
             value = getattr(point, attribute)
@@ -1582,8 +1580,8 @@ def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
     chart.value_axis.minimum_scale = 0
     for series, color, dash in zip(
         chart.plots[0].series,
-        (COLOR_PLANNED, COLOR_SUCCESS, COLOR_PHASE_ACTUAL),
-        (MSO_LINE_DASH_STYLE.DASH, None, None),
+        (COLOR_PLANNED, COLOR_SUCCESS),
+        (MSO_LINE_DASH_STYLE.DASH, None),
     ):
         series.smooth = False
         series.format.line.width = Pt(2.25)
@@ -1594,32 +1592,31 @@ def _earned_value_slide(deck: _Deck, project: models.Project) -> None:
 
 def _completion_slide(deck: _Deck, project: models.Project) -> None:
     slide, box = deck.add_slide("Andamento % completamento nel tempo")
-    snapshots = list(project.snapshots)
-    if not snapshots:
+    history = compute_dashboard_metrics(project).completion_history
+    if not history:
         _text(
             slide,
             box,
-            'Nessuno snapshot registrato. Aggiungine uno dalla tab "Andamento" per iniziare a tracciare lo storico.',
+            "Nessun PBI del code freeze, o l'increment non e' ancora iniziato.",
             color=COLOR_MUTED,
         )
         return
-    # Come nella Dashboard: % completamento degli snapshot su un asse di date
-    # vere e, se inizio e code freeze sono noti, l'obiettivo - la data del
-    # code freeze e la linea ideale dallo 0% all'inizio al 100% al code freeze.
+    # Come nella Dashboard: % completamento ricostruita dalle Fine effettive
+    # del backlog, su un asse di date vere e, se inizio e code freeze sono
+    # noti, l'obiettivo - la data del code freeze e la linea ideale dallo 0%
+    # all'inizio al 100% al code freeze.
     start, freeze = project.start_date, project.code_freeze_date
     has_plan = start is not None and freeze is not None and freeze > start
-    points = [
-        (s.snapshot_date, round((s.pbi_done or 0) / s.pbi_total * 100)) for s in snapshots if s.pbi_total
-    ]
-    # Ultimo rilevamento dell'Andamento: il completamento reale e, sulla
-    # linea ideale, dove dovremmo essere quel giorno.
+    points = [(point.date, round(point.percent * 100)) for point in history]
+    # Oggi: il completamento reale e, sulla linea ideale, dove dovremmo
+    # essere.
     last_day, last_actual = points[-1] if points else (None, None)
     last_ideal = None
     if has_plan and last_day is not None:
         last_ideal = round(min(max((last_day - start).days / (freeze - start).days, 0), 1) * 100)
 
     chart_data = XyChartData()
-    days = [s.snapshot_date for s in snapshots]
+    days = [day for day, _ in points]
     completion = chart_data.add_series("Completamento")
     for day, percent in points:
         completion.add_data_point(_date_serial(day), percent)
@@ -1638,7 +1635,7 @@ def _completion_slide(deck: _Deck, project: models.Project) -> None:
 
     summary_height = 0
     if last_day is not None:
-        summary = f"Ultimo rilevamento ({_date(last_day)}): completamento reale {last_actual}%"
+        summary = f"Oggi ({_date(last_day)}): completamento reale {last_actual}%"
         if last_ideal is not None:
             gap = last_actual - last_ideal
             summary += f", ideale {last_ideal}% - " + (

@@ -760,14 +760,14 @@ export type DashboardMetrics = {
   percent_budget_used: number | null
   percent_time_elapsed: number | null
   spi: number | null
-  completion_source: 'backlog' | 'snapshot'
-  // 'progetti': somma delle ore usate dei progetti e sotto-progetti collegati.
-  logged_hours_source: 'backlog' | 'snapshot' | 'progetti'
-  // Progetti collegati da cui vengono le Ore usate, con la data del loro
-  // ultimo snapshot dello Storico.
-  progetti_hours: { id: number; code: string; name: string | null; last_snapshot_date: string | null }[]
-  last_snapshot_date: string | null
+  // 'progetti': somma delle ore usate dei progetti e sotto-progetti collegati;
+  // 'backlog': ore Jira (nessun progetto collegato).
+  logged_hours_source: 'backlog' | 'progetti'
   phases: Phase[]
+  // Completamento nel tempo dalle Fine effettive dei PBI del code freeze.
+  completion_history: { date: string; done: number; total: number; percent: number }[]
+  // Ore usate nel tempo dagli Storici dei progetti collegati.
+  hours_history: { date: string; hours: number }[]
 }
 
 // Team a cui sono assegnati i PBI: JQL base diversa (issuetype/label) per
@@ -1256,9 +1256,7 @@ export interface EarnedValueItem {
   completion: number | null
   pv: number
   ev: number
-  ac: number
   sv: number
-  cpi: number | null
   plan_start: string | null
   plan_finish: string | null
   plan_source: 'baseline' | 'aggiornata' | 'effettiva' | null
@@ -1268,7 +1266,6 @@ export interface EarnedValuePoint {
   day: string
   pv: number
   ev: number | null
-  ac: number | null
 }
 
 export interface WorkloadItem {
@@ -1319,14 +1316,8 @@ export interface EarnedValue {
   bac: number
   pv: number
   ev: number
-  ac: number
   sv: number
-  cv: number
   spi: number | null
-  cpi: number | null
-  eac: number | null
-  etc: number | null
-  vac: number | null
   plan_start: string | null
   plan_finish: string | null
   earned_schedule: string | null
@@ -1334,8 +1325,6 @@ export interface EarnedValue {
   forecast_finish: string | null
   items_without_budget: number
   items_without_plan: number
-  done_without_hours: number
-  unbudgeted_logged_hours: number
   items: EarnedValueItem[]
   curve: EarnedValuePoint[]
 }

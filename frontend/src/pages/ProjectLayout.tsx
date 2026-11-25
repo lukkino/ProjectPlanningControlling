@@ -117,9 +117,6 @@ export function ProjectLayout() {
         <NavLink to={`/projects/${id}/backlog`} className={({ isActive }) => (isActive ? 'active' : '')}>
           Backlog
         </NavLink>
-        <NavLink to={`/projects/${id}/snapshots`} className={({ isActive }) => (isActive ? 'active' : '')}>
-          Andamento
-        </NavLink>
         <NavLink to={`/projects/${id}/forecasting`} className={({ isActive }) => (isActive ? 'active' : '')}>
           Forecasting
         </NavLink>

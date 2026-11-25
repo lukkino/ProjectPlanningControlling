@@ -1103,16 +1103,22 @@ class PprGenerateRequest(BaseModel):
 
 # ---------- Dashboard ----------
 
-class ProgettoHoursSource(BaseModel):
-    """Progetto collegato da cui vengono le Ore usate dell'increment, con la
-    data del suo ultimo snapshot dello Storico (le ore sono aggiornate a
-    quella data)."""
+class CompletionPoint(BaseModel):
+    """Un punto del completamento nel tempo (dal backlog, vedi
+    metrics.completion_history)."""
 
-    id: int
-    code: str
-    # Descrizione breve del progetto (Increment.notes).
-    name: str | None = None
-    last_snapshot_date: dt.date | None = None
+    date: dt.date
+    done: int
+    total: int
+    percent: float
+
+
+class HoursPoint(BaseModel):
+    """Un punto delle ore usate nel tempo (dagli Storici dei progetti, vedi
+    metrics.hours_history)."""
+
+    date: dt.date
+    hours: float
 
 
 class DashboardMetrics(BaseModel):
@@ -1128,13 +1134,11 @@ class DashboardMetrics(BaseModel):
     percent_budget_used: float | None = None
     percent_time_elapsed: float | None
     spi: float | None
-    completion_source: str
-    # "progetti" (somma dei progetti collegati), "snapshot" o "backlog".
+    # "progetti" (somma dei progetti collegati) o "backlog" (ore Jira).
     logged_hours_source: str
-    # Con logged_hours_source "progetti": i progetti da cui vengono le ore.
-    progetti_hours: list[ProgettoHoursSource] = []
-    last_snapshot_date: dt.date | None
     phases: list[Phase]
+    completion_history: list[CompletionPoint] = []
+    hours_history: list[HoursPoint] = []
 
 
 class PbiDoneCount(BaseModel):
@@ -1630,9 +1634,7 @@ class EarnedValueItem(BaseModel):
     completion: float | None
     pv: float
     ev: float
-    ac: float
     sv: float
-    cpi: float | None
     plan_start: dt.date | None
     plan_finish: dt.date | None
     # "baseline", "aggiornata" o "effettiva": da dove vengono le date del PV.
@@ -1643,7 +1645,6 @@ class EarnedValuePoint(BaseModel):
     day: dt.date
     pv: float
     ev: float | None
-    ac: float | None
 
 
 class EarnedValue(BaseModel):
@@ -1652,14 +1653,8 @@ class EarnedValue(BaseModel):
     bac: float
     pv: float
     ev: float
-    ac: float
     sv: float
-    cv: float
     spi: float | None
-    cpi: float | None
-    eac: float | None
-    etc: float | None
-    vac: float | None
     plan_start: dt.date | None
     plan_finish: dt.date | None
     earned_schedule: dt.date | None
@@ -1667,8 +1662,6 @@ class EarnedValue(BaseModel):
     forecast_finish: dt.date | None
     items_without_budget: int
     items_without_plan: int
-    done_without_hours: int
-    unbudgeted_logged_hours: float
     items: list[EarnedValueItem]
     curve: list[EarnedValuePoint]
 

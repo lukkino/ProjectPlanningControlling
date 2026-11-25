@@ -52,8 +52,7 @@ def get_earned_value(project_id: int, db: Session = Depends(get_db)):
     return schemas.EarnedValue(
         **{k: v for k, v in ev.__dict__.items() if k not in ("items", "curve")},
         sv=ev.sv,
-        cv=ev.cv,
-        items=[schemas.EarnedValueItem(**i.__dict__, sv=i.sv, cpi=i.cpi) for i in ev.items],
+        items=[schemas.EarnedValueItem(**i.__dict__, sv=i.sv) for i in ev.items],
         curve=[schemas.EarnedValuePoint(**p.__dict__) for p in ev.curve],
     )
 

@@ -4,9 +4,8 @@ increment, distribuite sulle settimane in cui sono pianificati.
 Regole:
 - item: quelli del piano (stesso perimetro dell'Earned Value: in scope, code
   freeze o attivita' per Release, non archiviati, senza milestone), non Done;
-- ore rimanenti: budget x (1 - % completamento), con budget e % dell'Earned
-  Value (stima dev + test, se manca Sizing x 8 h; ore loggate / budget, al
-  massimo 95% finche' non e' Done);
+- ore rimanenti: il budget dell'Earned Value (stima dev + test, se manca
+  Sizing x 8 h) degli item non Done (le ore Jira non contano);
 - distribuite in modo uniforme sui giorni lavorativi tra Start pian. (o oggi,
   se e' gia' passato) e Fine pian.; un item con Fine pian. gia' passata e'
   scaduto: le sue ore non vanno sulle settimane (andrebbero tutte su oggi)
