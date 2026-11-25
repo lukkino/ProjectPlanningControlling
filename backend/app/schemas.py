@@ -430,7 +430,9 @@ class BudgetReview(BaseModel):
 # ---------- BacklogItem ----------
 
 # Fase a cui serve un'attivita' di servizio (vedi models.BacklogItem.activity_phase).
-ActivityPhase = Literal["execution", "deployment", "release"]
+# "medium_change" solo negli increment Medium Change (models.REVIEW_TYPE_PHASES).
+ActivityPhase = Literal["execution", "deployment", "release", "medium_change"]
+ReviewType = Literal["full_review", "medium_change"]
 
 
 class BacklogItemBase(BaseModel):
@@ -712,6 +714,15 @@ class SidebarPin(BaseModel):
     pinned: bool
 
 
+class ReviewTypeChange(BaseModel):
+    review_type: ReviewType
+    # Sistema anche le fasi: Medium Change toglie Execution, Deployment e
+    # Release to Market e aggiunge Medium Change come fine; Full Review
+    # l'inverso. Le date passano da Release to Market a Medium Change e
+    # viceversa.
+    adjust_phases: bool = True
+
+
 class ProjectUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
@@ -787,6 +798,8 @@ class ProjectListItem(ProjectBase):
     finish_phase_id: int | None = None
     # Spostando una fase, propone di spostare le successive (vedi models).
     keep_phase_order: bool = True
+    # Full Review o Medium Change (si cambia con PUT /{id}/review-type).
+    review_type: str = "full_review"
     # JQL dei Planned/Unplanned PBI Done del Forecasting (vedi models).
     planned_done_jql: str | None = None
     unplanned_done_jql: str | None = None

@@ -242,7 +242,8 @@ export type ImplementedByTask = {
   fix_version: string | null
 }
 
-export type ActivityPhase = 'execution' | 'deployment' | 'release'
+// 'medium_change' solo negli increment Medium Change (vedi lib/activityPhases).
+export type ActivityPhase = 'execution' | 'deployment' | 'release' | 'medium_change'
 
 export type BacklogItem = {
   id: number
@@ -429,6 +430,9 @@ export type Project = {
   // Spostando una fase propone di spostare le successive che finirebbero
   // prima (e avvisa se la fase andrebbe prima della precedente).
   keep_phase_order: boolean
+  // Full Review o Medium Change: decide le fasi delle attivita' per Release
+  // e della chiusura dei PBI sviluppati (si cambia da Modifica increment).
+  review_type: PhaseTemplate
   // JQL dei Planned/Unplanned PBI Done del Forecasting ({inizio_sviluppi} =
   // Inizio sviluppi effettivo); null = criterio delle label.
   planned_done_jql: string | null

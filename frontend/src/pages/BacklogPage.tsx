@@ -14,7 +14,7 @@ import { CodeFreezeCheck } from '../components/CodeFreezeCheck'
 import { SyncChangesModal } from '../components/SyncChangesModal'
 import { isMilestone } from '../lib/milestone'
 import type { ActivityPhase, BacklogItem, NonWorkingDay } from '../api/types'
-import { ACTIVITY_PHASES } from '../lib/activityPhases'
+import { activityPhasesFor } from '../lib/activityPhases'
 import { ArchivedItemsModal } from '../components/ArchivedItemsModal'
 import { BacklogGanttChart, type GanttBarChange } from '../components/BacklogGanttChart'
 import { DateOrNaInput } from '../components/DateOrNaInput'
@@ -706,7 +706,7 @@ export function BacklogPage() {
           }
         >
           <option value="">—</option>
-          {ACTIVITY_PHASES.map((p) => (
+          {activityPhasesFor(project.review_type).map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
             </option>
@@ -763,7 +763,7 @@ export function BacklogPage() {
               }}
             >
               <option value="">—</option>
-              {ACTIVITY_PHASES.map((p) => (
+              {activityPhasesFor(project.review_type).map((p) => (
                 <option key={p.value} value={p.value}>
                   {p.label}
                 </option>
@@ -2079,7 +2079,7 @@ export function BacklogPage() {
                   </div>
                   <div className="bulk-menu-row">
                     <span>Attività per Release</span>
-                    {ACTIVITY_PHASES.map((p) => (
+                    {activityPhasesFor(project.review_type).map((p) => (
                       <button
                         key={p.value}
                         className="btn"

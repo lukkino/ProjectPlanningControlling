@@ -136,6 +136,24 @@ class SubProject(Base):
         return next((v.actual_hours for v in snapshots[-1].sub_values if v.sub_project_id == self.id), 0.0)
 
 
+# Fasi delle attivita' per Release e della chiusura dei PBI sviluppati
+# (BacklogItem.activity_phase / closure_phase) per tipo di increment.
+REVIEW_TYPE_PHASES = {
+    "full_review": ("execution", "deployment", "release"),
+    "medium_change": ("medium_change",),
+}
+
+
+def activity_phase_for(review_type: str | None, value: str | None) -> str | None:
+    """La fase valida per il tipo di increment: in un Medium Change tutto
+    va sulla review di Medium Change; tornando a Full Review, Medium Change
+    diventa Execution."""
+    if value is None:
+        return None
+    allowed = REVIEW_TYPE_PHASES.get(review_type or "full_review", REVIEW_TYPE_PHASES["full_review"])
+    return value if value in allowed else allowed[0]
+
+
 class Project(Base):
     """Un rilascio (es. "PTBSYS-03-004"), sincronizzato da Jira via una fix
     version: modello UI "Increment". Puo' avere piu' Increment (Progetto)
@@ -177,6 +195,12 @@ class Project(Base):
     # propone di spostare le successive che finirebbero prima (e avvisa se la
     # fase andrebbe prima della precedente). Disattivabile per increment.
     keep_phase_order: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Tipo di increment: "full_review" (Execution, Deployment e Release to
+    # Market) o "medium_change" (la sola review di Medium Change, che vale
+    # come rilascio). Decide le fasi delle attivita' per Release e della
+    # chiusura dei PBI sviluppati (vedi activity_phase_for); si cambia con
+    # PUT /api/projects/{id}/review-type.
+    review_type: Mapped[str] = mapped_column(String(32), default="full_review")
     # JQL dei Planned e Unplanned PBI Done per le simulazioni del
     # Forecasting (come nel foglio Excel); {inizio_sviluppi} = Inizio
     # sviluppi effettivo (o Project start). Vuote = le JQL predefinite

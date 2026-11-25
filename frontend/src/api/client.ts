@@ -318,6 +318,10 @@ export const api = {
     // scope_change_note: motivo della modifica dello Scope congelato.
     update: (id: number, data: Partial<Project> & { scope_change_note?: string | null }) =>
       put<ProjectDetail>(`/projects/${id}`, data),
+    // Cambia il tipo di increment (anche in corsa); adjustPhases sistema
+    // anche le fasi (Execution/Deployment/Release to Market <-> Medium Change).
+    changeReviewType: (id: number, reviewType: PhaseTemplate, adjustPhases: boolean) =>
+      put<ProjectDetail>(`/projects/${id}/review-type`, { review_type: reviewType, adjust_phases: adjustPhases }),
     remove: (id: number) => del(`/projects/${id}`),
     scopeHistory: (id: number) => request<ScopeHistory>(`/projects/${id}/scope/history`),
     freezeScope: (id: number, note: string | null) => post<ScopeHistory>(`/projects/${id}/scope/freeze`, { note }),

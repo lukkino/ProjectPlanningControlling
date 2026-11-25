@@ -22,8 +22,8 @@ import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
 import { SyncProgressModal } from '../components/SyncProgressModal'
-import type { BacklogItem, Complaint, Phase } from '../api/types'
-import { ACTIVITY_PHASES, activityPhaseInfo, normalizePhaseName } from '../lib/activityPhases'
+import type { BacklogItem, Complaint, Phase, PhaseTemplate } from '../api/types'
+import { ACTIVITY_PHASES, activityPhaseInfo, activityPhasesFor, normalizePhaseName } from '../lib/activityPhases'
 import { planningLabel } from '../lib/backlogStats'
 import { dateStrToEpochDays, formatDateTime, formatEpochDaysAsDate, formatIsoDate, latestSyncedAt, workingDaysBetween } from '../lib/dates'
 import { SalesforceCaseLinks } from './ComplaintsPage'
@@ -296,11 +296,13 @@ type RecentlyClosedPeriod = (typeof RECENTLY_CLOSED_PERIODS)[number]
 function RecentlyClosedCard({
   items,
   phases,
+  reviewType,
   period,
   setPeriod,
 }: {
   items: BacklogItem[] | undefined
   phases: Phase[] | undefined
+  reviewType: PhaseTemplate
   period: RecentlyClosedPeriod
   setPeriod: (period: RecentlyClosedPeriod) => void
 }) {
@@ -325,18 +327,18 @@ function RecentlyClosedCard({
       help: 'PBI ancora da iniziare con "Incluso in codefreeze".',
       items: toDo.filter((i) => i.included_in_codefreeze),
     },
-    ...ACTIVITY_PHASES.map((phase) => ({
+    ...activityPhasesFor(reviewType).map((phase, index, list) => ({
       key: phase.value,
       title: `Da fare entro ${phase.label}`,
       date: phaseDate(phase.phaseName),
       help:
-        phase.value === 'release'
-          ? 'Release to Market activities e tutti gli altri PBI in scope ancora da iniziare, non inclusi nel code freeze.'
+        index === list.length - 1
+          ? `${phase.label} activities e tutti gli altri PBI in scope ancora da iniziare, non inclusi nel code freeze.`
           : `${phase.label} activities ancora da iniziare.`,
       items: toDo.filter((i) => {
         const activity = activityPhaseInfo(i)
         if (activity) return activity.value === phase.value
-        return phase.value === 'release' && !i.included_in_codefreeze
+        return index === list.length - 1 && !i.included_in_codefreeze
       }),
     })),
   ]
@@ -835,7 +837,13 @@ export function DashboardPage() {
 
       <EarnedValueSection projectId={project.id} />
 
-      <RecentlyClosedCard items={backlogItems} phases={phases} period={closedPeriod} setPeriod={setClosedPeriod} />
+      <RecentlyClosedCard
+        items={backlogItems}
+        phases={phases}
+        reviewType={project.review_type}
+        period={closedPeriod}
+        setPeriod={setClosedPeriod}
+      />
 
       <ComplaintsCard items={backlogItems} complaints={complaints} />
 

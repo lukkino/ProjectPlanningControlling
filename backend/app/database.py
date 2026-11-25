@@ -402,6 +402,26 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_status VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_status_checked_at DATETIME"))
+        if "review_type" not in project_columns:
+            # Tipo di increment dedotto dalle fasi: Medium Change se ne ha una
+            # con quel nome; le attivita' per Release e le chiusure dei suoi
+            # PBI vanno sulla review di Medium Change.
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN review_type VARCHAR(32) DEFAULT 'full_review'"))
+                conn.execute(text("UPDATE projects SET review_type = 'full_review'"))
+                conn.execute(
+                    text(
+                        "UPDATE projects SET review_type = 'medium_change' WHERE id IN "
+                        "(SELECT project_id FROM phases WHERE lower(trim(name)) = 'medium change')"
+                    )
+                )
+                for column in ("activity_phase", "closure_phase"):
+                    conn.execute(
+                        text(
+                            f"UPDATE backlog_items SET {column} = 'medium_change' WHERE {column} IS NOT NULL "
+                            "AND project_id IN (SELECT id FROM projects WHERE review_type = 'medium_change')"
+                        )
+                    )
         if "co_software_involved" not in project_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_software_involved BOOLEAN"))

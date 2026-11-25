@@ -12,8 +12,9 @@ type Props = {
   onClose: () => void
 }
 
-// Tipo di increment, scelto solo alla creazione: decide le fasi iniziali
-// (poi si aggiungono e tolgono a mano dalla Dashboard).
+// Tipo di increment: alla creazione decide le fasi iniziali; poi si puo'
+// cambiare anche in corsa (Modifica increment), sistemando le fasi e le fasi
+// delle attivita' per Release (vedi PUT /projects/{id}/review-type).
 const PHASE_TEMPLATES: { value: PhaseTemplate; label: string; phases: string }[] = [
   {
     value: 'full_review',
@@ -48,12 +49,14 @@ export function ProjectFormModal({ project, onClose }: Props) {
         }
       : emptyForm,
   )
-  const [phaseTemplate, setPhaseTemplate] = useState<PhaseTemplate>('full_review')
+  const [phaseTemplate, setPhaseTemplate] = useState<PhaseTemplate>(project?.review_type ?? 'full_review')
+  const typeChanged = !!project && phaseTemplate !== project.review_type
+  const [adjustPhases, setAdjustPhases] = useState(true)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const payload: Partial<Project> = {
         ...form,
         scope: form.scope || null,
@@ -64,11 +67,15 @@ export function ProjectFormModal({ project, onClose }: Props) {
       // Lo Scope di un increment esistente si modifica direttamente dalla
       // Dashboard (ScopeCard, con formattazione): qui solo alla creazione.
       if (project) delete payload.scope
-      return project
-        ? api.projects.update(project.id, payload)
-        : api.projects.create({ ...payload, phase_template: phaseTemplate })
+      if (!project) return api.projects.create({ ...payload, phase_template: phaseTemplate })
+      const saved = await api.projects.update(project.id, payload)
+      return typeChanged ? api.projects.changeReviewType(project.id, phaseTemplate, adjustPhases) : saved
     },
     onSuccess: (saved) => {
+      if (typeChanged) {
+        // Fasi, attivita' per Release e sezioni della Dashboard cambiano.
+        for (const key of ['phases', 'backlog', 'dashboard']) queryClient.invalidateQueries({ queryKey: [key, saved.id] })
+      }
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project', saved.id] })
       // Stato delle cartelle Scenarios e review (impostate in questo form).
@@ -104,27 +111,37 @@ export function ProjectFormModal({ project, onClose }: Props) {
           <label>Nome</label>
           <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ProTube System Project" />
         </div>
-        {!project && (
-          <div className="form-row">
-            <label>Tipo di increment</label>
-            <div className="phase-template-options">
-              {PHASE_TEMPLATES.map((t) => (
-                <label key={t.value} className={`phase-template${phaseTemplate === t.value ? ' active' : ''}`}>
-                  <input
-                    type="radio"
-                    name="phase-template"
-                    checked={phaseTemplate === t.value}
-                    onChange={() => setPhaseTemplate(t.value)}
-                  />
-                  <span>
-                    <b>{t.label}</b>
-                    <span className="muted"> · fasi: {t.phases}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
+        <div className="form-row">
+          <label>Tipo di increment</label>
+          <div className="phase-template-options">
+            {PHASE_TEMPLATES.map((t) => (
+              <label key={t.value} className={`phase-template${phaseTemplate === t.value ? ' active' : ''}`}>
+                <input
+                  type="radio"
+                  name="phase-template"
+                  checked={phaseTemplate === t.value}
+                  onChange={() => setPhaseTemplate(t.value)}
+                />
+                <span>
+                  <b>{t.label}</b>
+                  <span className="muted"> · fasi: {t.phases}</span>
+                </span>
+              </label>
+            ))}
           </div>
-        )}
+          {typeChanged && (
+            <label style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+              <input type="checkbox" checked={adjustPhases} onChange={(e) => setAdjustPhases(e.target.checked)} />{' '}
+              {phaseTemplate === 'medium_change'
+                ? 'Sistema anche le fasi: elimina Execution, Deployment e Release to Market e aggiunge Medium Change (con le date di Release to Market) come fine pianificata'
+                : 'Sistema anche le fasi: aggiunge Execution, Deployment e Release to Market (con le date di Medium Change) come fine pianificata ed elimina Medium Change'}
+              <span className="muted">
+                {' '}
+                · Le attività per Release e le chiusure dei PBI sviluppati passano comunque alle fasi del nuovo tipo.
+              </span>
+            </label>
+          )}
+        </div>
         {!project && (
           <div className="form-row">
             <label>Scope</label>

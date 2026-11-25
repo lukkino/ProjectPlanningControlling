@@ -146,7 +146,7 @@ def set_project_pinned(project_id: int, payload: schemas.SidebarPin, db: Session
 def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
     template = data.pop("phase_template", "full_review")
-    project = models.Project(**data, owner_id=scope_user_id())
+    project = models.Project(**data, owner_id=scope_user_id(), review_type=template)
     db.add(project)
     db.flush()  # assegna project.id, serve per le fasi sotto
     for order, name in enumerate(PHASE_TEMPLATES[template], start=1):
@@ -346,6 +346,75 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
     phase = db.get(models.Phase, phase_id)
     if phase is None:
         raise HTTPException(status_code=404, detail="Fase non trovata")
+    _remove_phase(db, phase)
+    db.commit()
+
+
+# Fasi che esistono solo in un increment Full Review (dopo il code freeze).
+FULL_REVIEW_ONLY_PHASES = ["Execution", "Deployment", RELEASE_TO_MARKET_PHASE_NAME]
+
+
+@router.put("/{project_id}/review-type", response_model=schemas.ProjectDetail)
+def change_review_type(project_id: int, payload: schemas.ReviewTypeChange, db: Session = Depends(get_db)):
+    """Cambia il tipo di increment (anche in corsa). Le attivita' per Release
+    e le chiusure dei PBI sviluppati passano alle fasi del nuovo tipo (vedi
+    models.activity_phase_for); con adjust_phases si sistemano anche le fasi
+    dell'increment."""
+    project = _get_project_or_404(db, project_id)
+    project.review_type = payload.review_type
+    for item in project.all_backlog_items:
+        item.activity_phase = models.activity_phase_for(project.review_type, item.activity_phase)
+        item.closure_phase = models.activity_phase_for(project.review_type, item.closure_phase)
+    if payload.adjust_phases:
+        _adjust_phases(db, project)
+    sync_phase_dates(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def _adjust_phases(db: Session, project: models.Project) -> None:
+    """Medium Change: via Execution, Deployment e Release to Market, la
+    review di Medium Change (con le date di Release to Market, se la crea)
+    e' la fine pianificata. Full Review: l'inverso, Release to Market prende
+    le date di Medium Change. Le altre fasi restano."""
+    next_order = max((p.order for p in project.phases), default=0) + 1
+
+    def add(name: str, dates_from: models.Phase | None) -> models.Phase:
+        nonlocal next_order
+        phase = models.Phase(
+            project_id=project.id,
+            name=name,
+            order=next_order,
+            original_date=dates_from.original_date if dates_from else None,
+            planned_date=dates_from.planned_date if dates_from else None,
+            actual_date=dates_from.actual_date if dates_from else None,
+        )
+        next_order += 1
+        db.add(phase)
+        db.flush()
+        db.refresh(project)
+        return phase
+
+    if project.review_type == "medium_change":
+        rtm = _find_phase(project, RELEASE_TO_MARKET_PHASE_NAME)
+        finish = _find_phase(project, MEDIUM_CHANGE_PHASE_NAME) or add(MEDIUM_CHANGE_PHASE_NAME, rtm)
+        for name in FULL_REVIEW_ONLY_PHASES:
+            phase = _find_phase(project, name)
+            if phase is not None:
+                _remove_phase(db, phase)
+    else:
+        medium = _find_phase(project, MEDIUM_CHANGE_PHASE_NAME)
+        for name in FULL_REVIEW_ONLY_PHASES:
+            if _find_phase(project, name) is None:
+                add(name, medium if name == RELEASE_TO_MARKET_PHASE_NAME else None)
+        finish = _find_phase(project, RELEASE_TO_MARKET_PHASE_NAME)
+        if medium is not None:
+            _remove_phase(db, medium)
+    project.finish_phase_id = finish.id
+
+
+def _remove_phase(db: Session, phase: models.Phase) -> None:
     project = phase.project
     for item in db.query(models.BacklogItem).filter(models.BacklogItem.milestone_phase_id == phase.id):
         item.milestone_phase_id = None
@@ -358,7 +427,6 @@ def delete_phase(phase_id: int, db: Session = Depends(get_db)):
     db.flush()
     db.refresh(project)
     sync_phase_dates(project)
-    db.commit()
 
 
 # ---------- Giorni non lavorativi ----------

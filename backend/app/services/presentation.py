@@ -84,7 +84,15 @@ ACTIVITY_PHASES = [
     ("execution", "Execution", "execution", RGBColor(0x2F, 0x6F, 0xED)),
     ("deployment", "Deployment", "deployment", RGBColor(0x7C, 0x4D, 0xBD)),
     ("release", "Release to Market", "release to market", RGBColor(0x0F, 0x9D, 0x8A)),
+    ("medium_change", "Medium Change", "medium change", RGBColor(0x0F, 0x9D, 0x8A)),
 ]
+
+
+def _activity_phases(project: models.Project) -> list:
+    """Le fasi delle attivita' per il tipo di increment (Full Review o
+    Medium Change, vedi models.REVIEW_TYPE_PHASES)."""
+    allowed = models.REVIEW_TYPE_PHASES.get(project.review_type or "full_review", models.REVIEW_TYPE_PHASES["full_review"])
+    return [p for p in ACTIVITY_PHASES if p[0] in allowed]
 
 
 def _activity_phase(item: models.BacklogItem) -> tuple[str, str, str, RGBColor] | None:
@@ -722,11 +730,14 @@ def _recently_closed_slides(deck: _Deck, project: models.Project, days: int) -> 
         activity = _activity_phase(item)
         if activity:
             return activity[0] == value
-        return value == "release" and not item.included_in_codefreeze
+        # Gli altri PBI non del code freeze: entro l'ultima fase (Release to
+        # Market o Medium Change).
+        return value == phases[-1][0] and not item.included_in_codefreeze
 
+    phases = _activity_phases(project)
     code_freeze_items = [i for i in to_do if i.included_in_codefreeze]
     to_do_sections = [(to_do_title("code freeze", "code freeze", len(code_freeze_items)), code_freeze_items)]
-    for value, label, phase_name, _ in ACTIVITY_PHASES:
+    for value, label, phase_name, _ in phases:
         phase_items = [i for i in to_do if in_phase(i, value)]
         to_do_sections.append((to_do_title(label, phase_name, len(phase_items)), phase_items))
     # (titolo della sezione, intestazione dell'ultima colonna, righe, testo se vuota)

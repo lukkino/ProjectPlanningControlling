@@ -147,6 +147,10 @@ def _project_has_baseline(item: models.BacklogItem) -> bool:
 def _apply_update(item: models.BacklogItem, data: dict) -> None:
     _normalize_closure(item, data)
     _normalize_activity(data)
+    # Fasi valide per il tipo di increment (Full Review o Medium Change).
+    for field in ("activity_phase", "closure_phase"):
+        if data.get(field):
+            data[field] = models.activity_phase_for(item.project.review_type, data[field])
     for field, value in data.items():
         setattr(item, field, value)
     # Item arrivato dopo la baseline dell'increment: la prende la prima volta
