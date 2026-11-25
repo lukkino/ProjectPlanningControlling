@@ -272,6 +272,12 @@ export type BacklogItem = {
   // Fase a cui serve l'attivita' di servizio (entro cui va fatta); null per
   // un item normale. Valorizzata se e solo se is_activity.
   activity_phase: ActivityPhase | null
+  // Sviluppato entro il code freeze, chiusura posticipata: giorno di fine
+  // sviluppo e fase entro cui si chiude; riaperto (segno tolto) dopo il code
+  // freeze, es. per un bug dai system test.
+  code_complete_on: string | null
+  closure_phase: ActivityPhase | null
+  reopened_after_freeze_on: string | null
   // Presentazione degli scenari collegata a mano (percorso di un file o
   // URL); se manca vale quella trovata nella cartella Scenarios.
   scenarios_link: string | null
@@ -768,6 +774,19 @@ export type DashboardMetrics = {
   completion_history: { date: string; done: number; total: number; percent: number }[]
   // Ore usate nel tempo dagli Storici dei progetti collegati.
   hours_history: { date: string; hours: number }[]
+  // PBI del code freeze sviluppati ma non ancora chiusi, e riaperti dopo il
+  // code freeze.
+  backlog_developed: DevelopedItem[]
+  reopened_after_freeze: DevelopedItem[]
+}
+
+export interface DevelopedItem {
+  jira_key: string
+  summary: string | null
+  status: string
+  closure_phase: ActivityPhase | null
+  code_complete_on: string | null
+  reopened_after_freeze_on: string | null
 }
 
 // Team a cui sono assegnati i PBI: JQL base diversa (issuetype/label) per

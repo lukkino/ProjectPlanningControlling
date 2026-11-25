@@ -95,7 +95,9 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
     # Stessa regola di Backlog, Andamento e Forecasting: solo i PBI del code
     # freeze (fuori le story senza sviluppi e le attivita' di servizio).
     codefreeze_items = [i for i in items if i.counts_for_codefreeze]
-    done_items = [i for i in codefreeze_items if i.status == "Done"]
+    # Completati per il code freeze: Done o sviluppati con chiusura
+    # posticipata (BacklogItem.is_code_complete).
+    done_items = [i for i in codefreeze_items if i.is_code_complete]
 
     backlog_total = len(items)
     backlog_in_scope = len(codefreeze_items)
@@ -158,20 +160,33 @@ def compute_dashboard_metrics(project: models.Project) -> schemas.DashboardMetri
         phases=list(project.phases),
         completion_history=completion_history(project),
         hours_history=hours_history(project),
+        backlog_developed=[_developed(i) for i in codefreeze_items if i.is_developed],
+        reopened_after_freeze=[_developed(i) for i in codefreeze_items if i.reopened_after_freeze_on],
+    )
+
+
+def _developed(item: models.BacklogItem) -> schemas.DevelopedItem:
+    return schemas.DevelopedItem(
+        jira_key=item.jira_key,
+        summary=item.summary,
+        status=item.status,
+        closure_phase=item.closure_phase,
+        code_complete_on=item.code_complete_on,
+        reopened_after_freeze_on=item.reopened_after_freeze_on,
     )
 
 
 def completion_history(project: models.Project) -> list[schemas.CompletionPoint]:
     """% di completamento nel tempo, ricostruita dal backlog di oggi: sui PBI
-    del code freeze (stessa regola del Completamento backlog), i Done
-    contano dal giorno della loro Fine effettiva (un Done senza Fine
-    effettiva conta da oggi). Il totale e' quello di oggi: le aggiunte allo
+    del code freeze (stessa regola del Completamento backlog), i completati
+    contano dal giorno della fine dello sviluppo se segnata, altrimenti
+    della Fine effettiva (senza data, da oggi). Il totale e' quello di oggi: le aggiunte allo
     scope non si vedono nel tempo. Un punto all'inizio dell'increment, uno
     per ogni giorno con delle chiusure e uno oggi."""
     items = [i for i in project.backlog_items if i.counts_for_codefreeze]
     total = len(items)
     today = dt.date.today()
-    finishes = sorted(min(i.actual_finish or today, today) for i in items if i.status == "Done")
+    finishes = sorted(min(i.code_complete_date or today, today) for i in items if i.is_code_complete)
     start = project.start_date or (finishes[0] if finishes else today)
     if not total or start > today:
         return []

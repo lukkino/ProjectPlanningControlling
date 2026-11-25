@@ -9,6 +9,9 @@ import { workingDaysBetween } from './dates'
 //   da entrambe.
 export const countsForCodefreeze = (i: BacklogItem) => i.in_scope && i.included_in_codefreeze
 export const isInPlan = (i: BacklogItem) => i.in_scope && (i.included_in_codefreeze || i.is_activity)
+// Sviluppato entro il code freeze, chiusura posticipata (es. durante i system
+// test): completato per il code freeze ma non ancora Done.
+export const isDeveloped = (i: BacklogItem) => i.status !== 'Done' && !!i.code_complete_on
 
 // Conteggi condivisi tra BacklogPage (riga di stat in cima), ForecastingPage
 // (default di #PBI Remaining su una nuova simulazione) e SnapshotsPage
@@ -22,7 +25,8 @@ export function countBacklogStats(items: BacklogItem[]) {
   const totalInScopeCount = items.filter((i) => i.in_scope).length
   const codefreezeItems = items.filter(countsForCodefreeze)
   const doneCount = codefreezeItems.filter((i) => i.status === 'Done').length
-  const remainingCount = codefreezeItems.length - doneCount
+  const developedCount = codefreezeItems.filter(isDeveloped).length
+  const remainingCount = codefreezeItems.length - doneCount - developedCount
   // Somma su TUTTI gli item (non solo in-scope), coerente con la stat "Ore
   // loggate" della Dashboard (backend/app/services/metrics.py).
   const loggedHoursTotal = items.reduce((sum, i) => sum + (i.logged_hours ?? 0), 0)
@@ -30,6 +34,7 @@ export function countBacklogStats(items: BacklogItem[]) {
     totalInScopeCount,
     codefreezeCount: codefreezeItems.length,
     doneCount,
+    developedCount,
     remainingCount,
     loggedHoursTotal,
   }

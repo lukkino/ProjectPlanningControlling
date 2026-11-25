@@ -22,7 +22,7 @@ import { NonWorkingDaysModal, type NewNonWorkingDay } from '../components/NonWor
 import { ScenarioLinkModal } from '../components/ScenarioLinkModal'
 import { StatusBadge } from '../components/StatusBadge'
 import { SyncProgressModal } from '../components/SyncProgressModal'
-import { countBacklogStats, countsForCodefreeze, trimmedMeanDuration } from '../lib/backlogStats'
+import { countBacklogStats, countsForCodefreeze, isDeveloped, trimmedMeanDuration } from '../lib/backlogStats'
 import { formatDateTime, formatIsoDate, latestSyncedAt, workingDaysBetween } from '../lib/dates'
 import {
   addWorkingDays,
@@ -98,6 +98,7 @@ const DEFAULT_COLUMN_WIDTH: Record<string, number> = {
   issue_type: 70,
   in_scope: 60,
   included_in_codefreeze: 80,
+  closure_phase: 130,
   is_activity: 120,
   status: 70,
   refinement_date: 130,
@@ -713,6 +714,73 @@ export function BacklogPage() {
         </select>
       ),
     },
+    {
+      // PBI del code freeze sviluppato entro il code freeze ma chiuso dopo
+      // (es. durante i system test prima dell'Execution Review): conta come
+      // completato per il code freeze e resta aperto fino alla fase scelta.
+      // Togliere il segno dopo il code freeze (es. un bug dai system test) lo
+      // registra come modifica al codice dopo il code freeze.
+      key: 'closure_phase',
+      label: 'Sviluppato, chiusura in',
+      className: 'editable-cell',
+      render: (item) => {
+        const reopened = item.reopened_after_freeze_on && (
+          <span
+            style={{ fontSize: 10, color: 'var(--danger)' }}
+            title="Segno di sviluppato tolto dopo il code freeze: modifica al codice dopo il code freeze (es. bug dai system test)"
+          >
+            ⚠ riaperto il {formatIsoDate(item.reopened_after_freeze_on)}
+          </span>
+        )
+        if (!countsForCodefreeze(item)) return <span className="muted">—</span>
+        if (item.status === 'Done')
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {item.code_complete_on ? (
+                <span className="muted">sviluppato il {formatIsoDate(item.code_complete_on)}</span>
+              ) : (
+                <span className="muted">—</span>
+              )}
+              {reopened}
+            </div>
+          )
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <select
+              value={item.closure_phase ?? ''}
+              title="Sviluppato entro il code freeze ma chiuso dopo (es. durante i system test): conta come completato per il code freeze e resta aperto fino alla fase scelta"
+              onChange={(e) => {
+                const value = (e.target.value || null) as ActivityPhase | null
+                if (
+                  !value &&
+                  item.code_complete_on &&
+                  !confirm(
+                    `Togliere il segno di sviluppato da ${item.jira_key}? Dopo il code freeze viene registrato come modifica al codice dopo il code freeze (es. bug dai system test).`,
+                  )
+                )
+                  return
+                update.mutate({ id: item.id, data: { closure_phase: value } })
+              }}
+            >
+              <option value="">—</option>
+              {ACTIVITY_PHASES.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {item.code_complete_on && (
+              <DateInput
+                value={item.code_complete_on}
+                title="Giorno in cui lo sviluppo è finito"
+                onChange={(value) => value && update.mutate({ id: item.id, data: { code_complete_on: value } })}
+              />
+            )}
+            {reopened}
+          </div>
+        )
+      },
+    },
     { key: 'status', label: 'Stato', render: (item) => <StatusBadge status={item.status} jiraStatus={item.jira_status} /> },
     {
       key: 'refinement_date',
@@ -1240,7 +1308,7 @@ export function BacklogPage() {
     setDraggedCol(null)
   }
 
-  const { totalInScopeCount, codefreezeCount, doneCount, remainingCount } = countBacklogStats(items ?? [])
+  const { totalInScopeCount, codefreezeCount, doneCount, developedCount, remainingCount } = countBacklogStats(items ?? [])
   const avgDuration = trimmedMeanDuration(items ?? [])
 
   // Ultima sync Jira di QUESTO progetto (vedi latestSyncedAt).
@@ -1255,7 +1323,7 @@ export function BacklogPage() {
   const latestSimulation =
     [...(simulations ?? [])].reverse().find((s) => s.pbi_completed_by_deadline_85pct != null) ?? null
   const forecastTarget = latestSimulation?.pbi_completed_by_deadline_85pct ?? null
-  const forecastCandidates = (items ?? []).filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
+  const forecastCandidates = (items ?? []).filter((i) => countsForCodefreeze(i) && i.status !== 'Done' && !isDeveloped(i))
   const forecastHighlightIds = new Set(
     forecastTarget != null ? forecastCandidates.slice(0, forecastTarget).map((i) => i.id) : [],
   )
@@ -1593,6 +1661,15 @@ export function BacklogPage() {
           <span className="value">{doneCount}</span>
           <span className="label">Done</span>
         </div>
+        {developedCount > 0 && (
+          <div
+            className="stat-chip green"
+            title="Sviluppati entro il code freeze, chiusi dopo (colonna Sviluppato, chiusura in): contano come completati per il code freeze"
+          >
+            <span className="value">{developedCount}</span>
+            <span className="label">Sviluppati, chiusura posticipata</span>
+          </div>
+        )}
         <div className="stat-chip orange">
           <span className="value">{remainingCount}</span>
           <span className="label">Rimanenti (In Progress + To Do)</span>

@@ -94,6 +94,30 @@ def _normalize_activity(data: dict) -> None:
         data["activity_phase"] = None
 
 
+def _normalize_closure(item: models.BacklogItem, data: dict) -> None:
+    """Sviluppato, chiusura posticipata (models.BacklogItem.code_complete_on).
+    Scegliere la fase di chiusura lo segna: resta (o torna) nel code freeze
+    e, se manca, la fine dello sviluppo e' oggi (al massimo il code freeze).
+    Togliere la fase toglie il segno; se succede dopo il code freeze su un
+    PBI non ancora Done (es. un bug dai system test) lo registra come
+    riaperto dopo il code freeze. Diventare attivita' per Release o uscire
+    dal code freeze toglie il segno senza registrarlo."""
+    today = dt.date.today()
+    freeze = item.project.code_freeze_date
+    if data.get("closure_phase"):
+        data["included_in_codefreeze"] = True
+        data["activity_phase"] = None
+        if item.code_complete_on is None and data.get("code_complete_on") is None:
+            data["code_complete_on"] = min(today, freeze) if freeze else today
+    elif "closure_phase" in data:
+        if item.code_complete_on is not None and freeze and today > freeze and item.status != "Done":
+            data.setdefault("reopened_after_freeze_on", today)
+        data["code_complete_on"] = None
+    elif data.get("activity_phase") or data.get("is_activity") or data.get("included_in_codefreeze") is False:
+        data["closure_phase"] = None
+        data["code_complete_on"] = None
+
+
 def _link_milestone(item: models.BacklogItem, phase_id: int) -> None:
     """Collega la milestone a una fase dello stesso increment: ne prende la
     data e la fase non resta collegata ad altre milestone."""
@@ -121,6 +145,7 @@ def _project_has_baseline(item: models.BacklogItem) -> bool:
 
 
 def _apply_update(item: models.BacklogItem, data: dict) -> None:
+    _normalize_closure(item, data)
     _normalize_activity(data)
     for field, value in data.items():
         setattr(item, field, value)

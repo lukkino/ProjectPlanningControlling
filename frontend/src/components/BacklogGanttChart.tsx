@@ -1537,6 +1537,20 @@ export function BacklogGanttChart({
                     {activityPhaseInfo(item)?.label}
                   </span>
                 )}
+                {item.code_complete_on && item.status !== 'Done' && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      display: 'block',
+                      color: ACTIVITY_PHASES.find((p) => p.value === item.closure_phase)?.color,
+                    }}
+                    title={`Sviluppato il ${formatIsoDate(item.code_complete_on)}: completato per il code freeze, si chiude in ${
+                      ACTIVITY_PHASES.find((p) => p.value === item.closure_phase)?.label ?? 'Execution'
+                    }`}
+                  >
+                    ✓ dev · {ACTIVITY_PHASES.find((p) => p.value === item.closure_phase)?.label ?? 'Execution'}
+                  </span>
+                )}
               </div>
               {row === cutoffRow && <div className="gantt-forecast-cutoff" style={{ height: CUTOFF_BAND_HEIGHT }} />}
             </Fragment>

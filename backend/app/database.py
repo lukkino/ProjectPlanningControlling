@@ -236,6 +236,12 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN activity_phase VARCHAR(32)"))
                 conn.execute(text("UPDATE backlog_items SET activity_phase = 'execution' WHERE is_activity = 1"))
+        if "code_complete_on" not in backlog_columns:
+            # PBI sviluppati entro il code freeze, chiusi dopo (BacklogItem.code_complete_on).
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN code_complete_on DATE"))
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN closure_phase VARCHAR(32)"))
+                conn.execute(text("ALTER TABLE backlog_items ADD COLUMN reopened_after_freeze_on DATE"))
         if "scenarios_link" not in backlog_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE backlog_items ADD COLUMN scenarios_link TEXT"))

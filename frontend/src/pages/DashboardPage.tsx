@@ -44,7 +44,9 @@ const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%
 
 const COMPLETION_HELP =
   'PBI Done su PBI totali del code freeze: item in scope e "Incluso in codefreeze", come nel Backlog ' +
-  "e nel Forecasting. Non contano le story senza sviluppi né le attività per Release. Sempre dal backlog di oggi."
+  "e nel Forecasting. Non contano le story senza sviluppi né le attività per Release. Sempre dal backlog di oggi.\n\n" +
+  'Contano come completati anche i PBI sviluppati entro il code freeze ma chiusi dopo (colonna "Sviluppato, chiusura in" ' +
+  'del Backlog): restano aperti fino alla fase scelta.'
 
 const HOURS_HELP =
   'Ore usate: le ore consuntivate (controlling), inserite nel Consumo risorse dei progetti. Con progetti collegati ' +
@@ -752,6 +754,32 @@ export function DashboardPage() {
                 i
               </span>
             </span>
+            {metrics && metrics.backlog_developed.length > 0 && (
+              <span
+                className="muted"
+                style={{ fontSize: 11 }}
+                title={metrics.backlog_developed.map((d) => `${d.jira_key} ${d.summary ?? ''}`).join('\n')}
+              >
+                di cui {metrics.backlog_developed.length} sviluppati, chiusura in{' '}
+                {[
+                  ...new Set(
+                    metrics.backlog_developed.map(
+                      (d) => ACTIVITY_PHASES.find((p) => p.value === d.closure_phase)?.label ?? 'Execution',
+                    ),
+                  ),
+                ].join(', ')}
+              </span>
+            )}
+            {metrics && metrics.reopened_after_freeze.length > 0 && (
+              <span
+                style={{ fontSize: 11, color: 'var(--danger)' }}
+                title={metrics.reopened_after_freeze
+                  .map((d) => `${d.jira_key} riaperto il ${formatIsoDate(d.reopened_after_freeze_on)}`)
+                  .join('\n')}
+              >
+                ⚠ {metrics.reopened_after_freeze.length} riaperti dopo il code freeze
+              </span>
+            )}
           </div>
           <div className="stat">
             <span className="value">{metrics?.logged_hours_total ?? 0} h</span>
@@ -830,9 +858,27 @@ export function DashboardPage() {
                   tickFormatter={formatEpochDaysAsDate}
                   tick={{ fontSize: 12 }}
                 />
-                <YAxis tick={{ fontSize: 12 }} label={{ value: 'Ore', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#898781' } }} />
+                {/* Fino al budget ore dei progetti collegati (o oltre, se le ore lo superano). */}
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  domain={[0, (dataMax: number) => Math.ceil(Math.max(dataMax, metrics?.budget_hours_total ?? 0) * 1.05)]}
+                  label={{ value: 'Ore', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: '#898781' } }}
+                />
                 <Tooltip labelFormatter={(v) => formatEpochDaysAsDate(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
+                {!!metrics?.budget_hours_total && (
+                  <ReferenceLine
+                    y={metrics.budget_hours_total}
+                    stroke={COLOR_CODE_FREEZE}
+                    strokeDasharray="6 4"
+                    label={{
+                      value: `Budget ${metrics.budget_hours_total.toLocaleString('it-IT')} h`,
+                      position: 'insideTopLeft',
+                      fill: COLOR_CODE_FREEZE,
+                      fontSize: 12,
+                    }}
+                  />
+                )}
                 <Line
                   type="monotone"
                   dataKey="actualHours"

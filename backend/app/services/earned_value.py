@@ -4,14 +4,16 @@ Regole (stesse di frontend/src/lib/earnedValue.ts per la % in Backlog e Gantt):
 - perimetro: i PBI del piano (in scope, code freeze o attivita' per Release),
   non archiviati, senza le milestone;
 - budget di un PBI: stima dev + stima test; se mancano, Sizing (gg) x 8 h;
-- % di completamento: Done = 100%, altrimenti 0% (solo tempi: le ore
+- % di completamento: Done o sviluppato (chiusura posticipata, vedi
+  BacklogItem.code_complete_on) = 100%, altrimenti 0% (solo tempi: le ore
   loggate su Jira non sono attendibili e non entrano nel calcolo);
 - PV: il budget distribuito sui giorni lavorativi della baseline (se manca,
   le date aggiornate; per un PBI chiuso senza piano, le date effettive);
 - EV = budget x % completamento, cioe' il budget dei PBI Done.
 
 L'andamento nel tempo dell'EV e' ricostruito: il valore di un PBI Done e'
-guadagnato il giorno della sua Fine effettiva (oggi se manca).
+guadagnato il giorno della fine dello sviluppo se segnata, altrimenti della
+sua Fine effettiva (oggi se manca).
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ def item_budget(item: models.BacklogItem) -> tuple[float | None, str | None]:
 
 
 def item_completion(item: models.BacklogItem, budget: float | None) -> float | None:
-    if item.status == "Done":
+    if item.is_code_complete:
         return 1.0
     if not budget:
         return None
@@ -200,8 +202,8 @@ def compute_earned_value(project: models.Project, today: dt.date | None = None) 
 
         # EV nel tempo: guadagnato il giorno della Fine effettiva (oggi se
         # manca o e' nel futuro).
-        if done and ev:
-            finish = min(item.actual_finish or today, today)
+        if item.is_code_complete and ev:
+            finish = min(item.code_complete_date or today, today)
             ev_daily[finish] = ev_daily.get(finish, 0.0) + ev
 
     for row, own in item_pv_daily:

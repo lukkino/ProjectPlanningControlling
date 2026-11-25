@@ -876,6 +876,18 @@ class BacklogItem(Base):
     # un item normale. is_activity e' True se e solo se e' valorizzata
     # (allineati da routers/backlog.py::_apply_update).
     activity_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # PBI del code freeze sviluppato entro il code freeze ma chiuso dopo (es.
+    # durante i system test, prima dell'Execution Review): code_complete_on
+    # e' il giorno in cui lo sviluppo e' finito, closure_phase la fase entro
+    # cui si chiude ("execution", "deployment" o "release"). Conta come
+    # completato per il code freeze e resta aperto per la Release (vedi
+    # is_developed). reopened_after_freeze_on: il segno di sviluppato e'
+    # stato tolto dopo il code freeze (es. un bug dai system test), cioe'
+    # una modifica al codice dopo il code freeze. Campi manuali: la sync
+    # Jira non li tocca.
+    code_complete_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    closure_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reopened_after_freeze_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # Milestone (vedi is_milestone) collegata a una fase dell'increment:
     # Start e Fine pian. sono la data della fase (vedi align_milestone),
     # riallineate quando cambia la fase o lo stato su Jira. Una per fase.
@@ -906,6 +918,23 @@ class BacklogItem(Base):
     @property
     def is_in_plan(self) -> bool:
         return self.in_scope and (self.included_in_codefreeze or self.is_activity)
+
+    @property
+    def is_developed(self) -> bool:
+        """Sviluppato entro il code freeze, chiusura posticipata: non ancora
+        Done ma con lo sviluppo finito."""
+        return self.code_complete_on is not None and self.status != "Done"
+
+    @property
+    def is_code_complete(self) -> bool:
+        """Completato per il code freeze: Done oppure sviluppato."""
+        return self.status == "Done" or self.code_complete_on is not None
+
+    @property
+    def code_complete_date(self) -> dt.date | None:
+        """Giorno in cui conta come completato: fine dello sviluppo se
+        segnata, altrimenti la Fine effettiva."""
+        return self.code_complete_on or self.actual_finish
 
     planned: Mapped[bool] = mapped_column(Boolean, default=False)
     planned_duration_days: Mapped[float | None] = mapped_column(Float, nullable=True)

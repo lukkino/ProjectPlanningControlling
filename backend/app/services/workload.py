@@ -122,7 +122,8 @@ def compute_workload(
     for project in projects:
         off = calendars[project.id]
         for item in project.backlog_items:
-            if not in_earned_value_scope(item) or item.status == "Done":
+            # Sviluppati con chiusura posticipata: lo sviluppo e' finito.
+            if not in_earned_value_scope(item) or item.status == "Done" or item.is_developed:
                 continue
             name = (item.assignee or "").strip() or UNASSIGNED
             projects_of[name].add(project.id)

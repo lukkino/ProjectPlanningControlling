@@ -13,7 +13,8 @@ export function itemBudget(item: BacklogItem): number | null {
 }
 
 export function itemCompletion(item: BacklogItem): number | null {
-  if (item.status === 'Done') return 1
+  // Done o sviluppato con chiusura posticipata (code_complete_on).
+  if (item.status === 'Done' || item.code_complete_on) return 1
   const budget = itemBudget(item)
   if (!budget) return null
   return 0

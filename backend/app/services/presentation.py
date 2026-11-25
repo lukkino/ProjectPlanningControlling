@@ -578,6 +578,13 @@ def _scope_slides(deck: _Deck, project: models.Project) -> None:
                 _run(p, "  \U0001F680", size=font_size)
 
 
+def _developed_note(developed) -> str:
+    """Nota sotto il completamento: PBI sviluppati, chiusura posticipata."""
+    labels = {p[0]: p[1] for p in ACTIVITY_PHASES}
+    phases = sorted({labels.get(d.closure_phase, "Execution") for d in developed})
+    return f"di cui {len(developed)} sviluppati, chiusura in {', '.join(phases)}"
+
+
 def _kpi_slide(deck: _Deck, project: models.Project) -> None:
     metrics = compute_dashboard_metrics(project)
     slide, box = deck.add_slide("Indicatori")
@@ -589,7 +596,12 @@ def _kpi_slide(deck: _Deck, project: models.Project) -> None:
             _pct(metrics.percent_complete),
             COLOR_TEXT,
             f"Completamento backlog ({metrics.backlog_done}/{metrics.backlog_in_scope})",
-            [],
+            ([(_developed_note(metrics.backlog_developed), COLOR_MUTED)] if metrics.backlog_developed else [])
+            + (
+                [(f"{len(metrics.reopened_after_freeze)} riaperti dopo il code freeze", COLOR_DANGER)]
+                if metrics.reopened_after_freeze
+                else []
+            ),
         ),
         (
             f"{_num(metrics.logged_hours_total)} h",
@@ -1438,8 +1450,10 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
         )
         return
 
-    # Come nella Dashboard: le ore usate dagli Storici dei progetti collegati.
-    history = compute_dashboard_metrics(project).hours_history
+    # Come nella Dashboard: le ore usate dagli Storici dei progetti collegati,
+    # con il budget ore dei progetti come riferimento.
+    metrics = compute_dashboard_metrics(project)
+    history = metrics.hours_history
     if not history:
         _text(
             slide,
@@ -1454,15 +1468,27 @@ def _hours_slide(deck: _Deck, project: models.Project) -> None:
     for point in history:
         series.add_data_point(_date_serial(point.date), point.hours)
         days.append(point.date)
+    budget = metrics.budget_hours_total
+    if budget:
+        line = chart_data.add_series(f"Budget {_num(budget)} h")
+        line.add_data_point(_date_serial(min(days)), budget)
+        line.add_data_point(_date_serial(max(days)), budget)
 
     chart = slide.shapes.add_chart(
         XL_CHART_TYPE.XY_SCATTER_LINES, box.left, box.top, box.width, box.height, chart_data
     ).chart
     _date_x_axis(chart, days)
     _style_chart(chart, value_axis_title="Ore")
-    for series in chart.plots[0].series:
+    chart.value_axis.minimum_scale = 0
+    plot_series = list(chart.plots[0].series)
+    for series in plot_series:
         series.smooth = False
         series.format.line.width = Pt(2.25)
+    if budget:
+        # Budget: tratteggiato, senza punti, come la linea del code freeze.
+        plot_series[1].format.line.color.rgb = COLOR_DANGER
+        plot_series[1].format.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+        plot_series[1].marker.style = XL_MARKER_STYLE.NONE
 
 
 def _ev_tone(index: float | None) -> RGBColor:

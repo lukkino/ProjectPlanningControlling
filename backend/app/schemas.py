@@ -441,6 +441,11 @@ class BacklogItemBase(BaseModel):
     included_in_codefreeze: bool = True
     is_activity: bool = False
     activity_phase: ActivityPhase | None = None
+    # Sviluppato entro il code freeze, chiusura posticipata (vedi
+    # models.BacklogItem.code_complete_on).
+    code_complete_on: dt.date | None = None
+    closure_phase: ActivityPhase | None = None
+    reopened_after_freeze_on: dt.date | None = None
     scenarios_link: str | None = None
     planned: bool = False
     planned_duration_days: float | None = None
@@ -473,6 +478,9 @@ class BacklogItemUpdate(BaseModel):
     included_in_codefreeze: bool | None = None
     is_activity: bool | None = None
     activity_phase: ActivityPhase | None = None
+    code_complete_on: dt.date | None = None
+    closure_phase: ActivityPhase | None = None
+    reopened_after_freeze_on: dt.date | None = None
     scenarios_link: str | None = None
     planned: bool | None = None
     planned_duration_days: float | None = None
@@ -1121,6 +1129,18 @@ class HoursPoint(BaseModel):
     hours: float
 
 
+class DevelopedItem(BaseModel):
+    """PBI del code freeze sviluppato ma chiuso dopo, o riaperto dopo il
+    code freeze (vedi models.BacklogItem.code_complete_on)."""
+
+    jira_key: str
+    summary: str | None = None
+    status: str
+    closure_phase: str | None = None
+    code_complete_on: dt.date | None = None
+    reopened_after_freeze_on: dt.date | None = None
+
+
 class DashboardMetrics(BaseModel):
     backlog_total: int
     backlog_in_scope: int
@@ -1139,6 +1159,10 @@ class DashboardMetrics(BaseModel):
     phases: list[Phase]
     completion_history: list[CompletionPoint] = []
     hours_history: list[HoursPoint] = []
+    # PBI del code freeze contati come completati ma ancora aperti
+    # (sviluppati, chiusura posticipata) e quelli riaperti dopo il code freeze.
+    backlog_developed: list[DevelopedItem] = []
+    reopened_after_freeze: list[DevelopedItem] = []
 
 
 class PbiDoneCount(BaseModel):

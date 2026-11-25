@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { Project, Team } from '../api/types'
-import { countBacklogStats, countPlannedUnplannedDone, countsForCodefreeze } from '../lib/backlogStats'
+import { countBacklogStats, countPlannedUnplannedDone, countsForCodefreeze, isDeveloped } from '../lib/backlogStats'
 import {
   dateStrToEpochDays,
   epochDaysToDate,
@@ -116,7 +116,7 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
     return source === 'increment' ? "JQL dell'increment" : source === 'default' ? 'JQL predefinita' : 'label'
   }
   const traditionalForecastIso = items
-    .filter((i) => countsForCodefreeze(i) && i.status !== 'Done')
+    .filter((i) => countsForCodefreeze(i) && i.status !== 'Done' && !isDeveloped(i))
     .reduce<string | null>(
       (latest, i) => (i.expected_finish && (!latest || i.expected_finish > latest) ? i.expected_finish : latest),
       null,
