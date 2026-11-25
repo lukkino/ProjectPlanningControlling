@@ -31,6 +31,15 @@ const COLOR_CODE_FREEZE = '#eda100'
 const COLOR_MONTE_CARLO = '#e87ba4'
 const COLOR_TRADITIONAL = '#008300'
 
+const DEADLINE_HELP =
+  "Data entro cui tutti i PBI del code freeze devono essere Done: è la scadenza su cui la simulazione calcola " +
+  'Chance to meet the deadline e 85% #PBI Completed by Release Deadline.\n\n' +
+  'Con "+ Aggiungi simulazione" parte dal code freeze dell\'increment, cioè la data Aggiornata della fase scelta come ' +
+  'Code freeze in Fasi increment (la stessa di Backlog, Gantt e Dashboard). Nella finestra si può cambiare solo per ' +
+  'la simulazione oppure, spuntando la casella, aggiornare anche la fase Code freeze.\n\n' +
+  "È una fotografia: se poi il code freeze dell'increment cambia, le righe già create restano con la loro data. " +
+  'Modificandola qui nella riga, le previsioni Monte Carlo della riga vengono ricalcolate.'
+
 function formatKeysTooltip(keys: string | null): string {
   if (!keys) return 'Nessun dettaglio disponibile (simulazione creata prima di questa funzione, o nessun PBI trovato)'
   return keys.split(', ').join('\n')
@@ -163,7 +172,12 @@ export function ForecastingPage() {
               <th>Planned #PBI Done</th>
               <th>Unplanned #PBI Done</th>
               <th>Traditional Forecasting</th>
-              <th>Code Freeze Deadline (100% PBIs Done)</th>
+              <th>
+                Code Freeze Deadline (100% PBIs Done){' '}
+                <span className="info-icon" title={DEADLINE_HELP} aria-label={DEADLINE_HELP}>
+                  i
+                </span>
+              </th>
               <th>Chance to meet the deadline (Completion Likelihood)</th>
               <th>85% Completion Date Forecasting</th>
               <th>85% #PBI Completed by Release Deadline Forecasting</th>

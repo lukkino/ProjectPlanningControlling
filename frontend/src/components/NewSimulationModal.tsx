@@ -75,7 +75,9 @@ export function NewSimulationModal({ project, onClose }: { project: Project; onC
     queryKey: ['phases', project.id],
     queryFn: () => api.phases.list(project.id),
   })
-  const codeFreezePhase = phases?.find((p) => p.name.trim().toLowerCase().replace('-', ' ') === 'code freeze')
+  // La fase scelta come Code freeze in Fasi increment (quella che da' la
+  // data project.code_freeze_date proposta come deadline), qualunque nome abbia.
+  const codeFreezePhase = phases?.find((p) => p.id === project.code_freeze_phase_id)
   const { data: backlogItems } = useQuery({
     queryKey: ['backlog', project.id],
     queryFn: () => api.backlog.list(project.id),
