@@ -1,3 +1,3 @@
 // Versione dell'applicazione, mostrata sotto il nome in alto a sinistra.
 // Aggiornarla qui (e in package.json) a ogni rilascio.
-export const APP_VERSION = '1.2.11-beta'
+export const APP_VERSION = '1.2.12-beta'

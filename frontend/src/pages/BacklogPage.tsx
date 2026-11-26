@@ -1578,8 +1578,11 @@ export function BacklogPage() {
             )}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+        {/* Su schermi stretti (portatile) i pulsanti vanno a capo invece di
+            comprimersi: il selettore Tabella/Gantt ha overflow hidden e
+            tagliava il pulsante Gantt. */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexShrink: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
             <button
               className="btn"
               style={{ border: 'none', borderRadius: 0, ...(view === 'table' ? { background: 'var(--primary)', color: 'white' } : undefined) }}
