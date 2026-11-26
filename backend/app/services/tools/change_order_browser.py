@@ -276,8 +276,91 @@ def read_co_status(page) -> str | None:
     return None
 
 
-def save_co_status(project_id: int | None, status: str | None) -> None:
-    """Registra sull'increment lo Status del CO appena letto."""
+# Righe delle griglie (DevExtreme) "Departments Targets" e "Row Review" del
+# pannello del CO, come {colonna: testo} (piu' "_cells", le celle in ordine):
+# la griglia si trova dall'etichetta che la precede, le celle si abbinano
+# alle intestazioni con aria-colindex.
+CO_GRIDS_JS = """(titles) => {
+  const out = {};
+  for (const title of titles) {
+    const label = Array.from(document.querySelectorAll('label')).find((l) => l.innerText.trim() === title);
+    let el = label, grid = null;
+    for (let i = 0; i < 8 && el && !grid; i++) { el = el.parentElement; grid = el && el.querySelector('.dx-datagrid'); }
+    if (!grid) continue;
+    const headers = {};
+    grid.querySelectorAll('.dx-header-row td').forEach((td, i) => {
+      headers[td.getAttribute('aria-colindex') || String(i + 1)] = td.innerText.trim();
+    });
+    out[title] = Array.from(grid.querySelectorAll('tr.dx-data-row')).map((tr) => {
+      const row = {_cells: Array.from(tr.querySelectorAll('td')).map((td) => td.innerText.trim())};
+      tr.querySelectorAll('td').forEach((td, i) => {
+        const name = headers[td.getAttribute('aria-colindex') || String(i + 1)];
+        if (name) row[name] = td.innerText.trim();
+      });
+      return row;
+    }).filter((row) => row._cells.some((v) => v));
+  }
+  return out;
+}"""
+CO_GRID_TITLES = ["Departments Targets", "Row Review"]
+
+
+def _text(row: dict, name: str) -> str | None:
+    return (row.get(name) or "").strip() or None
+
+
+def _review_row(row: dict) -> dict:
+    """Riga di Row Review. Le intestazioni di Status, Modified e Order sono
+    vuote nella griglia: si prendono le celle subito dopo "Assigned To"
+    (Status come "04-Completed")."""
+    cells = row.get("_cells") or []
+    assigned = _text(row, "Assigned To")
+    status = modified = order = None
+    if assigned in cells:
+        after = cells[cells.index(assigned) + 1 :] + [None, None, None]
+        if after[0] and after[0][:2].isdigit():
+            status, modified, order = after[0], after[1] or None, after[2] or None
+    return {
+        "department": _text(row, "Title") or _text(row, "Department"),
+        "assigned_to": assigned,
+        "status": _text(row, "Status") or status,
+        "modified": _text(row, "Modified") or modified,
+        "order": _text(row, "Order") or order,
+    }
+
+
+def read_co_details(page) -> dict | None:
+    """Valutazioni del CO dal pannello aperto: reparti (Departments Targets)
+    e revisori (Row Review). None se le griglie non sono visibili."""
+    for frame in page.frames:
+        try:
+            grids = frame.evaluate(CO_GRIDS_JS, CO_GRID_TITLES)
+        except PlaywrightError:
+            continue
+        if not grids.get("Departments Targets"):
+            continue
+        targets = [
+            {
+                "row_number": _text(r, "Row Number"),
+                "department": _text(r, "Department"),
+                "change_reason": _text(r, "Change Reason"),
+                "row_status": _text(r, "Row Status"),
+                "assigned_to": [n.strip() for n in (r.get("Assigned To") or "").splitlines() if n.strip()],
+                "owner": _text(r, "Owner"),
+                "reviewer": _text(r, "Review Phase"),
+                "approver": _text(r, "Approval Phase"),
+                "modified": _text(r, "Modified"),
+            }
+            for r in grids["Departments Targets"]
+        ]
+        reviews = [_review_row(r) for r in grids.get("Row Review", [])]
+        return {"targets": targets, "reviews": reviews}
+    return None
+
+
+def save_co_status(project_id: int | None, status: str | None, details: dict | None = None) -> None:
+    """Registra sull'increment lo Status del CO appena letto (e, se lette,
+    le valutazioni: vedi read_co_details)."""
     if project_id is None or not status:
         return
     from app import models
@@ -289,6 +372,8 @@ def save_co_status(project_id: int | None, status: str | None) -> None:
             if project is not None:
                 project.co_status = status
                 project.co_status_checked_at = models._utcnow()
+                if details is not None:
+                    project.co_details_json = json.dumps(details, ensure_ascii=False)
                 db.commit()
                 log.info("Status del CO: %s", status)
     except Exception:

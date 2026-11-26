@@ -227,6 +227,11 @@ class Project(Base):
     # o di passaggio quando l'automazione apre il CO.
     co_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     co_status_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Valutazioni del CO lette insieme allo Status (JSON): righe di
+    # Departments Targets (valutazione dei reparti in Execution) e di Row
+    # Review (chi fa la review e a che punto e'). Vedi
+    # change_order_browser.read_co_details e GET .../change-order/details.
+    co_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Cartelle su file system (create a mano dall'utente, qui solo il
     # percorso): presentazioni degli scenari delle Story (colonna Scenarios
     # del Backlog) e documenti delle review.

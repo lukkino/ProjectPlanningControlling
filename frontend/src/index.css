@@ -1363,6 +1363,13 @@ ul.changelog-body { padding-left: 20px; }
 
 /* Stato del CO sul portale, nel passo 1 del box Change Order (Documents). */
 .co-portal-status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+/* Riepilogo del Change Order in cima a Documents. */
+.co-overview-section { margin-top: 12px; }
+.co-overview-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.co-overview-line { display: flex; gap: 8px; align-items: baseline; font-size: 13px; padding: 2px 0; }
+.co-overview-line .badge { flex-shrink: 0; }
+.co-overview-table { width: auto; margin-top: 6px; font-size: 12px; border-collapse: collapse; }
+.co-overview-table th, .co-overview-table td { padding: 3px 10px 3px 0; text-align: left; border-bottom: 1px solid var(--border); }
 .co-portal-error { color: var(--danger); font-size: 12px; flex-basis: 100%; }
 
 /* Carico per assegnatario (pages/WorkloadPage.tsx) */

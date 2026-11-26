@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app import models
+from app import models, schemas
 from app.database import get_db
 from app.services.change_order_targets import build_targets
 from app.services.tools.change_order_browser import read_status, write_status
@@ -96,6 +96,20 @@ def fill_change_order_target(project_id: int, pn: str = Query(...), db: Session 
         raise HTTPException(status_code=400, detail=f"{pn} non è tra i PN dell'increment")
     _start_browser(["app.services.tools.change_order_fill", str(project_id), pn], project_id, "fill-target", pn)
     return {"status": "opening"}
+
+
+@router.get("/api/projects/{project_id}/change-order/details", response_model=schemas.ChangeOrderDetails)
+def change_order_details(project_id: int, db: Session = Depends(get_db)):
+    """Ultime valutazioni lette dal CO (reparti e revisori), salvate con lo
+    Status da refresh-status."""
+    project = _project_with_co(db, project_id)
+    data = json.loads(project.co_details_json) if project.co_details_json else {}
+    return schemas.ChangeOrderDetails(
+        co_status=project.co_status,
+        checked_at=project.co_status_checked_at,
+        targets=data.get("targets", []),
+        reviews=data.get("reviews", []),
+    )
 
 
 @router.post("/api/projects/{project_id}/change-order/refresh-status")

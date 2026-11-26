@@ -23,6 +23,7 @@ from app.services.tools.change_order_browser import (
     PROFILE_DIR,
     log,
     open_from_list,
+    read_co_details,
     read_co_status,
     save_co_status,
     setup_logging,
@@ -30,6 +31,9 @@ from app.services.tools.change_order_browser import (
 
 # Tempo massimo per leggere lo Status (caricamento del portale e pannello).
 STATUS_TIMEOUT_S = 90
+# Dopo lo Status, attesa massima delle griglie delle valutazioni (Departments
+# Targets e Row Review), che si caricano dopo l'intestazione del pannello.
+DETAILS_WAIT_S = 20
 # Se dopo questo tempo non si e' sul portale, il login salvato e' scaduto.
 LOGIN_WAIT_S = 30
 
@@ -38,7 +42,7 @@ class LoginRequired(Exception):
     pass
 
 
-def fetch_status(url: str, label: str | None) -> str | None:
+def fetch_status(url: str, label: str | None) -> tuple[str | None, dict | None]:
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             str(PROFILE_DIR), channel=os.environ.get("CO_BROWSER_CHANNEL", "chrome"), headless=True
@@ -53,7 +57,14 @@ def fetch_status(url: str, label: str | None) -> str | None:
             while time.monotonic() - start < STATUS_TIMEOUT_S:
                 status = read_co_status(page)
                 if status:
-                    return status
+                    details = None
+                    waited = time.monotonic()
+                    while details is None and time.monotonic() - waited < DETAILS_WAIT_S:
+                        page.wait_for_timeout(1000)
+                        details = read_co_details(page)
+                    if details is None:
+                        log.warning("Valutazioni del CO non trovate nel pannello")
+                    return status, details
                 if "sharepoint.com" in page.url:
                     on_portal_since = on_portal_since or time.monotonic()
                     if label and not fallback_done and time.monotonic() - on_portal_since > PANEL_WAIT_S:
@@ -65,7 +76,7 @@ def fetch_status(url: str, label: str | None) -> str | None:
                 elif time.monotonic() - start > LOGIN_WAIT_S:
                     raise LoginRequired(page.url)
                 page.wait_for_timeout(1000)
-            return None
+            return None, None
         finally:
             context.close()
 
@@ -87,7 +98,7 @@ def main() -> int:
         print(json.dumps({"status": None, "error": "Nessun link al Change Order"}))
         return 1
     try:
-        status = fetch_status(url, label)
+        status, details = fetch_status(url, label)
     except LoginRequired:
         log.warning("Login richiesto: Status non letto")
         print(json.dumps({"status": None, "error": "login"}))
@@ -99,7 +110,7 @@ def main() -> int:
     if not status:
         print(json.dumps({"status": None, "error": "Status non trovato nel pannello del CO"}))
         return 1
-    save_co_status(args.project_id, status)
+    save_co_status(args.project_id, status, details)
     print(json.dumps({"status": status, "error": None}))
     return 0
 

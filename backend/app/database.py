@@ -402,6 +402,9 @@ def run_lightweight_migrations() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_status VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE projects ADD COLUMN co_status_checked_at DATETIME"))
+        if "co_details_json" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN co_details_json TEXT"))
         if "review_type" not in project_columns:
             # Tipo di increment dedotto dalle fasi: Medium Change se ne ha una
             # con quel nome; le attivita' per Release e le chiusure dei suoi

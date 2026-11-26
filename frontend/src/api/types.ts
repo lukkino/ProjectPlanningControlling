@@ -1351,3 +1351,32 @@ export interface EarnedValue {
   items: EarnedValueItem[]
   curve: EarnedValuePoint[]
 }
+
+// Valutazioni del Change Order lette dal portale insieme allo Status
+// (GET /projects/{id}/change-order/details).
+export type CoTargetRow = {
+  row_number: string | null
+  department: string | null
+  change_reason: string | null
+  row_status: string | null
+  assigned_to: string[]
+  owner: string | null
+  reviewer: string | null
+  approver: string | null
+  modified: string | null
+}
+
+export type CoReviewRow = {
+  department: string | null
+  assigned_to: string | null
+  status: string | null
+  modified: string | null
+  order: string | null
+}
+
+export type ChangeOrderDetails = {
+  co_status: string | null
+  checked_at: string | null
+  targets: CoTargetRow[]
+  reviews: CoReviewRow[]
+}

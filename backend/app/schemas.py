@@ -714,6 +714,35 @@ class SidebarPin(BaseModel):
     pinned: bool
 
 
+class CoTargetRow(BaseModel):
+    # Riga di Departments Targets del CO: un reparto (o un PN del reparto).
+    row_number: str | None = None
+    department: str | None = None
+    change_reason: str | None = None
+    row_status: str | None = None
+    assigned_to: list[str] = []
+    owner: str | None = None
+    reviewer: str | None = None
+    approver: str | None = None
+    modified: str | None = None
+
+
+class CoReviewRow(BaseModel):
+    # Riga di Row Review del CO: un revisore, nell'ordine della review.
+    department: str | None = None
+    assigned_to: str | None = None
+    status: str | None = None
+    modified: str | None = None
+    order: str | None = None
+
+
+class ChangeOrderDetails(BaseModel):
+    co_status: str | None = None
+    checked_at: dt.datetime | None = None
+    targets: list[CoTargetRow] = []
+    reviews: list[CoReviewRow] = []
+
+
 class ReviewTypeChange(BaseModel):
     review_type: ReviewType
     # Sistema anche le fasi: Medium Change toglie Execution, Deployment e

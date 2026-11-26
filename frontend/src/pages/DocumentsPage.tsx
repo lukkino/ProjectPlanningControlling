@@ -20,6 +20,7 @@ import type {
 import { useReviewDelivery } from '../components/ReviewDelivery'
 import { formatDateTime, parseBackendDateTime } from '../lib/dates'
 import { StatusBadge } from '../components/StatusBadge'
+import { ChangeOrderOverview } from '../components/ChangeOrderOverview'
 import { useProjectContext } from './useProjectContext'
 
 // Filtro tipo della tabella in fondo alla pagina. "CVE" sono i Bug di
@@ -1680,7 +1681,11 @@ function ChangeOrderPortalStatus({ project }: { project: Project }) {
   const queryClient = useQueryClient()
   const refresh = useMutation({
     mutationFn: () => api.projects.refreshChangeOrderStatus(project.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', project.id] })
+      // Valutazioni dei reparti e review, lette insieme allo Status.
+      queryClient.invalidateQueries({ queryKey: ['co-details', project.id] })
+    },
   })
   const [manual, setManual] = useState(false)
   const autoDone = useRef(false)
@@ -1954,6 +1959,11 @@ export function DocumentsPage() {
         </div>
       </div>
 
+      {/* In alto: Status del CO e chi ha gia' valutato / chi manca. */}
+      {project.change_order_url && !editingChangeOrder && (
+        <ChangeOrderOverview projectId={project.id} status={<ChangeOrderPortalStatus project={project} />} />
+      )}
+
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Change Order</h3>
         <ol className="co-steps">
@@ -1974,7 +1984,6 @@ export function DocumentsPage() {
                 >
                   Modifica
                 </button>
-                <ChangeOrderPortalStatus project={project} />
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>

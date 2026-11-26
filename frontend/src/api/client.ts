@@ -72,6 +72,7 @@ import type {
   BudgetCatalog,
   BudgetReview,
   BudgetReviewHours,
+  ChangeOrderDetails,
   Project,
   ProjectDetail,
   ScopeHistory,
@@ -329,6 +330,9 @@ export const api = {
     // Apre sulla macchina del backend una finestra del browser sul Change
     // Order, gia' sul popup delle attivita' Software.
     openChangeOrderSoftware: (id: number) => post<void>(`/projects/${id}/change-order/open-software`),
+    // Reparti (Departments Targets) e revisori (Row Review) del CO, letti
+    // insieme allo Status da refreshChangeOrderStatus.
+    changeOrderDetails: (id: number) => request<ChangeOrderDetails>(`/projects/${id}/change-order/details`),
     refreshChangeOrderStatus: (id: number) =>
       post<{ co_status: string | null; co_status_checked_at: string | null }>(`/projects/${id}/change-order/refresh-status`),
     // Target Software del CO ricavati da Components & PN, e compilazione di
