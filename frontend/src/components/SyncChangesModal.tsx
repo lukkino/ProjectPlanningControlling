@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { SyncItemChange, SyncResult } from '../api/types'
 
 // Popup dopo la sync del backlog da Jira: cosa e' cambiato, issue per issue
 // (nuove, rientrate dall'archivio, archiviate, modificate con il valore
 // prima e dopo di ogni campo). Le sole ore registrate cambiano spesso: si
-// possono nascondere.
+// possono nascondere. Usato anche dai Complaints (Jira + Salesforce), con
+// testi propri.
 const SECTIONS: { kind: SyncItemChange['kind']; title: string; help: string }[] = [
   { kind: 'new', title: 'Nuove', help: 'Entrate nella JQL dell’increment' },
   { kind: 'restored', title: 'Rientrate', help: 'Erano archiviate e sono tornate nella JQL' },
@@ -14,7 +15,19 @@ const SECTIONS: { kind: SyncItemChange['kind']; title: string; help: string }[] 
 ]
 const HOURS_FIELD = 'Ore registrate'
 
-export function SyncChangesModal({ result, onClose }: { result: SyncResult; onClose: () => void }) {
+export function SyncChangesModal({
+  result,
+  onClose,
+  sectionHelp,
+  summaryLine,
+  emptyText = 'Nessun cambiamento: il backlog era già allineato a Jira.',
+}: {
+  result: SyncResult
+  onClose: () => void
+  sectionHelp?: Partial<Record<SyncItemChange['kind'], string>>
+  summaryLine?: ReactNode
+  emptyText?: string
+}) {
   const [hideHours, setHideHours] = useState(true)
   const all = result.changes ?? []
   const visible = all
@@ -27,9 +40,13 @@ export function SyncChangesModal({ result, onClose }: { result: SyncResult; onCl
       <div className="modal sync-changes" style={{ width: 760 }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>Cosa è cambiato con la sincronizzazione</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          {result.total_matched} issue nella JQL · {result.created} nuove · {result.removed} archiviate
-          {result.restored > 0 && ` · ${result.restored} rientrate`} ·{' '}
-          {all.filter((c) => c.kind === 'updated').length} modificate
+          {summaryLine ?? (
+            <>
+              {result.total_matched} issue nella JQL · {result.created} nuove · {result.removed} archiviate
+              {result.restored > 0 && ` · ${result.restored} rientrate`} ·{' '}
+              {all.filter((c) => c.kind === 'updated').length} modificate
+            </>
+          )}
         </p>
         {hoursOnly > 0 && (
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
@@ -39,7 +56,7 @@ export function SyncChangesModal({ result, onClose }: { result: SyncResult; onCl
         )}
         <div className="sync-changes-body">
           {visible.length === 0 ? (
-            <p className="muted">Nessun cambiamento: il backlog era già allineato a Jira.</p>
+            <p className="muted">{emptyText}</p>
           ) : (
             SECTIONS.map((section) => {
               const items = visible.filter((c) => c.kind === section.kind)
@@ -47,7 +64,8 @@ export function SyncChangesModal({ result, onClose }: { result: SyncResult; onCl
               return (
                 <div key={section.kind} className="sync-changes-section">
                   <h4>
-                    {section.title} ({items.length}) <span className="muted">· {section.help}</span>
+                    {section.title} ({items.length}){' '}
+                    <span className="muted">· {sectionHelp?.[section.kind] ?? section.help}</span>
                   </h4>
                   <ul>
                     {items.map((c) => (

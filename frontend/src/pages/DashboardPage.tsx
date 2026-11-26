@@ -21,6 +21,7 @@ import { EarnedValueSection } from '../components/EarnedValue'
 import { MissingInfoCard } from '../components/MissingInfoCard'
 import { PhasesCard } from '../components/PhasesCard'
 import { ScopeCard } from '../components/ScopeCard'
+import { BacklogStatChips } from '../components/BacklogStatChips'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import type { BacklogItem, Complaint, Phase, PhaseTemplate } from '../api/types'
 import { ACTIVITY_PHASES, activityPhaseInfo, activityPhasesFor, normalizePhaseName } from '../lib/activityPhases'
@@ -735,7 +736,8 @@ export function DashboardPage() {
 
       <MissingInfoCard project={project} phases={phases} backlogItems={backlogItems} />
 
-      <PhasesCard projectId={project.id} currentStatus={project.status} />
+      {/* Staccati dal box "Da completare" sopra. */}
+      <BacklogStatChips items={backlogItems} style={{ marginTop: 24 }} />
 
       <ScopeCard
         projectId={project.id}
@@ -745,6 +747,8 @@ export function DashboardPage() {
         frozenAt={project.scope_frozen_at}
         frozenBy={project.scope_frozen_by}
       />
+
+      <PhasesCard projectId={project.id} currentStatus={project.status} />
 
       <div className="card">
         <div className="grid-4">

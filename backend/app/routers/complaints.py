@@ -265,6 +265,49 @@ def sync_complaints_from_jira(db: Session = Depends(get_db)):
         _sync_progress = None
 
 
+# Campi del complaint (da Jira e da Salesforce) confrontati prima e dopo la
+# sync per il popup "Cosa e' cambiato" (come per il Backlog).
+_SYNC_TRACKED_FIELDS = [
+    ("summary", "Titolo"),
+    ("jira_status", "Stato Jira"),
+    ("fix_versions", "Fix version"),
+    ("severity", "Severity"),
+    ("jira_resolved", "Risolto il"),
+    ("labels", "Label"),
+    ("architecture", "Architettura"),
+    ("salesforce_case_number", "ID Salesforce"),
+    ("customer_site", "Sito cliente"),
+    ("sf_status", "Status Salesforce"),
+    ("salesforce_status", "Stato Salesforce"),
+    ("sf_account", "Cliente (Salesforce)"),
+    ("sf_inpeco_priority", "Inpeco priority"),
+    ("sf_customer_impact", "Customer impact"),
+    ("sf_safety", "Safety"),
+    ("sf_severity", "Severity (Salesforce)"),
+]
+
+
+def _sync_value(value) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dt.date):
+        return value.strftime("%d/%m/%Y")
+    return str(value)
+
+
+def _sync_snapshot(c: models.Complaint) -> dict:
+    return {attr: _sync_value(getattr(c, attr)) for attr, _ in _SYNC_TRACKED_FIELDS}
+
+
+def _sync_diff(before: dict, c: models.Complaint) -> list[schemas.SyncFieldChange]:
+    changes = []
+    for attr, label in _SYNC_TRACKED_FIELDS:
+        new = _sync_value(getattr(c, attr))
+        if before[attr] != new:
+            changes.append(schemas.SyncFieldChange(field=label, old=before[attr], new=new))
+    return changes
+
+
 def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) -> schemas.SyncResult:
     row = _settings_row(db)
     try:
@@ -303,6 +346,9 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
     now = dt.datetime.utcnow()
     created = 0
     updated = 0
+    # Valori prima della sync, per i cambiamenti (Jira e poi Salesforce).
+    before = {key: _sync_snapshot(c) for key, c in existing.items()}
+    changes: list[schemas.SyncItemChange] = []
 
     for issue in issues:
         complaint = existing.get(issue.key)
@@ -335,6 +381,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
     removed = 0
     for jira_key, complaint in existing.items():
         if jira_key not in matched_keys:
+            changes.append(schemas.SyncItemChange(jira_key=jira_key, summary=complaint.summary, kind="removed"))
             db.delete(complaint)
             removed += 1
 
@@ -349,6 +396,14 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
     except HTTPException as exc:
         salesforce_matched = None
         errors.append(f"Salesforce non letto: {exc.detail}")
+    for c in _owned(db):
+        if c.jira_key not in before:
+            stato = [schemas.SyncFieldChange(field="Stato Jira", new=c.jira_status)] if c.jira_status else []
+            changes.append(schemas.SyncItemChange(jira_key=c.jira_key, summary=c.summary, kind="new", changes=stato))
+        else:
+            diff = _sync_diff(before[c.jira_key], c)
+            if diff:
+                changes.append(schemas.SyncItemChange(jira_key=c.jira_key, summary=c.summary, kind="updated", changes=diff))
     return schemas.SyncResult(
         created=created,
         updated=updated,
@@ -356,6 +411,7 @@ def _sync_complaints(db: Session, on_progress: Callable[[str, int, int], None]) 
         total_matched=len(issues),
         errors=errors,
         salesforce_matched=salesforce_matched,
+        changes=changes,
     )
 
 

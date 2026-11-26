@@ -564,7 +564,7 @@ class SyncResult(BaseModel):
     errors: list[str] = []
     # Complaints: Case trovati in Salesforce (None = lettura non fatta).
     salesforce_matched: int | None = None
-    # Backlog: cosa e' cambiato con questa sync, issue per issue.
+    # Backlog e Complaints: cosa e' cambiato con questa sync, issue per issue.
     changes: list[SyncItemChange] = []
 
 

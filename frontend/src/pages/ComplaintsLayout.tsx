@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { api } from '../api/client'
+import { SyncChangesModal } from '../components/SyncChangesModal'
 import { SyncProgressModal } from '../components/SyncProgressModal'
 import { parseBackendDateTime } from '../lib/dates'
 
@@ -16,10 +18,13 @@ function formatDateTime(value: string | null): string | null {
 export function ComplaintsLayout() {
   const queryClient = useQueryClient()
   const { data: complaints } = useQuery({ queryKey: ['complaints'], queryFn: api.complaints.list })
+  // Popup con cio' che la sync (Jira e Salesforce) ha cambiato.
+  const [syncChangesOpen, setSyncChangesOpen] = useState(false)
 
   const sync = useMutation({
     mutationFn: api.complaints.sync,
     onSuccess: () => {
+      setSyncChangesOpen(true)
       queryClient.invalidateQueries({ queryKey: ['complaints'] })
       queryClient.invalidateQueries({ queryKey: ['complaint-mismatches'] })
     },
@@ -71,8 +76,30 @@ export function ComplaintsLayout() {
           {sync.data.total_matched})
           {sync.data.salesforce_matched != null &&
             ` · Salesforce: ${sync.data.salesforce_matched} case trovati su ${sync.data.total_matched}`}
-          .
+          .{' '}
+          <button className="btn" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setSyncChangesOpen(true)}>
+            Cosa è cambiato
+          </button>
         </p>
+      )}
+      {sync.isSuccess && syncChangesOpen && (
+        <SyncChangesModal
+          result={sync.data}
+          onClose={() => setSyncChangesOpen(false)}
+          summaryLine={
+            <>
+              {sync.data.total_matched} complaint nella JQL · {sync.data.created} nuovi · {sync.data.removed} rimossi ·{' '}
+              {(sync.data.changes ?? []).filter((c) => c.kind === 'updated').length} modificati
+              {sync.data.salesforce_matched == null && ' · Salesforce non letto: solo i cambiamenti da Jira'}
+            </>
+          }
+          sectionHelp={{
+            new: 'Entrati nella JQL dei complaints',
+            removed: 'Non più nella JQL: rimossi',
+            updated: 'Campi cambiati su Jira o su Salesforce',
+          }}
+          emptyText="Nessun cambiamento: i complaint erano già allineati a Jira e Salesforce."
+        />
       )}
       {sync.isSuccess &&
         sync.data.errors.map((e) => (
