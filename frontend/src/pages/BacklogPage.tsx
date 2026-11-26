@@ -79,6 +79,8 @@ const COLUMN_WIDTHS_STORAGE_KEY = 'backlog-column-widths-v1'
 // Colonne nascoste dal menu "Colonne": come ordine e larghezze, e' una
 // preferenza per-browser valida per tutti gli increment.
 const HIDDEN_COLUMNS_STORAGE_KEY = 'backlog-hidden-columns-v1'
+// Pannello dei filtri aperto o chiuso: ricordato per browser.
+const FILTERS_OPEN_STORAGE_KEY = 'backlog-filters-open-v2'
 // Colonne della baseline: per un breve periodo erano nascoste di default; chi
 // le ha avute nascoste cosi' (non per scelta) le ritrova visibili una volta.
 const BASELINE_COLUMN_KEYS = ['baseline_start', 'baseline_finish', 'baseline_shift']
@@ -178,6 +180,22 @@ export function BacklogPage() {
   // si attiva a mano.
   const [ganttOnlyForecast, setGanttOnlyForecast] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
+  // Pulsante "Filtri": nasconde le spunte dei filtri (la ricerca e il menu
+  // Colonne restano sempre visibili). Di default chiuso.
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(FILTERS_OPEN_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_OPEN_STORAGE_KEY, filtersOpen ? '1' : '0')
+    } catch {
+      // ignora: e' solo una comodita' per-browser
+    }
+  }, [filtersOpen])
   const [newKey, setNewKey] = useState('')
   const [draggedId, setDraggedId] = useState<number | null>(null)
   const [draggedCol, setDraggedCol] = useState<string | null>(null)
@@ -1411,6 +1429,21 @@ export function BacklogPage() {
     if (!matchesImpactFilter(i)) reasons.push('filtro Impacts on')
     return reasons
   }
+  // Filtri diversi dal default: mostrati sul pulsante "Filtri", cosi' anche
+  // a pannello chiuso si vede se qualcosa sta nascondendo righe.
+  const changedFilters = [
+    !onlyInScope,
+    !showCodefreeze,
+    !showActivities,
+    showOutsideCodefreeze,
+    !hideDone,
+    !hideCve,
+    onlyComplaints,
+    sortByStatus,
+    hiddenTypes.size > 0,
+    impactFilter.size > 0,
+    view === 'gantt' && ganttOnlyForecast && forecastTarget != null,
+  ].filter(Boolean).length
   const searching = searchTerms.length > 0
   const hiddenMatches = searching
     ? (items ?? []).filter(matchesSearch).flatMap((i) => {
@@ -1728,6 +1761,20 @@ export function BacklogPage() {
           )}
         </span>
 
+        <button
+          className="btn"
+          aria-expanded={filtersOpen}
+          title={filtersOpen ? 'Nascondi i filtri' : 'Mostra i filtri'}
+          onClick={() => setFiltersOpen((open) => !open)}
+          style={changedFilters > 0 && !filtersOpen ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : undefined}
+        >
+          Filtri
+          {changedFilters > 0 && ` (${changedFilters === 1 ? '1 modificato' : `${changedFilters} modificati`})`}{' '}
+          {filtersOpen ? '▴' : '▾'}
+        </button>
+
+        {filtersOpen && (
+        <>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyInScope} onChange={(e) => setOnlyInScope(e.target.checked)} />
           Mostra solo item "In Scope"
@@ -1845,6 +1892,8 @@ export function BacklogPage() {
             />
             Mostra solo item nella finestra di forecast
           </label>
+        )}
+        </>
         )}
 
         {view === 'table' && (
