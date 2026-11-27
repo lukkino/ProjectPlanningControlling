@@ -398,7 +398,7 @@ export function PurchaseRequisitionsPage() {
                       <tr className="cert-row" onClick={() => toggleOpen(r.id)}>
                         <td className="nowrap">
                           <span className="wl-caret">{isOpen ? '▾' : '▸'}</span>
-                          <b>{r.number}</b> <DynamicsLink requisition={r} />
+                          <b>{r.number}</b> <CopyNumber value={r.number} /> <DynamicsLink requisition={r} />
                         </td>
                         <td>{r.name ?? <span className="muted">-</span>}</td>
                         <td className="nowrap">
@@ -630,6 +630,46 @@ function RequisitionDetail({ requisition: r }: { requisition: PurchaseRequisitio
 // Link alla RDA in Dynamics. Il link e' cifrato da Dynamics e non si
 // costruisce dal numero: la prima volta l'app lo chiede a Dynamics (~30 s,
 // col browser dell'app) e lo salva; dopo si apre subito.
+// Copia il numero della RDA (es. per incollarlo in una chat) senza aprirla
+// in Dynamics. Se l'app e' aperta via http da un altro PC, il browser non
+// offre navigator.clipboard: si ripiega su una textarea temporanea.
+function CopyNumber({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(value)
+      } else {
+        const area = document.createElement('textarea')
+        area.value = value
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        const ok = document.execCommand('copy')
+        area.remove()
+        if (!ok) throw new Error('copy failed')
+      }
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      window.prompt('Copia il numero della RDA (Ctrl+C):', value)
+    }
+  }
+  return (
+    <button
+      type="button"
+      className="rda-dyn-link"
+      onClick={(e) => void copy(e)}
+      title={copied ? 'Copiato' : `Copia ${value}`}
+      aria-label={`Copia ${value}`}
+    >
+      {copied ? '✓' : '⧉'}
+    </button>
+  )
+}
+
 function DynamicsLink({ requisition: r }: { requisition: PurchaseRequisition }) {
   const queryClient = useQueryClient()
   const { can } = useAuth()
