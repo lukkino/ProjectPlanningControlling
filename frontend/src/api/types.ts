@@ -1132,6 +1132,35 @@ export type CertificationTicket = {
 
 export type CertificationSyncResult = { created: number; updated: number; removed: number; total: number }
 
+// Tool CVE: un bug Jira di sicurezza letto dalla JQL del tool.
+export type CveIssue = {
+  id: number
+  jira_key: string
+  summary: string | null
+  cve_ids: string[]
+  package: string | null
+  status: string | null
+  status_category: string | null
+  priority: string | null
+  severity: string | null
+  cvss_base: number | null
+  cvss_inpeco: number | null
+  discovered_in: string | null
+  fix_versions: string[]
+  labels: string[]
+  components: string[]
+  assignee: string | null
+  rejection_reason: string | null
+  created: string | null
+  updated: string | null
+  resolved: string | null
+  synced_at: string | null
+}
+
+export type CveSettings = { jql: string; is_default?: boolean }
+
+export type CveSyncResult = { created: number; updated: number; removed: number; total: number }
+
 // Tool Commercial Coding: un ticket della lista SharePoint "Tickets" (sito Development).
 export type CommercialCodingTicket = {
   id: number

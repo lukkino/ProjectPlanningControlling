@@ -967,3 +967,129 @@ def fetch_requirement_issues(
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
 
     return issues
+
+
+# --- Tool CVE -----------------------------------------------------------------
+# Bug di sicurezza aperti dalla pipeline delle vulnerabilita': CVE e
+# pacchetto stanno nel summary ("[CVE-2026-97024] The remote Red Hat host is
+# missing one or more security updates for flatpak."), i punteggi CVSS in
+# due campi custom.
+CVSS_BASE_FIELD = "customfield_10192"
+CVSS_INPECO_FIELD = "customfield_10193"
+DISCOVERED_IN_FIELD = "customfield_10123"
+CVE_SEVERITY_FIELD = "customfield_10185"
+CVE_REJECTION_REASON_FIELD = "customfield_10196"
+CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
+CVE_PACKAGE_RE = re.compile(r"security updates? for (.+?)\.?\s*$", re.IGNORECASE)
+
+
+class CveJiraIssue:
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+
+def _float_or_none(value) -> float | None:
+    try:
+        return float(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_cves(
+    base_url: str,
+    email: str,
+    api_token: str,
+    jql: str,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> list[CveJiraIssue]:
+    """Issue della JQL del tool CVE, con i soli campi che servono (niente
+    changelog: un'unica ricerca paginata anche con migliaia di issue)."""
+    report = on_progress or (lambda phase, done, total: None)
+    if not (base_url and email and api_token):
+        raise JiraClientError(
+            "Integrazione Jira non configurata: compila Jira base URL, email e API token "
+            "nella sezione Configurazione"
+        )
+    base_url = base_url.rstrip("/")
+    fields = [
+        "summary",
+        "status",
+        "priority",
+        "labels",
+        "components",
+        "fixVersions",
+        "assignee",
+        "created",
+        "updated",
+        "resolutiondate",
+        "statuscategorychangedate",
+        CVSS_BASE_FIELD,
+        CVSS_INPECO_FIELD,
+        DISCOVERED_IN_FIELD,
+        CVE_SEVERITY_FIELD,
+        CVE_REJECTION_REASON_FIELD,
+    ]
+    results: list[CveJiraIssue] = []
+    next_page_token: str | None = None
+    try:
+        with httpx.Client(auth=(email, api_token), timeout=60.0) as client:
+            report("search", 0, 0)
+            total = _approximate_count(client, base_url, jql)
+            report("search", 0, total)
+            while True:
+                payload = {"jql": jql, "maxResults": 100, "fields": fields}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+                response = client.post(f"{base_url}{SEARCH_PATH}", json=payload)
+                if response.status_code == 401:
+                    raise JiraClientError("Autenticazione Jira fallita: verifica email e API token in Configurazione")
+                if response.status_code == 400:
+                    raise JiraClientError(f"JQL non valida: {response.text}")
+                response.raise_for_status()
+                data = response.json()
+                for raw in data.get("issues", []):
+                    f = raw.get("fields") or {}
+                    summary = f.get("summary") or ""
+                    status = f.get("status") or {}
+                    category = (status.get("statusCategory") or {}).get("key")
+                    resolved = None
+                    if category == "done":
+                        resolved = f.get("resolutiondate") or f.get("statuscategorychangedate")
+                    discovered = f.get(DISCOVERED_IN_FIELD)
+                    if isinstance(discovered, list):
+                        discovered = ", ".join(v.get("name", "") for v in discovered if isinstance(v, dict))
+                    elif isinstance(discovered, dict):
+                        discovered = discovered.get("name")
+                    package = CVE_PACKAGE_RE.search(summary)
+                    created = f.get("created")
+                    updated = f.get("updated")
+                    results.append(
+                        CveJiraIssue(
+                            key=raw.get("key", ""),
+                            summary=summary,
+                            cve_ids=sorted({m.upper() for m in CVE_RE.findall(summary)}),
+                            package=package.group(1).strip() if package else None,
+                            status=status.get("name"),
+                            status_category=category,
+                            priority=(f.get("priority") or {}).get("name"),
+                            severity=(f.get(CVE_SEVERITY_FIELD) or {}).get("value"),
+                            cvss_base=_float_or_none(f.get(CVSS_BASE_FIELD)),
+                            cvss_inpeco=_float_or_none(f.get(CVSS_INPECO_FIELD)),
+                            discovered_in=discovered or None,
+                            fix_versions=[v["name"] for v in (f.get("fixVersions") or []) if v.get("name")],
+                            labels=f.get("labels") or [],
+                            components=[c["name"] for c in (f.get("components") or []) if c.get("name")],
+                            assignee=(f.get("assignee") or {}).get("displayName"),
+                            rejection_reason=_rich_text(f.get(CVE_REJECTION_REASON_FIELD)),
+                            created=_parse_jira_datetime(created).date() if created else None,
+                            updated=_parse_jira_datetime(updated).astimezone(dt.timezone.utc).replace(tzinfo=None) if updated else None,
+                            resolved=_parse_jira_datetime(resolved).date() if resolved else None,
+                        )
+                    )
+                report("search", len(results), max(total, len(results)))
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token or data.get("isLast", True):
+                    break
+    except httpx.HTTPError as exc:
+        raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
+    return results

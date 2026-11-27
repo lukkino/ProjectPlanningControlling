@@ -171,7 +171,7 @@ def run_lightweight_migrations() -> None:
         if "ttp_review_path" not in settings_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE user_settings ADD COLUMN ttp_review_path TEXT"))
-        for column, ddl in (("enh_list_url", "TEXT"), ("enh_jira_field", "VARCHAR(128)")):
+        for column, ddl in (("enh_list_url", "TEXT"), ("enh_jira_field", "VARCHAR(128)"), ("cve_jql", "TEXT")):
             if column not in settings_columns:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {column} {ddl}"))
@@ -581,6 +581,7 @@ def run_budget_migrations() -> None:
             ("jira_info_json", "TEXT"),
             ("manual_jira_key", "VARCHAR(255)"),
         ],
+        "tool_cve_issues": [("components_json", "TEXT")],
     }
     for table, columns in added.items():
         existing = {col["name"] for col in inspector.get_columns(table)}

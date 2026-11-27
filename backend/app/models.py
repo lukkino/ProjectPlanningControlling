@@ -1322,6 +1322,46 @@ class CertificationTicket(Base):
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+# Tool CVE: JQL predefinita dei bug di sicurezza aperti in Jira dalla
+# pipeline delle vulnerabilita' (reporter jira.security-pipeline).
+DEFAULT_CVE_JQL = "project = PTBSYS AND type = Bug AND reporter = 712020:e92dd447-7eab-4206-991a-87c85572c2ef"
+
+
+class CveIssue(Base):
+    """Tool CVE: un bug Jira di sicurezza (una o piu' CVE nel summary),
+    letto dalla JQL dell'utente (UserSettings.cve_jql). Copia di sola
+    lettura: la sync la riallinea a Jira e toglie quelli non piu' nella JQL."""
+
+    __tablename__ = "tool_cve_issues"
+    __table_args__ = (UniqueConstraint("owner_id", "jira_key", name="uq_cve_issues_owner_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    jira_key: Mapped[str] = mapped_column(String(32))
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CVE citate nel summary, separate da virgola (es. "CVE-2026-97024").
+    cve_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Pacchetto dal summary ("... security updates for flatpak.").
+    package: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status_category: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    priority: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    cvss_base: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cvss_inpeco: Mapped[float | None] = mapped_column(Float, nullable=True)
+    discovered_in: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fix_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    labels_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Component Jira (di norma uno: Core, INTS, PAS...), JSON lista di nomi.
+    components_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    updated: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class CommercialCodingTicket(Base):
     """Tool Commercial Coding: un ticket della lista SharePoint "Tickets" del
     sito Development creato dall'utente, letto con le API REST di SharePoint
@@ -1489,6 +1529,8 @@ class UserSettings(Base):
     # (vuoto = Salesforce non ha ancora il campo).
     enh_list_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     enh_jira_field: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Tool CVE: JQL dei bug di sicurezza (vuota = DEFAULT_CVE_JQL).
+    cve_jql: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Dashboard: presentazione mensile "Project Review TTP" da aggiornare
     # (percorso del file; si parte dalla versione piu' recente nella cartella).
     ttp_review_path: Mapped[str | None] = mapped_column(Text, nullable=True)

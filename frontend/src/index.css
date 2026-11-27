@@ -1460,6 +1460,27 @@ ul.changelog-body { padding-left: 20px; }
 .rda-excel-ok { color: #1a7f37; }
 .rda-excel tr.rda-excel-bad td { background: #fff4f2; }
 .badge.rda-rejected { background: #fde8e8; color: var(--danger); }
+/* Tool CVE. */
+.cve-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.cve-stat { display: flex; align-items: baseline; gap: 6px; padding: 8px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.cve-stat-value { font-size: 20px; font-weight: 600; }
+.cve-table th.sortable { cursor: pointer; user-select: none; }
+.cve-table th.sortable:hover { color: var(--text); }
+.cve-table .cve-summary { max-width: 380px; -webkit-line-clamp: 2; }
+.cve-critical { color: #b42318; font-weight: 600; }
+.cve-high { color: #c4320a; }
+.cve-medium { color: var(--warning); }
+.cve-low { color: var(--text-muted); }
+.badge.cve-rejected { background: #fde8e8; color: var(--danger); }
+.cve-select { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.cve-pie-card { margin-bottom: 16px; }
+.cve-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; }
+.cve-pie-chart { width: 220px; height: 220px; flex-shrink: 0; }
+.cve-pie-legend { width: auto; min-width: 280px; }
+.cve-pie-legend td { border-bottom: 1px solid var(--border); padding: 4px 8px; }
+.cve-pie-legend td.num { text-align: right; }
+.cve-pie-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+.cve-pie-tooltip { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .cert-table td .badge + .badge { margin-left: 4px; }
 .rda-detail { display: grid; gap: 10px; padding: 4px 8px; }
 .rda-lines { font-size: 13px; }

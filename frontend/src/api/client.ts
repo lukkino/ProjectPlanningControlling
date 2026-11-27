@@ -24,6 +24,9 @@ import type {
   CycleTimeMetrics,
   DashboardMetrics,
   CertificationSyncResult,
+  CveIssue,
+  CveSettings,
+  CveSyncResult,
   CertificationTicket,
   CommercialCodingSettings,
   Enhancement,
@@ -742,6 +745,13 @@ export const api = {
       list: () => request<CertificationTicket[]>('/tools/certification-tickets'),
       sync: () => post<CertificationSyncResult>('/tools/certification-tickets/sync'),
       syncProgress: () => request<SyncProgress>('/tools/certification-tickets/sync/progress'),
+    },
+    cve: {
+      list: () => request<CveIssue[]>('/tools/cve'),
+      getSettings: () => request<CveSettings>('/tools/cve/settings'),
+      updateSettings: (data: CveSettings) => put<CveSettings>('/tools/cve/settings', data),
+      sync: () => post<CveSyncResult>('/tools/cve/sync'),
+      syncProgress: () => request<SyncProgress>('/tools/cve/sync/progress'),
     },
     commercialCoding: {
       list: () => request<CommercialCodingTicket[]>('/tools/commercial-coding'),

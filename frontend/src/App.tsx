@@ -26,6 +26,7 @@ import { ReleasesPage } from './pages/ReleasesPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { UsersPage } from './pages/UsersPage'
 import { CertificationTicketsPage } from './pages/tools/CertificationTicketsPage'
+import { CvePage } from './pages/tools/CvePage'
 import { CapacityPlannerPage } from './pages/tools/CapacityPlannerPage'
 import { CommercialCodingPage } from './pages/tools/CommercialCodingPage'
 import { EnhancementsPage } from './pages/tools/EnhancementsPage'
@@ -34,7 +35,7 @@ import { ShippingToolPage } from './pages/tools/ShippingToolPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { WorkloadPage } from './pages/WorkloadPage'
 
-const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/tools/complaints', '/tools/complaints/kpi', '/tools/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/tools/capacity-planner', '/workload']
+const WIDE_PAGE_SUFFIXES = ['/backlog', '/forecasting', '/montecarlo', '/documents', '/projects-dashboard', '/dashboard', '/tools/complaints', '/tools/complaints/kpi', '/tools/complaints/disallineamenti', '/releases', '/tools/spedizioni', '/tools/certificazioni', '/tools/cve', '/tools/commercial-coding', '/tools/enhancements', '/tools/rda', '/tools/capacity-planner', '/workload']
 
 export default function App() {
   const location = useLocation()
@@ -87,6 +88,7 @@ export default function App() {
           <Route path="/changelog" element={<ChangelogPage />} />
           <Route path="/tools/spedizioni" element={<ShippingToolPage />} />
           <Route path="/tools/certificazioni" element={<CertificationTicketsPage />} />
+          <Route path="/tools/cve" element={<CvePage />} />
           <Route path="/tools/commercial-coding" element={<CommercialCodingPage />} />
           <Route path="/tools/enhancements" element={<EnhancementsPage />} />
           <Route path="/tools/rda" element={<PurchaseRequisitionsPage />} />

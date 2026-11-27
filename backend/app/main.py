@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import auth, models, ownership
 from app.database import Base, SessionLocal, engine, run_budget_migrations, run_lightweight_migrations, seed_hours_costs
-from app.routers import app_info, backlog, change_order, complaints, dashboard, dashboard_snapshots, documents, forecasting, increment_components, increments, project_budget, projects, releases, review_folder, scenarios, settings, snapshots, suggestions, team, tools_certifications, tools_commercial_coding, tools_enhancements, tools_purchase_requisitions, tools_shipping, users
+from app.routers import app_info, backlog, change_order, complaints, dashboard, dashboard_snapshots, documents, forecasting, increment_components, increments, project_budget, projects, releases, review_folder, scenarios, settings, snapshots, suggestions, team, tools_certifications, tools_commercial_coding, tools_cve, tools_enhancements, tools_purchase_requisitions, tools_shipping, users
 
 # MVP: create tables directly from the models on startup instead of a
 # migration tool (Alembic can be introduced later if the schema needs to
@@ -55,6 +55,7 @@ app.include_router(releases.router)
 app.include_router(increment_components.router)
 app.include_router(tools_shipping.router)
 app.include_router(tools_certifications.router)
+app.include_router(tools_cve.router)
 app.include_router(tools_commercial_coding.router)
 app.include_router(tools_enhancements.router)
 app.include_router(tools_purchase_requisitions.router)

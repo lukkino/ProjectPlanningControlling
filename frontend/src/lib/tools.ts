@@ -17,6 +17,13 @@ export const TOOLS: ToolInfo[] = [
       'I bug Jira nati da un case Salesforce: elenco con i case collegati, KPI e disallineamenti tra Jira e Salesforce, sincronizzati con un clic.',
   },
   {
+    path: '/tools/cve',
+    icon: '🛡️',
+    name: 'CVE',
+    description:
+      'I bug di sicurezza aperti in Jira dalla pipeline delle vulnerabilità: CVE, pacchetto, CVSS, severity e stato, da una JQL modificabile, filtrabili e sincronizzati con un clic.',
+  },
+  {
     path: '/tools/capacity-planner',
     icon: '🧮',
     name: 'Capacity Planner',
