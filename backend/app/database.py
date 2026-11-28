@@ -581,7 +581,7 @@ def run_budget_migrations() -> None:
             ("jira_info_json", "TEXT"),
             ("manual_jira_key", "VARCHAR(255)"),
         ],
-        "tool_cve_issues": [("components_json", "TEXT")],
+        "tool_cve_issues": [("components_json", "TEXT"), ("confirmed_at", "DATETIME")],
     }
     for table, columns in added.items():
         existing = {col["name"] for col in inspector.get_columns(table)}

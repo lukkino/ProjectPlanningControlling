@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -7,6 +7,8 @@ import { SyncProgressModal } from '../../components/SyncProgressModal'
 import { useAuth } from '../../components/authContext'
 import { formatDateTime, formatIsoDate } from '../../lib/dates'
 import { CveComponentPie } from './CveComponentPie'
+import { CveDeadlineChart } from './CveDeadlineChart'
+import { CVE_URGENCY, cveDueDate, cveScore, cveTier, cveUrgency, formatDay, today } from '../../lib/cveDeadlines'
 
 // Tool CVE: i bug Jira di sicurezza della JQL del tool (di default quelli
 // aperti dalla pipeline delle vulnerabilita'), salvati dal backend
@@ -17,6 +19,19 @@ const NVD_DETAIL = 'https://nvd.nist.gov/vuln/detail/'
 // Righe mostrate prima di "Mostra altre": con oltre mille bug la tabella
 // intera rallenterebbe la pagina a ogni filtro.
 const PAGE_SIZE = 200
+// Ordinamento per urgenza acceso/spento: ricordato per browser.
+const URGENCY_STORAGE_KEY = 'cve-sort-urgency-v1'
+
+// Per urgenza: fascia, poi scadenza piu' vicina, poi CVSS piu' alto.
+function compareUrgency(a: CveIssue, b: CveIssue): number {
+  const ua = cveUrgency(a)
+  const ub = cveUrgency(b)
+  if (ua !== ub) return ua - ub
+  const da = cveDueDate(a)?.getTime() ?? Infinity
+  const db = cveDueDate(b)?.getTime() ?? Infinity
+  if (da !== db) return da < db ? -1 : 1
+  return (cveScore(b) ?? -1) - (cveScore(a) ?? -1) || keyNumber(b.jira_key) - keyNumber(a.jira_key)
+}
 
 const SEVERITY_RANK: Record<string, number> = { Critical: 4, High: 3, Medium: 2, Low: 1 }
 
@@ -42,7 +57,7 @@ const searchable = (c: CveIssue) =>
     .join(' ')
     .toLowerCase()
 
-type SortKey = 'key' | 'created' | 'cvss_base' | 'cvss_inpeco' | 'severity' | 'status' | 'package' | 'component'
+type SortKey = 'key' | 'created' | 'cvss_base' | 'cvss_inpeco' | 'severity' | 'status' | 'package' | 'component' | 'due'
 type Sort = { key: SortKey; desc: boolean }
 
 const keyNumber = (key: string) => Number(key.split('-').pop()) || 0
@@ -65,6 +80,13 @@ function compare(a: CveIssue, b: CveIssue, key: SortKey): number {
       return (a.package ?? '').localeCompare(b.package ?? '')
     case 'component':
       return (a.components[0] ?? '').localeCompare(b.components[0] ?? '')
+    case 'due': {
+      // Senza scadenza in fondo (anche ordinando al contrario resta l'ultima
+      // cosa a cui guardare): Infinity sopra a ogni data.
+      const da = cveDueDate(a)?.getTime() ?? Infinity
+      const db = cveDueDate(b)?.getTime() ?? Infinity
+      return da === db ? 0 : da < db ? -1 : 1
+    }
   }
 }
 
@@ -97,6 +119,21 @@ export function CvePage() {
   const [discoveredIn, setDiscoveredIn] = useState('')
   const [fixVersion, setFixVersion] = useState<'' | 'with' | 'without'>('')
   const [sort, setSort] = useState<Sort>({ key: 'created', desc: true })
+  const [byUrgency, setByUrgency] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(URGENCY_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleUrgency = (on: boolean) => {
+    setByUrgency(on)
+    try {
+      localStorage.setItem(URGENCY_STORAGE_KEY, on ? '1' : '0')
+    } catch {
+      // ignora: e' solo una comodita' per-browser
+    }
+  }
   const [shown, setShown] = useState(PAGE_SIZE)
 
   const all = cves ?? []
@@ -111,7 +148,7 @@ export function CvePage() {
         (fixVersion === '' || (fixVersion === 'with') === c.fix_versions.length > 0) &&
         words.every((w) => searchable(c).includes(w)),
     )
-    .sort((a, b) => (sort.desc ? -1 : 1) * compare(a, b, sort.key))
+    .sort((a, b) => (byUrgency ? compareUrgency(a, b) : (sort.desc ? -1 : 1) * compare(a, b, sort.key)))
   const lastSync = all.reduce<string | null>(
     (latest, c) => (c.synced_at && (!latest || c.synced_at > latest) ? c.synced_at : latest),
     null,
@@ -132,13 +169,32 @@ export function CvePage() {
   const filtered =
     hiddenStatuses.size > 0 || hiddenSeverities.size > 0 || minCvss > 0 || !!discoveredIn || !!fixVersion || words.length > 0
 
-  const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: true }))
+  // Clic su un'intestazione: ordina su quella colonna e spegne l'ordinamento
+  // per urgenza (al primo clic non inverte, riparte dal verso di default).
+  const sortBy = (key: SortKey) => {
+    if (byUrgency) {
+      toggleUrgency(false)
+      setSort({ key, desc: true })
+      return
+    }
+    setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: true }))
+  }
   const header = (key: SortKey, label: string, title?: string) => (
-    <th className="sortable" onClick={() => sortBy(key)} title={title} aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
+    <th
+      className="sortable"
+      onClick={() => sortBy(key)}
+      title={title}
+      aria-sort={!byUrgency && sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}
+    >
       {label}
-      {sort.key === key && (sort.desc ? ' ▾' : ' ▴')}
+      {!byUrgency && sort.key === key && (sort.desc ? ' ▾' : ' ▴')}
     </th>
   )
+  const urgencyCounts = byUrgency ? visible.reduce<number[]>((acc, c) => {
+    acc[cveUrgency(c)] += 1
+    return acc
+  }, CVE_URGENCY.map(() => 0)) : []
+  const COLUMN_COUNT = 14
   const resetFilters = () => {
     setSearch('')
     setHiddenStatuses(new Set())
@@ -205,7 +261,12 @@ export function CvePage() {
         </div>
       )}
 
-      {all.length > 0 && <CveComponentPie all={all} visible={visible} />}
+      {all.length > 0 && (
+        <div className="cve-charts">
+          <CveComponentPie all={all} visible={visible} />
+          <CveDeadlineChart visible={visible} />
+        </div>
+      )}
 
       <div className="card">
         <div className="cert-toolbar">
@@ -275,6 +336,13 @@ export function CvePage() {
               <option value="without">senza fix version</option>
             </select>
           </label>
+          <label
+            className="cve-select cve-urgency-toggle"
+            title="Raggruppa le righe per urgenza di risoluzione (scadute, entro 30 giorni, oltre, da pianificare, senza scadenza), ognuna col suo colore; dentro ogni gruppo prima la scadenza più vicina"
+          >
+            <input type="checkbox" checked={byUrgency} onChange={(e) => toggleUrgency(e.target.checked)} />
+            ⚡ Ordina per urgenza
+          </label>
           {filtered && (
             <button className="link-btn" onClick={resetFilters}>
               Azzera filtri
@@ -307,12 +375,30 @@ export function CvePage() {
                     <th>Discovered in</th>
                     <th>Fix version</th>
                     {header('created', 'Creato')}
+                    {header(
+                      'due',
+                      'Scadenza',
+                      'Confirmed: dalla data di conferma, CVSS Inpeco ≥ 9 entro 4 settimane, > 7 e < 9 entro 24 settimane, le altre da pianificare',
+                    )}
                     <th>Chiuso</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.slice(0, shown).map((c) => (
-                    <tr key={c.id}>
+                  {visible.slice(0, shown).map((c, index, page) => {
+                    const urgency = cveUrgency(c)
+                    const group = CVE_URGENCY[urgency]
+                    const newGroup = byUrgency && (index === 0 || cveUrgency(page[index - 1]) !== urgency)
+                    return (
+                    <Fragment key={c.id}>
+                    {newGroup && (
+                      <tr className={`cve-group-row cve-row-${group.key}`}>
+                        <td colSpan={COLUMN_COUNT}>
+                          {urgency === 0 && '⚠ '}
+                          {group.label} <span className="muted">· {urgencyCounts[urgency]}</span>
+                        </td>
+                      </tr>
+                    )}
+                    <tr className={byUrgency ? `cve-row-${group.key}` : undefined}>
                       <td className="nowrap">
                         <a href={`${JIRA_BROWSE}${c.jira_key}`} target="_blank" rel="noreferrer">
                           {c.jira_key}
@@ -366,9 +452,14 @@ export function CvePage() {
                         )}
                       </td>
                       <td className="nowrap">{formatIsoDate(c.created) ?? '-'}</td>
+                      <td className="nowrap">
+                        <DueCell cve={c} />
+                      </td>
                       <td className="nowrap">{formatIsoDate(c.resolved) ?? <span className="muted">-</span>}</td>
                     </tr>
-                  ))}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -435,5 +526,23 @@ function JqlSettings() {
       </span>
       {save.isError && <div className="error-banner">{(save.error as Error).message}</div>}
     </div>
+  )
+}
+
+function DueCell({ cve: c }: { cve: CveIssue }) {
+  const tier = cveTier(c)
+  if (!tier) return <span className="muted">-</span>
+  if (tier === 'plan') return <span className="muted">da pianificare</span>
+  const due = cveDueDate(c)
+  if (!due) return <span className="muted" title="Data di conferma mancante: risincronizza">?</span>
+  const days = Math.round((due.getTime() - today().getTime()) / 86400000)
+  const title = `Confermata il ${c.confirmed_at ? formatDateTime(c.confirmed_at) : '-'}; ${
+    days < 0 ? `scaduta da ${-days} giorni` : days === 0 ? 'scade oggi' : `mancano ${days} giorni`
+  }`
+  return (
+    <span className={days < 0 ? 'cve-overdue' : days <= 30 ? 'cve-due-soon' : undefined} title={title}>
+      {days < 0 && '⚠ '}
+      {formatDay(due)}
+    </span>
   )
 }

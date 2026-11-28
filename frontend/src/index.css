@@ -1473,7 +1473,24 @@ ul.changelog-body { padding-left: 20px; }
 .cve-low { color: var(--text-muted); }
 .badge.cve-rejected { background: #fde8e8; color: var(--danger); }
 .cve-select { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.cve-pie-card { margin-bottom: 16px; }
+.cve-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 16px; margin-bottom: 16px; }
+.cve-charts > .card { margin: 0; min-width: 0; }
+.cve-deadline-kpis { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; margin-bottom: 8px; }
+.cve-deadline-kpis b { font-size: 16px; }
+.cve-kpi-alert { color: #b42318; }
+.cve-deadline-chart { width: 100%; height: 220px; }
+.cve-deadline-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.cve-overdue { color: #b42318; font-weight: 600; }
+.cve-due-soon { color: var(--warning); font-weight: 600; }
+/* Ordinamento per urgenza: un colore di riga per fascia (status: sempre col
+   testo dell'intestazione del gruppo e la colonna Scadenza, mai solo colore). */
+.cve-urgency-toggle { font-weight: 600; }
+.cve-table tr.cve-row-overdue td { background: #fdecea; }
+.cve-table tr.cve-row-soon td { background: #fff4e0; }
+.cve-table tr.cve-row-later td { background: #fffbe8; }
+.cve-table tr.cve-row-plan td { background: #eef4fc; }
+.cve-table tr.cve-group-row td { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; padding-top: 10px; border-bottom: 2px solid var(--border); }
+.cve-table tr.cve-group-row.cve-row-none td { background: var(--bg); }
 .cve-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; }
 .cve-pie-chart { width: 220px; height: 220px; flex-shrink: 0; }
 .cve-pie-legend { width: auto; min-width: 280px; }

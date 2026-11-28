@@ -1359,6 +1359,9 @@ class CveIssue(Base):
     created: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     updated: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     resolved: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # Ultimo passaggio allo stato "Confirmed" (UTC, dal changelog Jira): da
+    # qui partono le scadenze di risoluzione in base al CVSS Inpeco.
+    confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 

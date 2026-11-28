@@ -1154,6 +1154,8 @@ export type CveIssue = {
   created: string | null
   updated: string | null
   resolved: string | null
+  // Ultimo passaggio a Confirmed in Jira (UTC): base delle scadenze.
+  confirmed_at: string | null
   synced_at: string | null
 }
 

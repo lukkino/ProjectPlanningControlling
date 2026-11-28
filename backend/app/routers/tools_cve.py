@@ -46,6 +46,7 @@ class CveIssue(BaseModel):
     created: dt.date | None
     updated: dt.datetime | None
     resolved: dt.date | None
+    confirmed_at: dt.datetime | None
     synced_at: dt.datetime | None
 
 
@@ -105,6 +106,7 @@ def _out(c: models.CveIssue) -> CveIssue:
         created=c.created,
         updated=c.updated,
         resolved=c.resolved,
+        confirmed_at=c.confirmed_at,
         synced_at=c.synced_at,
     )
 
@@ -201,6 +203,7 @@ def sync_cves(db: Session = Depends(get_db)):
             row.created = issue.created
             row.updated = issue.updated
             row.resolved = issue.resolved
+            row.confirmed_at = issue.confirmed_at
             row.synced_at = now
         for row in existing.values():
             db.delete(row)

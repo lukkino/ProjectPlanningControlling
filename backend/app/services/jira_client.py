@@ -979,6 +979,8 @@ CVSS_INPECO_FIELD = "customfield_10193"
 DISCOVERED_IN_FIELD = "customfield_10123"
 CVE_SEVERITY_FIELD = "customfield_10185"
 CVE_REJECTION_REASON_FIELD = "customfield_10196"
+CVE_CONFIRMED_STATUS = "Confirmed"
+CHANGELOG_BULK_PATH = "/rest/api/3/changelog/bulkfetch"
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 CVE_PACKAGE_RE = re.compile(r"security updates? for (.+?)\.?\s*$", re.IGNORECASE)
 
@@ -993,6 +995,51 @@ def _float_or_none(value) -> float | None:
         return float(value) if value is not None and value != "" else None
     except (TypeError, ValueError):
         return None
+
+
+def _fetch_confirmed_dates(
+    client: httpx.Client,
+    base_url: str,
+    issue_ids: list[str],
+    report: Callable[[str, int, int], None],
+) -> dict[str, dt.datetime]:
+    """Ultimo passaggio a "Confirmed" di ogni issue (id Jira -> data UTC
+    senza fuso), dal changelog dei soli cambi di stato letto in blocco: 100
+    issue per chiamata invece di una chiamata per issue."""
+    confirmed: dict[str, dt.datetime] = {}
+    total = len(issue_ids)
+    report("changelog", 0, total)
+    for start in range(0, total, 100):
+        batch = issue_ids[start : start + 100]
+        next_page_token: str | None = None
+        while True:
+            payload = {"issueIdsOrKeys": batch, "fieldIds": ["status"], "maxResults": 1000}
+            if next_page_token:
+                payload["nextPageToken"] = next_page_token
+            response = client.post(f"{base_url}{CHANGELOG_BULK_PATH}", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            for log in data.get("issueChangeLogs", []):
+                issue_id = str(log.get("issueId"))
+                for history in log.get("changeHistories", []):
+                    if not any(
+                        item.get("fieldId") == "status" and item.get("toString") == CVE_CONFIRMED_STATUS
+                        for item in history.get("items", [])
+                    ):
+                        continue
+                    created = history.get("created")
+                    when = (
+                        dt.datetime.fromtimestamp(created / 1000, dt.timezone.utc)
+                        if isinstance(created, (int, float))
+                        else _parse_jira_datetime(created).astimezone(dt.timezone.utc)
+                    ).replace(tzinfo=None)
+                    if issue_id not in confirmed or when > confirmed[issue_id]:
+                        confirmed[issue_id] = when
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+        report("changelog", min(start + 100, total), total)
+    return confirmed
 
 
 def fetch_cves(
@@ -1065,6 +1112,7 @@ def fetch_cves(
                     updated = f.get("updated")
                     results.append(
                         CveJiraIssue(
+                            id=str(raw.get("id", "")),
                             key=raw.get("key", ""),
                             summary=summary,
                             cve_ids=sorted({m.upper() for m in CVE_RE.findall(summary)}),
@@ -1090,6 +1138,9 @@ def fetch_cves(
                 next_page_token = data.get("nextPageToken")
                 if not next_page_token or data.get("isLast", True):
                     break
+            confirmed = _fetch_confirmed_dates(client, base_url, [r.id for r in results if r.id], report)
+            for r in results:
+                r.confirmed_at = confirmed.get(r.id)
     except httpx.HTTPError as exc:
         raise JiraClientError(f"Errore di comunicazione con Jira: {exc}") from exc
     return results
